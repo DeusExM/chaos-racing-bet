@@ -65,12 +65,19 @@ describe('construction et état initial', () => {
     expect(state.seedValue).toBe(normalizeSeed(SEED));
   });
 
-  it('ne produit encore aucun fait, ni avant ni après la course', () => {
+  it('ne produit aucun fait avant la course', () => {
     const engine = new RaceEngine(SEED);
 
     expect(engine.drainFacts()).toEqual([]);
+
+    // P006 : une course complète produit exactement les trois splits de checkpoint, et rien d'autre.
     engine.runToCompletion();
-    expect(engine.drainFacts()).toEqual([]);
+    const facts = engine.drainFacts();
+    expect(facts.map((fact) => fact.type)).toEqual([
+      'CHECKPOINT_SPLIT',
+      'CHECKPOINT_SPLIT',
+      'CHECKPOINT_SPLIT',
+    ]);
   });
 
   it('refuse une configuration incohérente', () => {

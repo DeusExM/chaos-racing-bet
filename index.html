@@ -21,12 +21,20 @@
         <div id="game" class="game" role="img" aria-label="Zone de jeu (canvas)"></div>
         <div class="hud">
           <p id="race-status" class="hud-status" data-testid="race-status">—</p>
+          <p
+            id="checkpoint-banner"
+            class="hud-banner"
+            data-testid="checkpoint-banner"
+            role="status"
+            hidden
+          ></p>
           <div id="leaderboard" class="hud-panel" data-testid="leaderboard"></div>
         </div>
       </section>
 
       <div class="controls">
         <button id="start-button" type="button" data-testid="start-button"></button>
+        <button id="pause-button" type="button" data-testid="pause-button"></button>
         <button id="replay-button" type="button" data-testid="replay-button"></button>
       </div>
 

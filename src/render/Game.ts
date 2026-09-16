@@ -13,6 +13,8 @@ export interface GameOptions {
   readonly text: UiText;
   readonly leaderboard: HTMLElement | null;
   readonly status: HTMLElement | null;
+  readonly banner: HTMLElement | null;
+  readonly pauseButton: HTMLElement | null;
   readonly debugPanel: HTMLElement | null;
   readonly debug: boolean;
   /** Expose les positions écran réelles (dev ou `?e2e=1`), pour les tests E2E. */
@@ -33,6 +35,8 @@ export function createGame(options: GameOptions): void {
     text: options.text,
     leaderboard: options.leaderboard,
     status: options.status,
+    banner: options.banner,
+    pauseButton: options.pauseButton,
     debugPanel: options.debugPanel,
     debug: options.debug,
     exposeView: options.exposeView,

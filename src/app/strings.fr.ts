@@ -9,7 +9,10 @@ import type { UiText } from '../render/uiText';
  */
 export const UI_TEXT_FR: UiText = Object.freeze({
   statusIdle: 'En attente du départ',
+  statusCountdown: 'Départ imminent',
   statusRunning: 'Course en cours',
+  statusCheckpointPause: 'Pause de checkpoint',
+  statusUserPaused: 'En pause',
   statusFinished: 'Course terminée',
 
   rankingTitle: 'Classement',
@@ -31,4 +34,7 @@ export const UI_TEXT_FR: UiText = Object.freeze({
 
   startButton: 'Lancer',
   replayButton: 'Rejouer',
+  pauseButton: 'Pause',
+  resumeButton: 'Reprendre',
+  checkpointBanner: 'CHECKPOINT',
 });

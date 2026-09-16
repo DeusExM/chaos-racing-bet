@@ -90,9 +90,13 @@ function bootstrap(): void {
   const hooksEnabled = testHooksEnabled(window.location.search, import.meta.env.DEV);
 
   const startButton = elementById('start-button');
+  const pauseButton = elementById('pause-button');
   const replayButton = elementById('replay-button');
   if (startButton !== null) {
     startButton.textContent = UI_TEXT_FR.startButton;
+  }
+  if (pauseButton !== null) {
+    pauseButton.textContent = UI_TEXT_FR.pauseButton;
   }
   if (replayButton !== null) {
     replayButton.textContent = UI_TEXT_FR.replayButton;
@@ -104,12 +108,14 @@ function bootstrap(): void {
     text: UI_TEXT_FR,
     leaderboard: elementById('leaderboard'),
     status: elementById('race-status'),
+    banner: elementById('checkpoint-banner'),
+    pauseButton,
     debugPanel: params.get(DEBUG_PARAM) === '1' ? elementById('debug') : null,
     debug: params.get(DEBUG_PARAM) === '1',
     exposeView: hooksEnabled,
   });
 
-  // « Lancer » démarre immédiatement : P005 n'a aucun compte à rebours.
+  // « Lancer » démarre la course : `RaceSimulation` gère elle-même le compte à rebours réel.
   startButton?.addEventListener('click', () => {
     simulation.start();
   });
@@ -118,6 +124,28 @@ function bootstrap(): void {
   replayButton?.addEventListener('click', () => {
     simulation.restart();
     simulation.start();
+  });
+
+  // « Pause / Reprendre » : même commande que la touche Espace, et rien d'autre.
+  pauseButton?.addEventListener('click', () => {
+    simulation.toggleUserPause();
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (event.code !== 'Space' && event.key !== ' ') {
+      return;
+    }
+    // Espace ne doit jamais faire défiler la page.
+    event.preventDefault();
+
+    // Un bouton qui garde le focus serait « cliqué » par Espace : la pause basculerait deux fois et
+    // reviendrait à son état initial. On rend donc le focus au document pour que le raccourci reste
+    // unique, quelle que soit la façon dont le MJ a lancé la course.
+    if (event.target instanceof HTMLElement && event.target.tagName === 'BUTTON') {
+      event.target.blur();
+    }
+
+    simulation.toggleUserPause();
   });
 
   if (params.get(AUTOSTART_PARAM) === '1') {

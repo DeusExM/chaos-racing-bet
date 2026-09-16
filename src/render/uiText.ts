@@ -8,8 +8,14 @@
 export interface UiText {
   /** État affiché quand la course n'a pas commencé. */
   readonly statusIdle: string;
+  /** État affiché pendant le compte à rebours. */
+  readonly statusCountdown: string;
   /** État affiché pendant la course. */
   readonly statusRunning: string;
+  /** État affiché pendant une pause de checkpoint. */
+  readonly statusCheckpointPause: string;
+  /** État affiché pendant une pause demandée par le MJ. */
+  readonly statusUserPaused: string;
   /** État affiché quand la course est terminée. */
   readonly statusFinished: string;
   /** Titre du panneau de classement. */
@@ -32,4 +38,10 @@ export interface UiText {
   readonly startButton: string;
   /** Libellé du bouton qui rejoue la même course. */
   readonly replayButton: string;
+  /** Libellé du bouton qui suspend la course. */
+  readonly pauseButton: string;
+  /** Libellé du même bouton quand la course est suspendue. */
+  readonly resumeButton: string;
+  /** Début de la bannière de checkpoint ; le rendu y ajoute le numéro (`CHECKPOINT 2`). */
+  readonly checkpointBanner: string;
 }

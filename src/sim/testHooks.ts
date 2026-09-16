@@ -15,10 +15,12 @@ import type { SimPhase } from './types';
 
 /** Surface exposée à Playwright et à la console de développement. */
 export interface ChaosRaceTestApi {
-  /** Démarre la course (aucun compte à rebours en P005). */
+  /** Démarre la course : compte à rebours réel, puis course. */
   start(): void;
   /** Repart de zéro avec la seed en cours. */
   restart(): void;
+  /** Suspend ou reprend la course, exactement comme le bouton ou la touche Espace. */
+  toggleUserPause(): void;
   /** État complet du noyau (instantané figé). */
   state(): Readonly<RaceState>;
   /** Classement, du 1er au dernier, calculé par `core/ranking.ts`. */
@@ -33,6 +35,8 @@ export interface ChaosRaceTestApi {
   seed(): string;
   /** Phase temps réel de la simulation. */
   phase(): SimPhase;
+  /** Numéro du checkpoint en pause (`1` à `3`), sinon `null`. */
+  checkpoint(): number | null;
 }
 
 declare global {
@@ -60,6 +64,7 @@ export function createTestApi(simulation: RaceSimulation): ChaosRaceTestApi {
   return Object.freeze({
     start: () => simulation.start(),
     restart: () => simulation.restart(),
+    toggleUserPause: () => simulation.toggleUserPause(),
     state: () => simulation.view,
     ranks: () => leaderboardOf(simulation.view),
     distances: () => simulation.view.characters.map((character) => character.x),
@@ -67,6 +72,7 @@ export function createTestApi(simulation: RaceSimulation): ChaosRaceTestApi {
     timeScale: () => simulation.timeScale,
     seed: () => simulation.seed,
     phase: () => simulation.phase,
+    checkpoint: () => simulation.checkpoint,
   });
 }
 

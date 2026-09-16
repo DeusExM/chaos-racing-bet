@@ -539,7 +539,7 @@ vrais graphismes (P014), HUD soigné (P011).
 
 ---
 
-### P006 — Structure 4 × 45 s et checkpoints
+### P006 — Structure 4 × 45 s et checkpoints `[x]`
 
 **Objectif** : la structure temporelle officielle du jeu, avec la séparation stricte noyau / temps réel.
 

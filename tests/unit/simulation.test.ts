@@ -27,6 +27,21 @@ function playWith(simulation: RaceSimulation, frameMs: number): readonly number[
   return simulation.view.characters.map((character) => character.x);
 }
 
+/**
+ * Démarre la course et purge le compte à rebours par du `realDt` injecté.
+ *
+ * Aucune attente réelle : le temps du compte à rebours est simplement fourni d'un coup, comme le
+ * ferait une frame très longue. La course doit alors être en `running`, sans avoir avancé d'un pas.
+ */
+function startWithCountdownDone(simulation: RaceSimulation, countdownRealS: number): void {
+  simulation.start();
+  if (countdownRealS > 0) {
+    simulation.update(countdownRealS * 1000);
+  }
+  expect(simulation.phase).toBe('running');
+  expect(simulation.view.steps).toBe(0);
+}
+
 function expectSameDoubles(actual: readonly number[], expected: readonly number[]): void {
   expect(actual).toHaveLength(expected.length);
   for (const [index, value] of actual.entries()) {
@@ -83,7 +98,7 @@ describe('RaceSimulation — temps réel', () => {
   it('convertit les millisecondes en secondes simulées', () => {
     // Plafond volontairement très haut : ce test porte sur la conversion, pas sur le garde-fou.
     const simulation = new RaceSimulation(SEED, { ...SIM_CONFIG, maxStepsPerFrame: 1000 });
-    simulation.start();
+    startWithCountdownDone(simulation, SIM_CONFIG.countdownRealS);
     simulation.update(1000);
 
     // 1 seconde réelle à timeScale 1 = 1 seconde simulée = 60 pas.
@@ -93,7 +108,7 @@ describe('RaceSimulation — temps réel', () => {
 
   it('multiplie par le timeScale sans jamais changer la taille du pas', () => {
     const simulation = new RaceSimulation(SEED, { ...SIM_CONFIG, maxStepsPerFrame: 5000 });
-    simulation.start();
+    startWithCountdownDone(simulation, SIM_CONFIG.countdownRealS);
     simulation.update(1000);
 
     expect(simulation.view.steps).toBe(60);
@@ -106,7 +121,7 @@ describe('RaceSimulation — temps réel', () => {
 
   it('conserve le reliquat quand le plafond de pas par frame est atteint', () => {
     const simulation = new RaceSimulation(SEED, { ...SIM_CONFIG, maxStepsPerFrame: 10 });
-    simulation.start();
+    startWithCountdownDone(simulation, SIM_CONFIG.countdownRealS);
 
     simulation.update(1000);
     expect(simulation.view.steps).toBe(10);
@@ -316,7 +331,11 @@ describe('hooks de test', () => {
     const api = createTestApi(simulation);
 
     api.start();
+    // P006 : `start()` ouvre le compte à rebours réel avant le premier pas.
+    expect(api.phase()).toBe('countdown');
+    simulation.update(SIM_CONFIG.countdownRealS * 1000);
     expect(api.phase()).toBe('running');
+
     simulation.update(1000);
     expect(api.state().steps).toBe(60);
   });

@@ -35,7 +35,16 @@ export interface HudRowSample {
 export interface FrameSample {
   readonly steps: number;
   readonly tSim: number;
+  /** Phase du **noyau** : `idle`, `running` ou `finished`. */
   readonly phase: string;
+  /** Phase **temps réel** de `RaceSimulation` : `countdown`, `checkpointPause`, `userPaused`, … */
+  readonly simPhase: string;
+  /** Numéro du checkpoint en pause, sinon `null`. */
+  readonly checkpoint: number | null;
+  /** Texte de la bannière de checkpoint dans cette frame (`''` si aucune). */
+  readonly banner: string;
+  /** `true` si la bannière est masquée dans cette frame. */
+  readonly bannerHidden: boolean;
   readonly distances: readonly number[];
   readonly sprites: readonly SpriteSample[];
   readonly camera: CameraSample;
@@ -164,6 +173,12 @@ export async function collectRace(page: Page, maxFrames = 4000): Promise<FrameSa
           steps: state.steps,
           tSim: state.tSim,
           phase: state.phase.kind,
+          simPhase: api.phase(),
+          checkpoint: api.checkpoint(),
+          banner: document.querySelector('[data-testid="checkpoint-banner"]')?.textContent ?? '',
+          bannerHidden:
+            document.querySelector('[data-testid="checkpoint-banner"]')?.hasAttribute('hidden') ??
+            true,
           distances: state.characters.map((character) => character.x),
           sprites: view.sprites().map((sprite) => ({
             id: sprite.id,

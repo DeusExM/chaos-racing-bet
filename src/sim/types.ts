@@ -10,11 +10,21 @@
 /**
  * Phase **temps réel** de la course, vue par la boucle d'affichage.
  *
- * P005 n'en connaît que trois : la course n'a pas commencé, elle avance, elle est terminée. Les
- * états `countdown`, `checkpointPause` et `userPaused` arrivent avec P006, en même temps que les
- * comportements correspondants — pas avant (AGENTS §1.3 : aucun code destiné à une étape future).
+ * `RaceSimulation` est l'**unique** propriétaire de ces phases : le noyau n'en connaît que trois
+ * (`idle`, `running`, `finished`), et n'importe jamais ce type. Une pause n'existe donc que d'un côté
+ * de la frontière — c'est précisément ce qui garantit qu'elle ne peut pas modifier la course.
+ *
+ * Ordre d'une course normale, sans intervention du MJ :
+ * `idle` → `countdown` → `running` → `checkpointPause` → `running` → … → `finished`.
+ * `userPaused` s'intercale où l'on veut, sans consommer ni annuler la phase qu'il suspend.
  */
-export type SimPhase = 'idle' | 'running' | 'finished';
+export type SimPhase =
+  | 'idle'
+  | 'countdown'
+  | 'running'
+  | 'checkpointPause'
+  | 'userPaused'
+  | 'finished';
 
 /**
  * Configuration du **temps réel**. Les valeurs normatives sont dans `GAME_DESIGN.md` §4.1b et §11.
@@ -23,9 +33,9 @@ export type SimPhase = 'idle' | 'running' | 'finished';
  * exécutés par frame, jamais leur taille.
  */
 export interface SimConfig {
-  /** Durée réelle du compte à rebours, en secondes. **Non exécuté en P005** (P006). */
+  /** Durée réelle du compte à rebours, en secondes. `0` en mode test : départ immédiat. */
   readonly countdownRealS: number;
-  /** Durée réelle d'une pause de checkpoint, en secondes. **Non exécutée en P005** (P006). */
+  /** Durée réelle d'une pause de checkpoint, en secondes. */
   readonly checkpointPauseRealS: number;
   /** Nombre de secondes simulées par seconde réelle. */
   readonly timeScale: number;

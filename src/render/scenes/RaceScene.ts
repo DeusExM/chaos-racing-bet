@@ -2,6 +2,7 @@ import { Scene } from 'phaser';
 
 import { CHARACTERS } from '../../core/characters';
 import type { RaceSimulation } from '../../sim/RaceSimulation';
+import type { SimPhase } from '../../sim/types';
 import { leaderboardOf } from '../../sim/leaderboard';
 import type { UiText } from '../uiText';
 import { VIEW } from '../viewConfig';
@@ -18,10 +19,32 @@ export interface RaceSceneOptions {
   readonly text: UiText;
   readonly leaderboard: HTMLElement | null;
   readonly status: HTMLElement | null;
+  /** Bannière de checkpoint : visible uniquement pendant la pause réelle. */
+  readonly banner: HTMLElement | null;
+  /** Bouton Pause / Reprendre : son libellé suit la phase, la commande est câblée par `app/`. */
+  readonly pauseButton: HTMLElement | null;
   readonly debugPanel: HTMLElement | null;
   readonly debug: boolean;
   /** Expose les positions écran réelles pour les tests E2E. */
   readonly exposeView: boolean;
+}
+
+/** Libellé d'état correspondant à une phase temps réel. Exhaustif par construction. */
+function statusLabelFor(phase: SimPhase, text: UiText): string {
+  switch (phase) {
+    case 'idle':
+      return text.statusIdle;
+    case 'countdown':
+      return text.statusCountdown;
+    case 'running':
+      return text.statusRunning;
+    case 'checkpointPause':
+      return text.statusCheckpointPause;
+    case 'userPaused':
+      return text.statusUserPaused;
+    case 'finished':
+      return text.statusFinished;
+  }
 }
 
 /**
@@ -117,25 +140,34 @@ export class RaceScene extends Scene {
     }
 
     this.leaderboard?.update(leaderboardOf(state));
-    this.updateStatus();
+    this.updateHud();
     this.debug?.update(state, this.options.simulation.phase, this.options.simulation.timeScale);
   }
 
-  /** État de la course, en HTML : lisible même quand le canvas est réduit. */
-  private updateStatus(): void {
-    const element = this.options.status;
-    if (element === null) {
-      return;
-    }
+  /**
+   * État, bannière de checkpoint et libellé du bouton de pause, en HTML : lisible même quand le
+   * canvas est réduit, et jamais réécrit sans changement.
+   *
+   * La bannière n'apparaît **que** pendant la pause réelle : elle se déduit de la phase, donc elle
+   * disparaît d'elle-même à la reprise, sans minuterie ni animation à entretenir.
+   */
+  private updateHud(): void {
     const phase = this.options.simulation.phase;
-    const label =
-      phase === 'idle'
-        ? this.options.text.statusIdle
-        : phase === 'running'
-          ? this.options.text.statusRunning
-          : this.options.text.statusFinished;
-    if (element.textContent !== label) {
-      element.textContent = label;
+
+    setTextIfChanged(this.options.status, statusLabelFor(phase, this.options.text));
+    setTextIfChanged(
+      this.options.pauseButton,
+      phase === 'userPaused' ? this.options.text.resumeButton : this.options.text.pauseButton,
+    );
+
+    const checkpoint = this.options.simulation.checkpoint;
+    const showBanner = phase === 'checkpointPause' && checkpoint !== null;
+    setTextIfChanged(
+      this.options.banner,
+      showBanner ? `${this.options.text.checkpointBanner} ${String(checkpoint)}` : '',
+    );
+    if (this.options.banner !== null) {
+      this.options.banner.hidden = !showBanner;
     }
   }
 
@@ -153,5 +185,12 @@ export class RaceScene extends Scene {
     for (const sprite of this.sprites) {
       sprite.layout(height);
     }
+  }
+}
+
+/** Écrit un libellé dans un élément, seulement s'il change : le DOM n'est pas réécrit à chaque frame. */
+function setTextIfChanged(element: HTMLElement | null, label: string): void {
+  if (element !== null && element.textContent !== label) {
+    element.textContent = label;
   }
 }

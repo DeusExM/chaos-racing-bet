@@ -95,6 +95,18 @@ export interface SpeakConfig {
   readonly MIN_WINDOW_AVG_S: number;
 }
 
+/**
+ * Importance de base des faits, de 0 à 100 (`GAME_DESIGN.md` §9.2).
+ *
+ * Sous `SPEAK.MIN_IMPORTANCE`, un fait n'est pas commenté. P006 n'émet qu'un seul type de fait : les
+ * autres importances arrivent avec le planificateur d'événements (P008) et l'observateur (P009), et
+ * cette section sera complétée **à ce moment-là**, pas avant.
+ */
+export interface FactConfig {
+  /** `CHECKPOINT_SPLIT` : instant de checkpoint atteint (`tSim` = 45, 90 ou 135 s). */
+  readonly CHECKPOINT_SPLIT_IMPORTANCE: number;
+}
+
 /** Temps simulé de la course. Le noyau ignore tout du temps réel. */
 export const RACE_CONFIG: RaceTimeConfig = Object.freeze({
   /** Nombre de segments. */
@@ -234,6 +246,18 @@ export const SPEAK: SpeakConfig = Object.freeze({
   MIN_WINDOW_AVG_S: 5.0,
 });
 
+/**
+ * Importance de base des faits.
+ *
+ * Un fait peu important n'est pas commenté : c'est ce qui empêche le speaker de parler en continu.
+ * Les modificateurs conditionnels de `GAME_DESIGN.md` §9.2 (« +20 si le leader a changé », « +10 si
+ * l'écart P1–P2 < 20 m ») comparent **deux relevés successifs** : ils n'ont donc pas leur place dans
+ * le noyau, qui ne conserve aucun historique, et seront appliqués par l'observateur de faits (P009).
+ */
+export const FACT: FactConfig = Object.freeze({
+  CHECKPOINT_SPLIT_IMPORTANCE: 38,
+});
+
 /** Vue agrégée de toutes les constantes, utilisée par `validateConfig()`. */
 export interface GameConfig {
   readonly RACE: RaceTimeConfig;
@@ -245,6 +269,7 @@ export interface GameConfig {
   readonly OVERTAKE: OvertakeConfig;
   readonly LEADER: LeaderConfig;
   readonly SPEAK: SpeakConfig;
+  readonly FACT: FactConfig;
 }
 
 /** Toutes les constantes réunies, figées. Chaque membre est déjà figé individuellement. */
@@ -258,6 +283,7 @@ export const GAME_CONFIG: GameConfig = Object.freeze({
   OVERTAKE,
   LEADER,
   SPEAK,
+  FACT,
 });
 
 /**
@@ -331,7 +357,7 @@ function requireCloseTo(actual: number, expected: number, label: string): void {
  * configurations volontairement incohérentes pour vérifier qu'elles sont bien rejetées.
  */
 export function validateConfig(config: GameConfig = GAME_CONFIG): void {
-  const { RACE, SPEED: S, DRIFT: D, SURGE: G, EVENT: E, OVERTAKE: O, LEADER: L, SPEAK: K } = config;
+  const { RACE, SPEED: S, DRIFT: D, SURGE: G, EVENT: E, OVERTAKE: O, LEADER: L, SPEAK: K, FACT: F } = config;
 
   requireIntegerAtLeast(RACE.SEGMENT_COUNT, 1, 'RACE_CONFIG.SEGMENT_COUNT');
   requirePositive(RACE.SEGMENT_DURATION_S, 'RACE_CONFIG.SEGMENT_DURATION_S');
@@ -437,4 +463,7 @@ export function validateConfig(config: GameConfig = GAME_CONFIG): void {
   requireIntegerAtLeast(K.QUEUE_MAX, 1, 'SPEAK.QUEUE_MAX');
   requireIntegerAtLeast(K.MAX_LINES_PER_SEGMENT, 1, 'SPEAK.MAX_LINES_PER_SEGMENT');
   requireNonNegative(K.MIN_WINDOW_AVG_S, 'SPEAK.MIN_WINDOW_AVG_S');
+
+  requireNonNegative(F.CHECKPOINT_SPLIT_IMPORTANCE, 'FACT.CHECKPOINT_SPLIT_IMPORTANCE');
+  requireAtMost(F.CHECKPOINT_SPLIT_IMPORTANCE, 100, 'FACT.CHECKPOINT_SPLIT_IMPORTANCE');
 }

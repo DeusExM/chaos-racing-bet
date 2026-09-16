@@ -29,6 +29,8 @@ test('Lancer démarre la course, Rejouer la reprend depuis le début avec la mê
   expect(await currentSteps(page)).toBe(0);
 
   await page.getByTestId('start-button').click();
+  // P006 : `start()` ouvre d'abord le compte à rebours réel, puis la course démarre seule.
+  await expect(page.getByTestId('race-status')).toHaveText('Départ imminent');
   await expect(page.getByTestId('race-status')).toHaveText('Course en cours');
   await expect.poll(() => currentSteps(page), { timeout: 10_000 }).toBeGreaterThan(0);
 
@@ -39,9 +41,9 @@ test('Lancer démarre la course, Rejouer la reprend depuis le début avec la mê
   await page.getByTestId('replay-button').click();
   await expect.poll(() => currentSteps(page), { timeout: 10_000 }).toBeLessThan(beforeReplay);
 
-  // La seed affichée n'a pas changé : « Rejouer » rejoue la même course.
+  // La seed affichée n'a pas changé : « Rejouer » rejoue la même course, compte à rebours compris.
   await expect(page.getByTestId('seed-value')).toHaveText(OVERTAKE_SEED);
-  await expect(page.getByTestId('race-status')).toHaveText('Course en cours');
+  await expect(page.getByTestId('race-status')).toHaveText('Départ imminent');
 
   expectNoErrors(watch);
 });

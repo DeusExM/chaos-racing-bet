@@ -124,6 +124,28 @@ body {
   border: 1px solid var(--border);
 }
 
+/*
+ * Bannière de checkpoint : centrée sur l'arène, visible uniquement pendant la pause réelle.
+ * Volontairement sobre — aucune animation, aucun effet : le polish appartient à P015.
+ */
+.hud-banner {
+  align-self: center;
+  margin: 0;
+  padding: 0.3rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: #000000cc;
+  color: var(--accent);
+  font-size: clamp(0.75rem, 2.4vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.hud-banner[hidden] {
+  display: none;
+}
+
 .hud-title {
   margin: 0 0 0.25rem;
   color: var(--muted);

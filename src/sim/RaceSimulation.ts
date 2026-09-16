@@ -1,6 +1,6 @@
 import { RACE_CONFIG } from '../core/config';
 import { RaceEngine } from '../core/engine';
-import type { RaceResult, RaceState } from '../core/types';
+import type { RaceFact, RaceResult, RaceState } from '../core/types';
 import { SIM_CONFIG } from './config';
 import type { SimConfig, SimPhase } from './types';
 
@@ -19,10 +19,24 @@ import type { SimConfig, SimPhase } from './types';
  * donc pas faire sauter une partie de la course : il la décale dans le temps réel, jamais dans le
  * résultat.
  *
- * ## P005
+ * ## P006 : countdown, checkpoints, pauses — et surtout **aucun rattrapage**
  *
- * Ni compte à rebours, ni pause, ni checkpoint : `start()` démarre immédiatement, et seul le noyau
- * décide de la fin — à `tSim = 180 s`, soit exactement 10 800 pas.
+ * Une pause réelle n'appelle simplement pas `step()`. Le noyau ignore qu'elle existe : `tSim`, `x`,
+ * `v` et le drift sont strictement gelés, et le nombre total de pas d'une course reste `10800`
+ * qu'il y ait eu 0, 3 ou 100 pauses.
+ *
+ * Corollaire moins évident, et c'est le piège de cette étape : **le temps réel passé en pause ne
+ * doit jamais devenir du temps simulé à rattraper**. Sans précaution, une frame qui traverse une
+ * borne de checkpoint aurait déjà « payé » plusieurs pas au-delà de la borne ; une pause de 3 s
+ * ajouterait ses propres secondes à l'accumulateur, et la reprise rejouerait tout d'un bloc. C'est
+ * pourquoi :
+ *
+ * * pendant `countdown`, `checkpointPause` et `userPaused`, **rien** n'est ajouté à l'accumulateur ;
+ * * à chaque entrée en pause, l'accumulateur est **recalé sur `executedSteps × DT_S`**, ce qui jette
+ *   le reliquat de la frame courante et coupe la progression **à la borne exacte**.
+ *
+ * Le temps réel d'une pause et le temps simulé accumulé sont donc deux quantités distinctes, que
+ * rien ne relie.
  */
 export class RaceSimulation {
   private readonly engine: RaceEngine;
@@ -32,18 +46,35 @@ export class RaceSimulation {
   /**
    * Total de temps **simulé** reçu depuis le départ, en secondes.
    *
-   * Il ne fait que croître : il n'est **jamais** décrémenté. Soustraire `DT_S` à chaque pas
-   * accumulerait une erreur d'arrondi et ferait perdre un pas de temps en temps — un `update` de
-   * 1000 ms en `timeScale = 1` ne produirait plus 60 pas, mais 59. Le nombre de pas à exécuter est
-   * donc recalculé depuis ce total, et `executedSteps` tient le compte exact de ce qui a déjà été
-   * joué.
+   * Il ne fait que croître pendant la course : il n'est **jamais** décrémenté. Soustraire `DT_S` à
+   * chaque pas accumulerait une erreur d'arrondi et ferait perdre un pas de temps en temps — un
+   * `update` de 1000 ms en `timeScale = 1` ne produirait plus 60 pas, mais 59. Le nombre de pas à
+   * exécuter est donc recalculé depuis ce total, et `executedSteps` tient le compte exact de ce qui
+   * a déjà été joué. Il est en revanche **recalé** à chaque entrée en pause (voir la classe).
    */
   private accumulatedSimS = 0;
 
-  /** Pas déjà exécutés. Un entier, décrémenté ou incrémenté sans jamais dériver. */
+  /** Pas déjà exécutés. Un entier, incrémenté sans jamais dériver. */
   private executedSteps = 0;
 
   private simPhase: SimPhase = 'idle';
+
+  /** Temps réel restant du compte à rebours, en secondes. */
+  private countdownRemainingS = 0;
+
+  /** Temps réel restant de la pause de checkpoint en cours, en secondes. */
+  private checkpointPauseRemainingS = 0;
+
+  /** Numéro du checkpoint atteint (1 à 3), pendant sa pause uniquement. */
+  private checkpointNumber: number | null = null;
+
+  /**
+   * Phase suspendue par une pause utilisateur.
+   *
+   * Elle permet de reprendre **exactement** où l'on était : ni le compte à rebours ni une pause de
+   * checkpoint ne sont annulés, recommencés, ni consommés pendant que le MJ regarde ailleurs.
+   */
+  private phaseBeforeUserPause: SimPhase = 'idle';
 
   constructor(seed: string, config: SimConfig = SIM_CONFIG) {
     requireUsableConfig(config);
@@ -55,6 +86,17 @@ export class RaceSimulation {
   /** Phase temps réel : `idle` tant que `start()` n'a pas été appelé. */
   get phase(): SimPhase {
     return this.simPhase;
+  }
+
+  /**
+   * Numéro du checkpoint dont la pause est en cours (`1`, `2` ou `3`), sinon `null`.
+   *
+   * C'est ce que la bannière affiche. Pendant la pause, l'état du noyau **est** le split : le
+   * classement et les distances figés à la borne sont donc déjà disponibles dans `view`, sans avoir
+   * à recopier quoi que ce soit.
+   */
+  get checkpoint(): number | null {
+    return this.checkpointNumber;
   }
 
   /** État du noyau, en lecture seule. Le rendu ne peut pas le modifier. */
@@ -73,16 +115,44 @@ export class RaceSimulation {
   }
 
   /**
-   * Démarre la course immédiatement.
+   * Démarre la course : compte à rebours réel, puis course.
    *
-   * P005 n'a **pas** de compte à rebours : c'est P006 qui l'ajoutera. Appeler `start()` sur une
-   * course déjà terminée la rejoue depuis le début, avec la même seed.
+   * Avec `countdownRealS = 0` (mode test), le départ est immédiat : `start()` passe directement en
+   * `running`. Appeler `start()` sur une course terminée la rejoue depuis le début, même seed.
    */
   start(): void {
     if (this.simPhase === 'finished') {
       this.restart();
     }
-    this.simPhase = 'running';
+    if (this.simPhase !== 'idle') {
+      return;
+    }
+
+    this.countdownRemainingS = this.config.countdownRealS;
+    this.simPhase = this.countdownRemainingS > 0 ? 'countdown' : 'running';
+  }
+
+  /**
+   * Suspend ou reprend la course à la demande du MJ.
+   *
+   * `running` → `userPaused`, et retour à la phase exactement suspendue. Une pause utilisateur
+   * déclenchée pendant le compte à rebours ou pendant une pause de checkpoint **ne les annule pas**
+   * et **ne consomme pas leur minuterie** : elle laisse le temps restant intact et le reprend tel
+   * quel.
+   *
+   * Sans effet sur une course qui n'a pas commencé ou qui est terminée : il n'y a rien à suspendre.
+   */
+  toggleUserPause(): void {
+    if (this.simPhase === 'userPaused') {
+      this.simPhase = this.phaseBeforeUserPause;
+      return;
+    }
+    if (this.simPhase === 'idle' || this.simPhase === 'finished') {
+      return;
+    }
+
+    this.phaseBeforeUserPause = this.simPhase;
+    this.simPhase = 'userPaused';
   }
 
   /**
@@ -93,32 +163,47 @@ export class RaceSimulation {
    * simulé, jamais à la taille du pas.
    */
   update(realDtMs: number): void {
-    if (this.simPhase !== 'running') {
-      return;
-    }
-
     const realDtS = realDtMs / 1000;
     if (!Number.isFinite(realDtS) || realDtS <= 0) {
       return;
     }
 
-    this.accumulatedSimS += realDtS * this.config.timeScale;
+    switch (this.simPhase) {
+      case 'idle':
+      case 'finished':
+      case 'userPaused':
+        // Rien ne bouge, et surtout rien ne s'accumule : ni pas, ni temps simulé, ni tirage.
+        // La minuterie de la phase suspendue reste intacte, à la seconde près.
+        return;
 
-    // Nombre total de pas que le temps réel écoulé autorise depuis le départ…
-    const stepsWanted = Math.floor(this.accumulatedSimS / RACE_CONFIG.DT_S);
-    // … moins ceux déjà joués, plafonné par le garde-fou anti « spiral of death ».
-    const stepsToRun = Math.min(stepsWanted - this.executedSteps, this.config.maxStepsPerFrame);
+      case 'countdown':
+        this.countdownRemainingS -= realDtS;
+        if (this.countdownRemainingS > 0) {
+          return;
+        }
+        this.countdownRemainingS = 0;
+        this.simPhase = 'running';
+        // Le reliquat de cette frame est abandonné : le temps passé à attendre le départ n'est pas
+        // du temps couru, et le transformer en pas ferait bondir la course au premier update.
+        this.rebaseAccumulator();
+        return;
 
-    for (let index = 0; index < stepsToRun; index += 1) {
-      this.engine.step();
-      this.executedSteps += 1;
+      case 'checkpointPause':
+        this.checkpointPauseRemainingS -= realDtS;
+        if (this.checkpointPauseRemainingS > 0) {
+          return;
+        }
+        this.checkpointPauseRemainingS = 0;
+        this.checkpointNumber = null;
+        this.simPhase = 'running';
+        this.rebaseAccumulator();
+        return;
+
+      case 'running':
+        break;
     }
-    // Si le plafond a été atteint ici, `stepsWanted - executedSteps` reste positif : le temps en
-    // attente n'est ni perdu ni écrasé, il sera simplement exécuté au prochain `update()`.
 
-    if (this.engine.getState().phase.kind === 'finished') {
-      this.simPhase = 'finished';
-    }
+    this.advanceRunning(realDtS);
   }
 
   /**
@@ -134,11 +219,15 @@ export class RaceSimulation {
     this.config = Object.freeze({ ...this.config, timeScale });
   }
 
-  /** Repart de zéro. Sans seed, rejoue la course en cours. */
+  /** Repart de zéro, **en `idle`**, avec tous les compteurs réels remis à plat. */
   restart(seed?: string): void {
     this.engine.reset(seed ?? this.engine.getState().seed);
     this.accumulatedSimS = 0;
     this.executedSteps = 0;
+    this.countdownRemainingS = 0;
+    this.checkpointPauseRemainingS = 0;
+    this.checkpointNumber = null;
+    this.phaseBeforeUserPause = 'idle';
     this.simPhase = 'idle';
   }
 
@@ -146,7 +235,9 @@ export class RaceSimulation {
    * Joue la course jusqu'au bout, **sans rendu ni pause**, et renvoie le résultat du noyau.
    *
    * C'est l'API des tests et des hooks : elle produit exactement le même résultat qu'une course
-   * jouée image par image, en une fraction de seconde.
+   * jouée image par image, en une fraction de seconde. Elle **ne dort pas** : ni les 3 s du compte à
+   * rebours, ni les 3 × 3 s des checkpoints ne sont attendues — une pause ne fait pas partie de la
+   * course, elle n'a donc rien à reproduire ici.
    */
   runToCompletion(seed?: string): RaceResult {
     this.restart(seed);
@@ -155,9 +246,95 @@ export class RaceSimulation {
     // pour qu'un `update()` ultérieur ne croie pas avoir du retard à rattraper.
     this.executedSteps = this.engine.getState().steps;
     this.accumulatedSimS = this.executedSteps * RACE_CONFIG.DT_S;
+    this.countdownRemainingS = 0;
+    this.checkpointPauseRemainingS = 0;
+    this.checkpointNumber = null;
+    this.phaseBeforeUserPause = 'idle';
     this.simPhase = 'finished';
     return result;
   }
+
+  /** Avance la course d'au plus `maxStepsPerFrame` pas, en s'arrêtant pile sur un checkpoint. */
+  private advanceRunning(realDtS: number): void {
+    this.accumulatedSimS += realDtS * this.config.timeScale;
+
+    // Nombre total de pas que le temps réel écoulé autorise depuis le départ…
+    const stepsWanted = Math.floor(this.accumulatedSimS / RACE_CONFIG.DT_S);
+    // … moins ceux déjà joués, plafonné par le garde-fou anti « spiral of death ».
+    const stepsToRun = Math.min(stepsWanted - this.executedSteps, this.config.maxStepsPerFrame);
+
+    for (let index = 0; index < stepsToRun; index += 1) {
+      this.engine.step();
+      this.executedSteps += 1;
+
+      // Après **chaque** pas, jamais en fin de frame : en mode accéléré une seule frame demande
+      // des centaines de pas et peut donc traverser une borne. Tout ce qui suit la borne
+      // appartiendrait au segment suivant, or il doit être mis en pause.
+      const checkpoint = checkpointReachedBy(this.engine.drainFacts());
+      if (checkpoint !== null) {
+        this.enterCheckpointPause(checkpoint);
+        return;
+      }
+    }
+    // Si le plafond a été atteint ici, `stepsWanted - executedSteps` reste positif : le temps en
+    // attente n'est ni perdu ni écrasé, il sera simplement exécuté au prochain `update()`.
+
+    if (this.engine.getState().phase.kind === 'finished') {
+      this.simPhase = 'finished';
+    }
+  }
+
+  /**
+   * Entre en pause de checkpoint, **à la borne exacte**.
+   *
+   * L'accumulateur est recalé sur le pas atteint : la frame courante est terminée, son reliquat
+   * appartient au temps réel de la pause et non à la course. C'est ce recalage qui rend le
+   * non-rattrapage structurel plutôt que fortuit.
+   */
+  private enterCheckpointPause(checkpoint: number): void {
+    this.rebaseAccumulator();
+    if (this.config.checkpointPauseRealS > 0) {
+      this.checkpointNumber = checkpoint;
+      this.checkpointPauseRemainingS = this.config.checkpointPauseRealS;
+      this.simPhase = 'checkpointPause';
+      return;
+    }
+
+    // Pause de durée nulle : on ne s'arrête pas, mais la frontière reste franchie proprement.
+    this.checkpointNumber = null;
+    this.checkpointPauseRemainingS = 0;
+    this.simPhase = 'running';
+  }
+
+  /** Recale l'accumulateur sur la frontière de pas atteinte, en abandonnant tout reliquat de frame. */
+  private rebaseAccumulator(): void {
+    this.accumulatedSimS = this.executedSteps * RACE_CONFIG.DT_S;
+  }
+}
+
+/**
+ * Numéro du checkpoint signalé par un `CHECKPOINT_SPLIT`, ou `null`.
+ *
+ * Le numéro vient du `tSim` du fait — `45 / 45 = 1`, `90 / 45 = 2`, `135 / 45 = 3` — et non d'un
+ * calcul parallèle sur le compteur de pas : c'est le fait qui fait foi, et lui seul.
+ */
+function checkpointReachedBy(facts: readonly RaceFact[]): number | null {
+  for (const fact of facts) {
+    if (fact.type !== 'CHECKPOINT_SPLIT') {
+      continue;
+    }
+
+    const checkpoint = fact.tSim / RACE_CONFIG.SEGMENT_DURATION_S;
+    if (
+      !Number.isInteger(checkpoint) ||
+      checkpoint < 1 ||
+      checkpoint >= RACE_CONFIG.SEGMENT_COUNT
+    ) {
+      throw new RangeError(`CHECKPOINT_SPLIT inattendu à tSim=${fact.tSim}.`);
+    }
+    return checkpoint;
+  }
+  return null;
 }
 
 /** Refuse une configuration qui rendrait la boucle inutilisable ou silencieusement incohérente. */
@@ -168,6 +345,16 @@ function requireUsableConfig(config: SimConfig): void {
   if (!Number.isInteger(config.maxStepsPerFrame) || config.maxStepsPerFrame < 1) {
     throw new RangeError(
       `SIM_CONFIG.maxStepsPerFrame doit être un entier supérieur ou égal à 1 (reçu : ${config.maxStepsPerFrame}).`,
+    );
+  }
+  if (!Number.isFinite(config.countdownRealS) || config.countdownRealS < 0) {
+    throw new RangeError(
+      `SIM_CONFIG.countdownRealS doit être un nombre fini positif ou nul (reçu : ${config.countdownRealS}).`,
+    );
+  }
+  if (!Number.isFinite(config.checkpointPauseRealS) || config.checkpointPauseRealS < 0) {
+    throw new RangeError(
+      `SIM_CONFIG.checkpointPauseRealS doit être un nombre fini positif ou nul (reçu : ${config.checkpointPauseRealS}).`,
     );
   }
 }

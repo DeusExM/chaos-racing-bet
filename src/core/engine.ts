@@ -33,7 +33,12 @@ import type {
  *
  * **P004 est une course minimale** : vitesse de base, dérive d'Ornstein–Uhlenbeck indépendante,
  * rampe progressive, intégration de position. Pas encore de surge, pas d'événement, pas de
- * checkpoint, pas de fait, pas de commentaire.
+ * commentaire.
+ *
+ * **P006 ajoute les checkpoints**, et rien d'autre : le moteur **signale** les instants `tSim = 45`,
+ * `90` et `135 s` par un fait `CHECKPOINT_SPLIT`, puis **continue**. Il ne s'arrête pas, ne connaît
+ * aucune durée de pause et ignore qu'une pause existe : ce qui se passe après le signal appartient
+ * entièrement à `RaceSimulation`.
  */
 
 /** Numéros humains des segments, dans l'ordre. `RacePhase.segment` est en base 1 (contrat P003). */
@@ -52,6 +57,18 @@ const FINISHED_PHASE: RacePhase = frozenPhase({ kind: 'finished' });
 
 /** Préfixe des flux de dérive : `drift:c0`, `drift:c1`, … Un flux par personnage, jamais partagé. */
 const DRIFT_STREAM_PREFIX = 'drift:';
+
+/**
+ * Clé technique du texte du split.
+ *
+ * Le noyau ne contient **aucun** texte visible : il désigne, l'application résout. C'est
+ * `src/app/strings.fr.ts` qui fournira la formulation française, plus tard, et modifier ce texte ne
+ * pourra donc jamais changer le déroulement d'une course.
+ */
+const CHECKPOINT_SPLIT_TEXT_KEY = 'fact.checkpointSplit';
+
+/** Tampon de faits vide, partagé : un `drainFacts()` sans fait ne doit rien allouer. */
+const NO_FACTS: readonly RaceFact[] = Object.freeze([]);
 
 export class RaceEngine {
   private readonly config: GameConfig;
@@ -72,6 +89,14 @@ export class RaceEngine {
    * parfaitement plate, sans qu'aucun test de type ne s'en aperçoive.
    */
   private driftStreams: readonly RngStream[];
+
+  /**
+   * Faits produits depuis le dernier `drainFacts()`, dans l'ordre chronologique.
+   *
+   * P006 n'en produit qu'un seul type : `CHECKPOINT_SPLIT`. Le tampon est vidé par `drainFacts()` et
+   * par `reset()` — **jamais** par `getState()`, qui n'est qu'une photographie en lecture seule.
+   */
+  private facts: RaceFact[] = [];
 
   constructor(seed: string, config: GameConfig = GAME_CONFIG) {
     validateConfig(config);
@@ -125,6 +150,10 @@ export class RaceEngine {
     // alors qu'une accumulation flottante donnerait 44.99999999999873 et 180.00000000003539 (P003).
     this.state.tSim = this.state.steps * DT_S;
     this.state.phase = this.phaseFor(this.state.tSim);
+
+    // Le fait est produit **après** l'intégration du pas qui atteint la borne : les distances
+    // publiées sont donc exactement celles de `tSim` = 45, 90 ou 135 s, sans décalage d'un pas.
+    this.recordCheckpointSplit();
   }
 
   /**
@@ -165,19 +194,83 @@ export class RaceEngine {
   /**
    * Faits produits par les pas écoulés, et vide le tampon.
    *
-   * P004 n'en produit **aucun** : les faits naissent de l'observateur qui compare les états
-   * successifs, et cet observateur arrive avec P009. Tant qu'il n'existe pas, cette liste est vide —
-   * le speaker n'a donc rien à commenter, ce qui est exactement l'état attendu ici.
+   * Contrat : ce qui est renvoyé ne le sera plus au prochain appel — un second `drainFacts()`
+   * immédiat renvoie une liste vide. `getState()` ne draine rien : consulter l'état ne doit jamais
+   * faire disparaître un fait non consommé.
    */
   drainFacts(): readonly RaceFact[] {
-    return [];
+    if (this.facts.length === 0) {
+      return NO_FACTS;
+    }
+    const drained = this.facts;
+    this.facts = [];
+    return Object.freeze(drained);
   }
 
-  /** Repart de zéro sur une nouvelle seed : distances, vitesses, dérives, pas et flux aléatoires. */
+  /** Repart de zéro sur une nouvelle seed : distances, vitesses, dérives, pas, faits et flux. */
   reset(seed: string): void {
     this.seedValue = normalizeSeed(seed);
     this.driftStreams = this.createDriftStreams();
+    this.facts = [];
     this.state = RaceEngine.createInitialState(seed, this.seedValue, this.config);
+  }
+
+  /**
+   * Émet le fait `CHECKPOINT_SPLIT` si le pas qui vient d'être joué atteint une borne de segment.
+   *
+   * Une seule règle, écrite avec les constantes du noyau : un pas multiple de `STEPS_PER_SEGMENT`,
+   * strictement à l'intérieur de la course. Les bornes **internes** uniquement : jamais au départ
+   * (pas 0), jamais à l'arrivée (pas `TOTAL_STEPS`, où c'est `finished` qui parle). Une course
+   * complète en produit donc exactement `SEGMENT_COUNT − 1` = 3.
+   */
+  private recordCheckpointSplit(): void {
+    const { STEPS_PER_SEGMENT, SEGMENT_COUNT } = this.config.RACE;
+    const { steps } = this.state;
+
+    if (steps <= 0 || steps % STEPS_PER_SEGMENT !== 0) {
+      return;
+    }
+
+    const checkpoint = steps / STEPS_PER_SEGMENT;
+    if (checkpoint >= SEGMENT_COUNT) {
+      return;
+    }
+
+    this.facts.push(this.buildSplitFact());
+  }
+
+  /**
+   * Split figé à une borne : classement et distances **tels qu'ils sont à cet instant exact**.
+   *
+   * `characterIds` porte le classement du moment, du 1er au dernier, et `magnitudes` les distances
+   * correspondantes : les écarts s'en déduisent par soustraction. Un split **constate** — aucun
+   * point, aucun bonus, aucune pénalité, et aucune influence sur le résultat de la course.
+   */
+  private buildSplitFact(): RaceFact {
+    const order = sortByRank(
+      this.state.characters.map((character) => character.x),
+      this.state.characters.map((character) => character.id),
+    );
+
+    const characterIds: CharacterId[] = [];
+    const distances: number[] = [];
+    for (const index of order) {
+      const character = this.state.characters[index];
+      if (character === undefined) {
+        throw new RangeError(`Index de classement hors bornes : ${index}.`);
+      }
+      characterIds.push(character.id);
+      distances.push(character.x);
+    }
+
+    return Object.freeze({
+      type: 'CHECKPOINT_SPLIT',
+      tSim: this.state.tSim,
+      characterIds: Object.freeze(characterIds),
+      magnitudes: Object.freeze(distances),
+      importance: this.config.FACT.CHECKPOINT_SPLIT_IMPORTANCE,
+      textKey: CHECKPOINT_SPLIT_TEXT_KEY,
+    });
   }
 
   /** Un flux nommé par personnage, dérivé de la seed : consommer `c0` ne touche jamais `c1`. */

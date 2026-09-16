@@ -15,6 +15,10 @@
     {
       "step": "P008",
       "change": "Événements rares activés : les six seeds affichées sont conservées, mais leurs distances sont remesurées. Les 7 événements de GAME_DESIGN §7.1 modulent la vitesse cible pendant 2 à 7 s ; les distances finales augmentent en moyenne de +1,42 % (36 valeurs sur 36, +1,4 % en moyenne par course, positif sur les 6 seeds — les bonus du catalogue pèsent un peu plus lourd que les malus), et les classements changent. Aucune valeur n'a été corrigée à la main : toutes sont mesurées par runToCompletion()."
+    },
+    {
+      "step": "P008 (correctif)",
+      "change": "Un candidat qui tombe pendant un cooldown est désormais REJETÉ au lieu d'être reporté à la fin du cooldown (GAME_DESIGN §7.3). La course compte donc 10,1 événements en moyenne au lieu de 12,4 — le bas de la fourchette [10 ; 16] de §13 — et les six seeds sont remesurées une nouvelle fois, sans qu'aucune constante de tirage ait été ajustée. K7QM2X9A est la seule seed dont la course ne bouge pas : aucun de ses candidats ne tombait pendant un cooldown, rejet et report y sont donc équivalents."
     }
   ],
   "goldenSeeds": [
@@ -42,20 +46,20 @@
       "seed": "ZZZZZZZZ",
       "tSim": 180,
       "ranking": [
-        "c4",
-        "c2",
         "c3",
         "c5",
+        "c2",
+        "c4",
         "c0",
         "c1"
       ],
       "distances": [
-        2140.786711380426,
-        2086.50114202926,
-        2256.9238548440567,
-        2246.2694233819248,
-        2310.3285576472076,
-        2175.462639812938
+        2142.359680676552,
+        2106.8496497833366,
+        2222.189463940247,
+        2272.148479436922,
+        2215.2828978634857,
+        2230.626739640572
       ]
     },
     {
@@ -65,16 +69,16 @@
         "c1",
         "c5",
         "c2",
-        "c4",
         "c3",
+        "c4",
         "c0"
       ],
       "distances": [
-        2071.516548425141,
-        2323.815926987739,
+        2072.49402284464,
+        2257.0319602347945,
         2207.752886939549,
-        2150.59441736493,
-        2196.9715298413826,
+        2158.022874185507,
+        2141.981223541739,
         2244.975597168213
       ]
     },
@@ -85,57 +89,57 @@
         "c3",
         "c1",
         "c2",
-        "c0",
         "c5",
-        "c4"
+        "c4",
+        "c0"
       ],
       "distances": [
-        2178.4728834840216,
-        2327.3417867262906,
-        2199.852974226406,
-        2407.136032377764,
-        2145.970548170897,
-        2156.765854657521
+        2124.82107005375,
+        2311.3328714724607,
+        2199.9355749849,
+        2410.858513110715,
+        2131.2952613179623,
+        2156.3112291724265
       ]
     },
     {
       "seed": "BANAN4X2",
       "tSim": 180,
       "ranking": [
-        "c4",
-        "c2",
-        "c3",
         "c0",
+        "c4",
+        "c3",
         "c1",
+        "c2",
         "c5"
       ],
       "distances": [
-        2250.8444437379712,
-        2215.6448053816202,
-        2282.708832214959,
-        2251.453148499232,
-        2428.706452234518,
-        2159.3028297419387
+        2347.1763272370613,
+        2214.1834085546393,
+        2192.189200259269,
+        2251.670744087858,
+        2254.655355499593,
+        2156.1379367342934
       ]
     },
     {
       "seed": "PZZA1234",
       "tSim": 180,
       "ranking": [
-        "c4",
         "c0",
-        "c3",
+        "c4",
         "c1",
+        "c3",
         "c5",
         "c2"
       ],
       "distances": [
-        2239.368297545085,
+        2256.2506053526954,
         2160.9647030151373,
-        2073.189283086688,
-        2169.0548526813664,
-        2254.0687198708843,
-        2146.5900834501313
+        2072.293657093626,
+        2157.2490307033386,
+        2189.19034190457,
+        2139.5713937630753
       ]
     }
   ]

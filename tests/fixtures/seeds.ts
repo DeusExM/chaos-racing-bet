@@ -22,18 +22,23 @@ import { computeRanks, isLeaderChange, overtakesBetween } from '../../src/core/r
 export const OVERTAKE_SEED = 'POULET42';
 
 /**
- * Valeurs **remesurées** pour `OVERTAKE_SEED` après l'activation des événements rares (P008).
+ * Valeurs **remesurées** pour `OVERTAKE_SEED` après le correctif de P008 (rejet d'un candidat tombé
+ * pendant un cooldown).
  *
- * L'activation des événements change encore la course de cette seed : les deux chiffres passent de
- * 12 changements de leader / 30 dépassements (P007) à 16 / 38. La seed est conservée — elle reste
- * très largement au-dessus des minima exigés par les tests E2E (1 changement de leader, 3
- * dépassements), et la remplacer romprait la continuité des captures E2E sans rien apporter.
+ * Ce correctif change la course de cette seed comme l'activation des événements l'avait fait : les
+ * deux chiffres passent de 16 changements de leader / 38 dépassements à 14 / 32. La seed est
+ * conservée — elle reste très largement au-dessus des minima exigés par les tests E2E (1 changement de
+ * leader, 3 dépassements), et la remplacer romprait la continuité des captures E2E sans rien apporter.
+ *
+ * À savoir : ce comptage dépend de la **fréquence d'observation** (`OVERTAKE.MIN_MARGIN` vaut plus
+ * qu'un pas de course, donc observer pas à pas ne compte aucun dépassement). Ce couplage est
+ * documenté et testé dans `tests/unit/raceSeeds.test.ts` ; il doit être tranché avant P009.
  */
 export const OVERTAKE_SEED_EVIDENCE = Object.freeze({
   /** 20 pas par frame = `timeScale 20` observé à 60 images par seconde. */
   granularitySteps: 20,
-  leaderChanges: 16,
-  overtakes: 38,
+  leaderChanges: 14,
+  overtakes: 32,
 });
 
 export interface OvertakeMeasurement {

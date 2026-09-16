@@ -228,6 +228,38 @@ const RENDER_IMPORT_RULES: readonly Rule[] = [
   },
 ];
 
+/**
+ * Le planificateur d'événements (`src/core/events.ts`) doit rester **aveugle à la course** : c'est ce
+ * qui garantit, structurellement et pas seulement statistiquement, qu'aucun rubber-banding ne peut s'y
+ * cacher. Il ne reçoit que le planning, le flux, les constantes pré-calculées, l'ordre des personnages
+ * et le numéro du pas — ni distance, ni vitesse, ni rang, ni écart.
+ *
+ * Les deux règles ci-dessous couvrent les deux moitiés de la preuve : aucune API de classement ni
+ * d'état de personnage n'est citée, **et** la signature de `stepEvents` n'accepte rien d'autre.
+ */
+const PLANNER_TOKEN_RULES: readonly Rule[] = [
+  {
+    pattern: /\b(?:computeRanks|sortByRank|ranking)\b/,
+    rule: 'le planificateur ne lit jamais le classement',
+  },
+  {
+    pattern: /\b\w+\s*\.\s*(?:x|v|drift|surge|eventBonus|activeEvent)\b/,
+    rule: "le planificateur ne lit jamais l'état d'un personnage",
+  },
+  {
+    pattern: /\b(?:leader|gap|position|rank|distance)\b/,
+    rule: 'aucune décision du planificateur ne dépend de la position ou de la distance',
+  },
+  {
+    pattern: /\b(?:speedModel|computeTargetSpeed)\b/,
+    rule: 'le planificateur ne connaît pas le modèle de vitesse',
+  },
+];
+
+/** Les cinq paramètres de `stepEvents`, et rien d'autre : ni monde, ni rang, ni distance. */
+const STEP_EVENTS_SIGNATURE =
+  /export function stepEvents\(\s*plan: EventPlanState,\s*stream: RngStream,\s*params: EventParams,\s*characterIds: readonly CharacterId\[\],\s*stepNumber: number,?\s*\): void/;
+
 const SIM_SOURCES = import.meta.glob<string>('/src/sim/**/*.ts', {
   query: '?raw',
   import: 'default',
@@ -253,6 +285,28 @@ describe('frontières du noyau', () => {
   it('ne trouve aucune violation dans les sources du noyau', () => {
     const violations = violationsIn(CORE_SOURCES, FORBIDDEN_TOKENS, FORBIDDEN_IMPORTS);
     expect(violations, report(violations)).toEqual([]);
+  });
+});
+
+describe('le planificateur d’événements ne regarde jamais la course', () => {
+  const source = CORE_SOURCES['/src/core/events.ts'];
+
+  it('lit bien la source du planificateur', () => {
+    expect(typeof source).toBe('string');
+  });
+
+  it('ne cite ni classement, ni état de personnage, ni position', () => {
+    const violations = violationsIn(
+      { '/src/core/events.ts': source ?? '' },
+      PLANNER_TOKEN_RULES,
+      FORBIDDEN_IMPORTS,
+    );
+    expect(violations, report(violations)).toEqual([]);
+  });
+
+  it('n’accepte que le planning, le flux, les constantes, l’ordre des personnages et le pas', () => {
+    const stripped = stripComments(source ?? '');
+    expect(STEP_EVENTS_SIGNATURE.test(stripped), 'signature de stepEvents').toBe(true);
   });
 });
 

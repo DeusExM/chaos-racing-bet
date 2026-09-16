@@ -399,7 +399,7 @@ describe('équivalence des 6 personnages', () => {
    * seule course est de 2,1 % ; sur 384 courses (4 147 200 pas) il tombe à 0,11 %, ce qui rend les
    * seuils ci-dessous inatteignables par le hasard.
    */
-  it('garde les six personnages indistinguables, avec un biais global hérité des surges', () => {
+  it('mesure le biais partagé, qui dépasse le seuil §13 ± 1,5 % (écart connu, P010)', () => {
     const races = 384;
     const totals = CHARACTER_IDS.map(() => 0);
 
@@ -428,19 +428,27 @@ describe('équivalence des 6 personnages', () => {
     const spread = Math.max(...means) - Math.min(...means);
     expect(spread / SPEED.BASE).toBeLessThan(0.005);
 
-    // 2. Biais global **partagé** par les six personnages. Il n'est pas nul, et c'est attendu :
-    //    - les constantes de surge de `GAME_DESIGN.md` §6.4 ont une espérance positive (55 %
-    //      d'accélérations à +0,225 contre 45 % de freinages à −0,20), soit ≈ +0,9 % ;
-    //    - le catalogue d'événements de §7.1 est lui aussi net positif en distance : à poids et
-    //      durées égaux, les bonus rapportent plus que les malus ne retirent, et l'écrêtage à
-    //      `SPEED.MIN` rabote encore les malus (mesuré : une `SIESTE` ne retire parfois que 29 m).
-    //    Mesuré sur 384 courses : +2,03 % (min +1,78 %, max +2,16 %), soit ≈ +1,1 point apporté par
-    //    P008. L'ancien seuil absolu de `±1,5 %` datait d'avant les événements : il est remplacé par
-    //    l'écart à la moyenne des six (point 1), seule formulation indépendante de l'amplitude du
-    //    biais partagé. L'asymétrie du catalogue est signalée dans le compte rendu P008.
+    // 2. Critère §13 : `SPEED.BASE ± 1,5 %` par personnage. Depuis P008, ce critère est **dépassé**,
+    //    et le test l'affirme au lieu de le masquer : le biais est *partagé* par les six personnages,
+    //    il ne vient pas d'un déséquilibre. Sa cause est documentée dans `GAME_DESIGN.md` §13 :
+    //    surges à espérance positive (≈ +0,9 %) et catalogue d'événements de §7.1 net positif en
+    //    distance (≈ +1,1 point), l'écrêtage à `SPEED.MIN` rabotant les malus. Mesuré : +2,03 %.
+    //    Arbitrage attendu en P010 (rendre §7.1 net neutre) : si le biais repasse sous 1,5 %, ces
+    //    deux assertions échouent et forcent la mise à jour explicite du seuil et de son commentaire.
+    for (const [index, mean] of means.entries()) {
+      const relative = (mean - SPEED.BASE) / SPEED.BASE;
+      expect(relative, `${CHARACTER_IDS[index]} : ${(relative * 100).toFixed(3)} %`).toBeGreaterThan(
+        0.015,
+      );
+      expect(relative, `${CHARACTER_IDS[index]} : ${(relative * 100).toFixed(3)} %`).toBeLessThan(
+        0.025,
+      );
+    }
+
+    // 3. Le biais est bien *commun* : mesuré à ±0,2 point autour de sa moyenne, jamais nul ni négatif.
     const relative = (grand - SPEED.BASE) / SPEED.BASE;
-    expect(relative, `biais global mesuré : ${(relative * 100).toFixed(3)} %`).toBeGreaterThan(0);
-    expect(relative).toBeLessThan(0.03);
+    expect(relative, `biais global mesuré : ${(relative * 100).toFixed(3)} %`).toBeGreaterThan(0.015);
+    expect(relative).toBeLessThan(0.025);
   }, 120_000);
 });
 

@@ -15,7 +15,7 @@ import {
 import type { EventDefinition } from '../../src/core/events';
 import { RngStream, forkStream } from '../../src/core/rng';
 import { normalizeSeed } from '../../src/core/seed';
-import type { ActiveEvent, EventId } from '../../src/core/types';
+import type { ActiveEvent, CharacterId, EventId } from '../../src/core/types';
 
 /**
  * P008 — le catalogue (§7.1) et le planificateur (§7.3), **sans moteur**.
@@ -125,8 +125,15 @@ interface EventObservation {
  * Un déclenchement est détecté par **identité** de la fiche : le planificateur remplace l'objet quand
  * il déclenche, et conserve le même objet sinon. L'état « connu » est mis à jour en place, sans
  * allouer quoi que ce soit dans la boucle : à 1000 seeds, cela représente 10,8 millions de pas.
+ *
+ * `idsAtStep` permet de présenter les personnages dans un ordre dicté par un « monde » artificiel :
+ * c'est ce que le planificateur reçoit — et tout ce qu'il reçoit avec le pas et le flux.
  */
-function runPlanner(seed: string, observe: (observation: EventObservation) => void): void {
+function runPlanner(
+  seed: string,
+  observe: (observation: EventObservation) => void,
+  idsAtStep: (step: number) => readonly CharacterId[] = () => CHARACTER_IDS,
+): void {
   const plan = createEventPlan(CHARACTER_IDS.length);
   const stream = forkStream(normalizeSeed(seed), 'events:global');
   const known: (ActiveEvent | null)[] = CHARACTER_IDS.map(() => null);
@@ -134,7 +141,7 @@ function runPlanner(seed: string, observe: (observation: EventObservation) => vo
   let lastGlobalStep: number | null = null;
 
   for (let step = 1; step <= TOTAL_STEPS; step += 1) {
-    stepEvents(plan, stream, PARAMS, CHARACTER_IDS, step);
+    stepEvents(plan, stream, PARAMS, idsAtStep(step), step);
 
     for (let index = 0; index < known.length; index += 1) {
       const event = activeEventAt(plan, index);
@@ -363,6 +370,90 @@ describe('planificateur : tirage forcé', () => {
     expect(plan.counts.reduce((sum, count) => sum + count, 0)).toBe(1);
   });
 
+  it('rejette un candidat tombé pendant un cooldown, sans le reporter à sa fin', () => {
+    // §7.3 : le tirage est éclairci (thinning) par les cooldowns, jamais différé. La preuve est
+    // directe : le candidat de 185 a été rejeté ; au pas 241 le cooldown global (240 pas après le pas
+    // 1) est écoulé, et pourtant **aucun** événement ne se déclenche si aucun nouveau candidat n'est
+    // tiré. Un candidat simplement mis en attente se serait déclenché ici.
+    const plan = createEventPlan(CHARACTER_IDS.length);
+    stepEvents(
+      plan,
+      scripted([0, floatValue(fractionFor('POULET')), 0, 0, floatValue(0)]),
+      PARAMS,
+      CHARACTER_IDS,
+      1,
+    );
+    expect(plan.lastTriggerStep).toBe(1);
+
+    // Candidat pendant le cooldown : rejeté.
+    stepEvents(
+      plan,
+      scripted([0, floatValue(fractionFor('POULET')), 0, 0, floatValue(0)]),
+      PARAMS,
+      CHARACTER_IDS,
+      200,
+    );
+    expect(plan.lastTriggerStep).toBe(1);
+
+    // Cooldown écoulé, mais pas de candidat : rien ne se déclenche. Rien n'était « en attente ».
+    stepEvents(plan, scripted([0xffff_ffff]), PARAMS, CHARACTER_IDS, 241);
+
+    // Un mois plus tard, toujours rien, tant que le flux ne tire pas de candidat. Le `POULET` de
+    // l'unique déclenchement est terminé depuis longtemps : aucun emplacement n'est occupé.
+    stepEvents(plan, scripted([0xffff_ffff]), PARAMS, CHARACTER_IDS, 5000);
+
+    expect(plan.counts.reduce((sum, count) => sum + count, 0)).toBe(1);
+    expect(plan.slots.every((slot) => slot === null)).toBe(true);
+  });
+
+  it('ne dépend ni des positions ni du classement : même flux sur un « monde » réordonné', () => {
+    // Preuve **structurelle** demandée en complément du test statistique : le planificateur ne reçoit
+    // que le planning, le flux, les constantes, l'ordre des personnages et le numéro du pas. On rejoue
+    // donc exactement le même flux, mais en présentant les personnages dans l'ordre d'un monde
+    // artificiel qui change à chaque pas (positions et classements faux). Doivent rester strictement
+    // identiques : les pas de déclenchement, les identifiants, les durées, les magnitudes et l'index
+    // tiré. Seule l'identité du personnage suit l'ordre reçu — jamais sa place dans le monde.
+    const seed = 'MONDE001';
+    // Monde hostile : rotation déterministe, revue à chaque pas (jamais l'ordre du roster).
+    const hostile = (step: number): readonly CharacterId[] => {
+      const shift = (step * 7 + Math.floor(step / 13)) % CHARACTER_IDS.length;
+      return CHARACTER_IDS.map(
+        (_, index) => CHARACTER_IDS[(index + shift) % CHARACTER_IDS.length] as CharacterId,
+      );
+    };
+
+    const signature = (observation: EventObservation): string =>
+      `${observation.step}|${observation.event.id}|${observation.event.durationS}|${observation.event.magnitude}|${observation.index}`;
+
+    const reference: string[] = [];
+    const perturbed: string[] = [];
+    const targets: { readonly step: number; readonly index: number; readonly target: CharacterId }[] =
+      [];
+
+    runPlanner(seed, (observation) => {
+      reference.push(signature(observation));
+    });
+    runPlanner(
+      seed,
+      (observation) => {
+        perturbed.push(signature(observation));
+        targets.push({ step: observation.step, index: observation.index, target: observation.event.target });
+      },
+      hostile,
+    );
+
+    // Aucune décision ne bouge, l'index tiré compris.
+    expect(perturbed).toEqual(reference);
+    // Et l'identité du personnage est exactement celle de l'ordre reçu à ce pas.
+    expect(targets.length).toBeGreaterThan(0);
+    for (const { step, index, target } of targets) {
+      expect(target, `pas ${step}`).toBe(hostile(step)[index]);
+    }
+
+    // Le monde a réellement été hostile : sans cela, la comparaison ne prouverait rien.
+    expect(hostile(1)).not.toEqual([...CHARACTER_IDS]);
+  });
+
   it('refuse un second événement sur un personnage déjà occupé', () => {
     const plan = createEventPlan(CHARACTER_IDS.length);
     // VENT_DE_FACE (long) sur c0, à sa durée maximale (7 s = 420 pas).
@@ -470,11 +561,13 @@ describe('planificateur : mécanismes sur 1000 seeds', () => {
   it('déclenche 10 à 16 événements par course en moyenne', () => {
     const mean = statistics.events / statistics.races;
 
-    // Attendu théorique : 180 s / 14 s ≈ 12,9 candidats, moins ceux rejetés par les cooldowns (§7.3).
+    // Attendu théorique : 180 s / 14 s ≈ 12,9 candidats, dont chacun est **rejeté** s'il tombe pendant
+    // un cooldown (thinning, §7.3) : la mesure donne 10,1 événements par course, soit le bas de la
+    // fourchette §13. Aucune constante de tirage n'a été ajustée pour « remonter » ce chiffre.
     expect(mean).toBeGreaterThanOrEqual(10);
     expect(mean).toBeLessThanOrEqual(16);
-    // Bornes de vraisemblance d'une loi de Poisson de moyenne 12,4 : elles n'ont rien de seuils de
-    // game design, seulement de garde-fous contre un planificateur cassé.
+    // Bornes de vraisemblance d'une loi de Poisson éclaircie de moyenne 10,1 : elles n'ont rien de
+    // seuils de game design, seulement de garde-fous contre un planificateur cassé.
     expect(Math.min(...statistics.perRaceCounts)).toBeGreaterThanOrEqual(3);
     expect(Math.max(...statistics.perRaceCounts)).toBeLessThanOrEqual(24);
   });

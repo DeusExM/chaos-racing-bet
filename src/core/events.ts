@@ -14,11 +14,11 @@ import type { ActiveEvent, CharacterId, EventId } from './types';
  *
  * 1. **Processus de Poisson en temps discret.** Le planificateur tire un candidat à **chaque pas**,
  *    avec la probabilité `RATE_PER_S × DT_S` : l'intervalle moyen entre deux candidats vaut donc
- *    exactement `1 / RATE_PER_S = 14 s`, et le nombre d'événements d'une course suit une loi de
- *    Poisson de moyenne ≈ 13 (§7.3). Aucune fonction transcendante n'est nécessaire — une loi
+ *    exactement `1 / RATE_PER_S = 14 s`. Aucune fonction transcendante n'est nécessaire — une loi
  *    exponentielle par inversion demanderait `Math.log`, interdit par §10.2 — et tout reste
- *    reproductible. Un candidat qui arrive pendant le cooldown global n'est pas perdu : il attend et
- *    déclenche le premier pas autorisé (sinon le taux réel tomberait à ≈ 10).
+ *    reproductible. Un candidat qui tombe pendant un cooldown est **rejeté**, pas reporté : les
+ *    cooldowns éclaircissent (thinning) le processus, qui garde donc son absence de mémoire, et la
+ *    course compte `≈ 10` événements (§13).
  * 2. **Tout est compté en pas entiers.** Durées, cooldowns et frontières de fin sont des nombres de
  *    pas : seule l'arithmétique entière est exactement spécifiée par ECMAScript, donc le planning ne
  *    peut pas dériver d'un moteur JavaScript à l'autre.
@@ -166,15 +166,6 @@ export interface ActiveEventSlot {
 export interface EventPlanState {
   /** Pas du dernier événement déclenché, ou `null`. Sert au cooldown global. */
   lastTriggerStep: number | null;
-  /**
-   * `true` si un candidat est arrivé pendant le cooldown global et attend son tour.
-   *
-   * Un candidat n'est **pas** perdu pendant un cooldown : il est mis en attente et déclenche le
-   * premier pas autorisé. Sans cela, chaque cooldown consommerait tout le temps d'attente suivant
-   * (le processus est sans mémoire) et le taux réel tomberait à `180 / (4 + 14) ≈ 10` événements par
-   * course, au lieu des ≈ 13 annoncés par §7.3.
-   */
-  pendingCandidate: boolean;
   /** Dernier pas où chaque personnage a subi un événement, par index de roster. */
   readonly lastCharacterStep: (number | null)[];
   /** Nombre d'événements déjà subis par chaque personnage. */
@@ -298,7 +289,6 @@ export function createEventPlan(characterCount: number): EventPlanState {
 
   return {
     lastTriggerStep: null,
-    pendingCandidate: false,
     lastCharacterStep: new Array<number | null>(characterCount).fill(null),
     counts: new Array<number>(characterCount).fill(0),
     slots: new Array<ActiveEventSlot | null>(characterCount).fill(null),
@@ -345,17 +335,16 @@ export function stepEvents(
     }
   }
 
-  // 2. Candidat du pas. Un candidat arrivé pendant le cooldown global n'est **pas** jeté : il est mis
-  // en attente et déclenchera le premier pas autorisé (voir `pendingCandidate`).
-  if (!plan.pendingCandidate) {
-    if (stream.nextFloat() >= params.perStepProbability) {
-      return;
-    }
-    plan.pendingCandidate = true;
+  // 2. Candidat du pas. Le tirage a lieu à **chaque** pas, cooldown compris : un candidat qui tombe
+  // pendant un cooldown est rejeté, jamais reporté. C'est ce qui garde au processus son absence de
+  // mémoire (§7.3) ; les cooldowns l'éclaircissent, et la course compte donc ≈ 10 événements — le
+  // bas de la fourchette `[10 ; 16]` de §13.
+  if (stream.nextFloat() >= params.perStepProbability) {
+    return;
   }
 
-  // 3. Cooldown global, tous personnages confondus : c'est lui qui décide si le candidat en attente
-  // peut se déclencher à ce pas.
+  // 3. Cooldown global, tous personnages confondus : le candidat est rejeté, et le flux a simplement
+  // avancé d'un cran. Aucun report, aucun rattrapage.
   if (
     plan.lastTriggerStep !== null &&
     stepNumber - plan.lastTriggerStep < params.globalCooldownSteps
@@ -391,9 +380,8 @@ export function stepEvents(
     }
   }
 
-  // Aucun personnage éligible : le candidat est perdu, et le flux a simplement avancé d'un cran.
+  // Aucun personnage éligible : le candidat est rejeté lui aussi, sans être mis de côté.
   if (eligible.length === 0) {
-    plan.pendingCandidate = false;
     return;
   }
 
@@ -421,7 +409,6 @@ export function stepEvents(
   });
 
   plan.slots[targetIndex] = Object.freeze({ event, endStep: stepNumber + durationSteps });
-  plan.pendingCandidate = false;
   plan.lastTriggerStep = stepNumber;
   plan.lastCharacterStep[targetIndex] = stepNumber;
   plan.counts[targetIndex] = (plan.counts[targetIndex] ?? 0) + 1;

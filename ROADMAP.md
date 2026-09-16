@@ -618,14 +618,22 @@ permanente déjà présente (P004).
   reste acquise (comparaison avec un jumeau sur tout l'intervalle restant).
 * Malus cohérents : `CHUTE` ⇒ perte dans `[14 ; 42] m`, `SIESTE` ⇒ ≈ `39 m`, `VENT_DE_FACE` ⇒
   `[13 ; 37] m`.
-* **Anti-rubber-banding** (test de propriété) : sur 1000 seeds, la cible du **premier événement de
-  chaque course** est uniforme sur les 6 personnages — aucun événement ne s'est encore appliqué, donc
-  les positions ne doivent rien aux événements : rang moyen `3,5 ± 0,2` et `≈ 167` cibles par rang
-  (écart-type 11,8). *La corrélation littérale « position moyenne vs nombre d'événements » n'est pas
-  utilisable comme seuil* : elle vaut `−0,13` mesuré sur 1800 couples (course, personnage), parce
-  qu'elle mesure l'effet **voulu** des événements sur les positions (§7.2 : « un gros bonus vaut 2 à 5
-  places »), et `−0,10` même en prenant le rang d'avant le premier événement du personnage — les
-  événements des autres personnages l'ont déjà déplacé.
+* **Anti-rubber-banding** — deux preuves complémentaires :
+  * *structurelle* (la principale) : `stepEvents()` ne reçoit que le planning, le flux, les constantes,
+    l'ordre des personnages et le numéro du pas ; ni `x`, ni `v`, ni un rang, ni un écart ne peuvent
+    entrer dans une décision. Vérifié par un garde-fou de source sur `src/core/events.ts`
+    (signature exacte + aucune citation de classement ou d'état de personnage) et par un test qui
+    rejoue **le même flux** en présentant les personnages dans l'ordre d'un « monde » artificiel
+    réordonné à chaque pas : pas de déclenchement, identifiants, durées, magnitudes et index tiré
+    restent identiques, seule l'identité du personnage suit l'ordre reçu.
+  * *statistique* : sur 1000 seeds, la cible du **premier événement de chaque course** est uniforme
+    sur les 6 personnages — aucun événement ne s'est encore appliqué, donc les positions ne doivent
+    rien aux événements : rang moyen `3,5 ± 0,2` et `≈ 167` cibles par rang (écart-type 11,8).
+  * La corrélation littérale « position moyenne vs nombre d'événements » n'est pas utilisable comme
+    seuil : elle vaut `−0,13` mesuré sur 1800 couples (course, personnage), parce qu'elle mesure
+    l'effet **voulu** des événements sur les positions (§7.2 : « un gros bonus vaut 2 à 5 places »),
+    et `−0,10` même en prenant le rang d'avant le premier événement du personnage — les événements des
+    autres personnages l'ont déjà déplacé.
 * Aucune condition de fin liée à un événement ou à une distance : la course finit à `10800` pas quel
   que soit le nombre d'événements.
 * Progressivité directionnelle et bornes de vitesse respectées, y compris pendant `MEGA_TURBO`
@@ -921,13 +929,15 @@ Si le jalon retient une option 3D, cette étape s'appuie dessus ; sinon elle res
   ni Three.js ni Babylon.js par défaut, et **aucune dépendance 3D n'est installée** tant que le
   **Jalon 3D (P013.5)** n'a pas produit son prototype comparatif A/B/C. Toute demande d'installer un
   moteur 3D avant ce jalon est à signaler, pas à exécuter.
-* **Marge de dépassement dépendante de la fréquence d'observation** (constat P005) :
+* **Marge de dépassement dépendante de la fréquence d'observation** (constat P005, reconfirmé en P008) :
   `overtakesBetween` ne compte un dépassement que si le nouvel arrivant mène de plus de
   `OVERTAKE.MIN_MARGIN` (**0,5 m**) au moment du relevé. Or à la vitesse de base, un pas ne fait
   avancer que de `SPEED.BASE × DT_S = 0,2 m` : observée **pas à pas** (60 Hz en `timeScale = 1`), une
   course ne produit donc **aucun** dépassement compté, alors que la même course en produit une
-  vingtaine observée image par image en mode accéléré. Le nombre de dépassements dépend donc de la
-  fréquence à laquelle on regarde, ce qui est intenable dès que le speaker (P009) ou le HUD devront
-  s'appuyer dessus. À trancher explicitement (par exemple : exiger que le dépassement **tienne**
-  pendant une durée simulée, plutôt qu'une marge mesurée entre deux relevés). Aucune constante ne
-  doit être changée avant cette décision, et les seeds dorées devront alors être réévaluées.
+  vingtaine observée image par image en mode accéléré. Mesure P008 sur `OVERTAKE_SEED` : **20 pas →
+  32 dépassements et 14 changements de leader ; 1 pas → 0 dépassement** (et 14 changements de leader,
+  eux, bien détectés). Le nombre de dépassements dépend donc de la fréquence à laquelle on regarde,
+  ce qui est intenable dès que le speaker (P009) ou le HUD devront s'appuyer dessus.
+  **À corriger avant P009** (P009 ne doit pas commencer avant) : par exemple exiger que le dépassement
+  **tienne** pendant une durée simulée, plutôt qu'une marge mesurée entre deux relevés. Aucune constante
+  ne doit être changée avant cette décision, et les seeds dorées devront alors être réévaluées.

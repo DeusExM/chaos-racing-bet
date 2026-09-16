@@ -422,7 +422,7 @@ qu'un bonus combiné à des modulations positives peut buter sur `SPEED.MAX`. La
 
 | Constante | Valeur | Rôle |
 | --- | --- | --- |
-| `EVENT.RATE_PER_S` | `1/14` | taux global (Poisson), ⇒ ≈ 12,9 événements sur 180 s |
+| `EVENT.RATE_PER_S` | `1/14` | taux global des **candidats** (Poisson) : ≈ 12,9 candidats sur 180 s |
 | `EVENT.GLOBAL_COOLDOWN_S` | `4.0` | délai minimum entre deux événements, tous personnages confondus |
 | `EVENT.CHAR_COOLDOWN_S` | `8.0` | délai minimum entre deux événements sur le même personnage |
 | `EVENT.MAX_PER_CHARACTER` | `5` | plafond par course, évite le dogpiling |
@@ -432,16 +432,18 @@ Règles d'application :
 
 * Un événement ne s'applique que si la cible n'a **aucun** événement actif.
   Exception unique : `CHUTE` remplace un `TURBO` actif (annulation dramatisante).
-* Un candidat tiré pendant le `GLOBAL_COOLDOWN` n'est **pas** perdu : il reste en attente et déclenche
-  le premier pas autorisé. Sans cela, chaque cooldown consommerait tout le délai d'attente suivant (le
-  processus de Poisson est sans mémoire) et la course ne compterait plus que `180 / (4 + 14) ≈ 10`
-  événements au lieu des `≈ 13` annoncés ci-dessus. La mesure donne `≈ 12,4` événements par course.
+* Un candidat tiré pendant un cooldown — global ou individuel — est **rejeté**, jamais reporté. Le
+  tirage a lieu à chaque pas, cooldown compris : les cooldowns **éclaircissent** (thinning) le
+  processus de Poisson, qui garde ainsi son absence de mémoire. Reporter un candidat à la fin du
+  cooldown ferait au contraire dépendre le taux réel de l'état des cooldowns, et la course monterait à
+  `≈ 12,4` événements. La mesure avec rejet donne `≈ 10,0 – 10,2` événements par course : le **bas** de
+  la fourchette `[10 ; 16]` de §13, sans aucune compensation sur `RATE_PER_S`.
 * Avec les constantes de la V1, l'exception `CHUTE` sur `TURBO` **ne peut pas se produire en course** :
   un `TURBO` dure au plus `4,0 s`, alors que le cooldown global vaut `4,0 s` et le cooldown individuel
   `8,0 s`. La règle reste implémentée comme une garde structurelle — elle s'appliquerait sans
   modification de code si l'un de ces réglages changeait — et elle est vérifiée par un test à
   cooldowns nuls. La rendre atteignable suppose de modifier un réglage de §7.1 ou §7.3 : c'est une
-  décision de game design, pas une conséquence du planificateur.
+  décision de game design, **à arbitrer en P010**, pas une conséquence du planificateur.
 * La durée d'un événement se compte en **temps simulé**.
 * Les événements sont tirés **dans `step()`**, donc jamais pendant une pause : `RaceSimulation` ne
   faisant aucun pas, rien n'est tiré, rien n'avance, et un événement en cours reste simplement
@@ -457,8 +459,18 @@ uniformément parmi les 6 personnages (filtrée par les cooldowns). Il n'existe 
 * aucune accélération du peloton.
 
 Les remontées spectaculaires et les rattrapages du leader **émergent** de la variance (§6.3, §6.4,
-§7.1) et ne sont jamais garantis. Test de propriété obligatoire : sur N seeds, un personnage ne doit
-recevoir ni plus ni moins d'événements en fonction de sa position moyenne.
+§7.1) et ne sont jamais garantis.
+
+La garantie est **structurelle**, pas seulement statistique : `stepEvents()` ne reçoit que le planning,
+le flux, les constantes pré-calculées, la liste des identifiants de personnages et le numéro du pas.
+Ni `x`, ni `v`, ni un rang, ni un écart ne peuvent donc entrer dans une décision — vérifié par un
+garde-fou de source (`tests/unit/boundaries.test.ts`) et par un test qui rejoue le même flux sur un
+« monde » artificiellement réordonné. Test de propriété complémentaire : sur 1000 seeds, la cible du
+premier événement de chaque course est uniforme sur les 6 personnages.
+
+> La corrélation littérale « nombre d'événements reçus vs position moyenne » ne peut **pas** servir de
+> seuil : elle mesure l'effet causal revendiqué ci-dessus (« un gros bonus vaut 2 à 5 places ») et vaut
+> `−0,13` mesuré sur 1800 couples (course, personnage).
 
 ---
 
@@ -693,22 +705,22 @@ Sur **1000 seeds**, 6 personnages, course complète :
 | Répliques du speaker par course | 12 – 30 |
 | Reproductibilité | 100/100 seeds identiques bit à bit |
 | Nombre de pas par course | exactement `10800`, avec ou sans pauses |
-| Écart de vitesse moyenne entre personnages | ≤ 0,5 % autour de la moyenne des six (équivalence) |
+| Vitesse moyenne finale par personnage | `SPEED.BASE ± 1,5 %` (équivalence) |
 
 Ces seuils sont **implémentés comme tests** (P010). Si un réglage change, le document et les seuils
 changent ensemble.
 
-> **Biais partagé, et pourquoi la ligne ci-dessus a changé en P008.** La dérive, les surges et les
+> **Écart connu à ce seuil, mesuré en P008 — à arbitrer en P010.** La dérive, les surges et les
 > événements ont chacun une espérance **nette positive** : les constantes de surge de §6.4 valent
 > ≈ +0,9 %, et le catalogue d'événements de §7.1 ajoute ≈ +1,1 point de plus, parce qu'à poids et
 > durées égaux les bonus rapportent plus de distance que les malus n'en retirent — l'écrêtage à
-> `SPEED.MIN` rabote encore les malus. Mesuré sur 384 courses en P008 : **+2,03 %** de `SPEED.BASE`
-> en moyenne, identique pour les six personnages (écart maximal entre personnages : 0,38 %).
-> Le seuil historique `SPEED.BASE ± 1,5 %`, écrit avant les événements, ne pouvait donc plus servir
-> de borne **absolue** ; il est remplacé par l'**écart à la moyenne des six**, qui est la vraie
-> formulation de l'invariant d'équivalence §5.6 et ne dépend pas de l'amplitude du biais partagé.
-> Rendre le catalogue net neutre en distance (malus plus longs ou plus forts) est un réglage de §7.1,
-> donc une décision de game design — signalée au compte rendu P008, à trancher avant P010.
+> `SPEED.MIN` rabote encore les malus (une `SIESTE` ne retire parfois que 29 m). Mesuré sur 384
+> courses en P008 : **+2,03 %** de `SPEED.BASE` (min +1,78 %, max +2,16 %), **identique pour les six
+> personnages** (écart maximal entre personnages : 0,38 %), donc l'invariant d'équivalence §5.6 tient.
+> Le seuil ci-dessus, lui, est **dépassé** : il est conservé tel quel, et c'est le **catalogue §7.1**
+> qu'il faudra rendre net neutre en distance (malus plus longs ou plus forts) — décision de game
+> design, pas une constante à ajuster en douce pour faire passer un test. Le test
+> `tests/unit/engine.test.ts` mesure et encadre donc explicitement l'écart actuel.
 
 ---
 

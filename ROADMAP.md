@@ -32,7 +32,7 @@ chaos-race/
     audio/                    # sons locaux optionnels (P015)
   src/
     core/                     # NOYAU PUR — zéro dépendance, zéro Phaser, zéro DOM, zéro horloge
-      types.ts                #   RaceState, CharacterState, RacePhase, RaceFact, RaceEventState
+      types.ts                #   CharacterId, CharacterState, RaceState, RacePhase, ActiveEvent, RaceFact, RaceResult
       config.ts               #   RACE_CONFIG (temps SIMULÉ) + SPEED/DRIFT/SURGE/EVENT/RANK/OVERTAKE
       characters.ts           #   roster des 6 (données pures)
       rng.ts                  #   hash32, splitmix32, sfc32, RngStream, fork(seed, label)
@@ -368,7 +368,7 @@ par `seedTextFromBytes`. Détails dans `GAME_DESIGN.md` §10.
 
 ---
 
-### P003 — Types, configuration, piste temporelle et classement
+### P003 — Types, configuration, piste temporelle et classement `[x]`
 
 **Objectif** : toutes les constantes du jeu au bon endroit, et un classement purement dérivé.
 

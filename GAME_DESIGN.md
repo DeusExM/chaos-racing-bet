@@ -128,6 +128,14 @@ Conséquences vérifiables :
   100 pauses (checkpoint ou utilisateur).
 * Le résultat d'une course est identique avec et sans pauses.
 
+**Contrat d'exactitude des bornes.** Le temps simulé doit être dérivé du **numéro de pas** par
+multiplication — `tSim = step × DT` — et **jamais** par accumulation (`tSim += DT`). Avec la
+multiplication, `2700 × DT`, `5400 × DT`, `8100 × DT` et `10800 × DT` valent **exactement** `45`,
+`90`, `135` et `180` : les instants de checkpoint et la fin de course tombent donc pile sur un pas, et
+`track.ts` peut comparer sans la moindre tolérance. En accumulant, on obtient `44.99999999999873` au
+pas 2700 et `180.00000000003539` au pas 10800 — les checkpoints seraient manqués. Cette propriété est
+verrouillée par les tests de `config.ts` et `track.ts`.
+
 ### 4.3 Déroulement
 
 1. Le MJ clique « Lancer ». `RaceSimulation` gère le compte à rebours réel, puis démarre la boucle.

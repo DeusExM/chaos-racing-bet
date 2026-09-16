@@ -289,7 +289,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P006 | Structure 4 × 45 s + checkpoints (segments au noyau, pauses réelles dans `sim/`) | P005 | 4 segments, 3 pauses automatiques |
 | P007 | Variations occasionnelles (surges) | P006 | accélérations/ralentissements ponctuels |
 | P008 | Événements rares + planificateur | P007 | turbos, chutes, raccourcis |
-| P009 | Observateur de faits + speaker *(P009-A ✅ observateur, P009-B/C ⏳)* | P008 | commentaires à cooldowns |
+| P009 | Observateur de faits + speaker *(P009-A ✅ observateur, P009-B ✅ speaker, P009-C ⏳ textes)* | P008 | commentaires à cooldowns |
 | P010 | Équilibrage statistique + verrouillage des constantes | P009 | `tools/balance.ts` + seuils testés |
 | P011 | HUD complet + panneau debug | P010 | mini-carte, classement détaillé, chrono |
 | P012 | Affichage du speaker + réglages | P011 | bannières de commentaires |
@@ -654,9 +654,12 @@ permanente déjà présente (P004).
   `RaceEngine.step()` / `drainFacts()`, `tests/unit/observer.test.ts` et
   `tests/unit/observerSeeds.test.ts`. Le noyau publie des faits **mesurés**, et rien d'autre : aucun
   texte, aucun cooldown, aucun rendu.
-* **P009-B ⏳ — speaker** : `src/speaker/importance.ts`, `src/speaker/cooldowns.ts`,
-  `src/speaker/Speaker.ts` (score, cooldowns global et par type, déduplication, quotas, file de 3,
-  préemption).
+* **P009-B ✅ — speaker (terminé)** : `src/speaker/policy.ts` (politique injectée : source unique des
+  constantes de parole, sans import de `core/config`), `src/speaker/importance.ts`,
+  `src/speaker/cooldowns.ts`, `src/speaker/Speaker.ts` (score, cooldowns global et par type,
+  déduplication, quotas, file de 3, préemption), `tests/unit/speaker.test.ts`,
+  `tests/unit/speakerBoundaries.test.ts` et `tests/unit/speakerSeeds.test.ts` (campagne de 200
+  courses réelles). Aucun texte, aucun rendu : P009-B ne manipule que des faits et des candidats.
 * **P009-C ⏳ — textes et affichage** : `src/app/strings.fr.ts` (3 à 6 variantes par type) et
   `src/render/view/SubtitleBanner.ts`.
 
@@ -669,8 +672,9 @@ permanente déjà présente (P004).
   `CHECKPOINT_SPLIT`, `FINISH`, `PHOTO_FINISH`. Chaque fait porte les valeurs mesurées
   (`characterIds`, `magnitudes`, `tSim`).
 * ✅ `src/core/engine.ts` : `drainFacts()` renvoie les faits accumulés depuis le dernier drain.
-* ⏳ `src/speaker/importance.ts`, `src/speaker/cooldowns.ts`, `src/speaker/Speaker.ts` : score,
-  cooldown global + par type, déduplication, quotas, file de 3, préemption (`INTERRUPT_DELTA`).
+* ✅ (`P009-B`) `src/speaker/policy.ts`, `src/speaker/importance.ts`, `src/speaker/cooldowns.ts`,
+  `src/speaker/Speaker.ts` : score, cooldown global + par type, déduplication, quotas, file de 3,
+  préemption (`INTERRUPT_DELTA`). Le module n'importe que `core/types`.
 * ⏳ `src/app/strings.fr.ts` : 3 à 6 variantes par type de fait, placeholders, flux `speaker:lines`.
 * ⏳ `src/render/view/SubtitleBanner.ts` : **affichage minimal** des répliques (le soin visuel vient en
   P012) — mais suffisant pour voir le speaker fonctionner.
@@ -684,14 +688,25 @@ permanente déjà présente (P004).
   **zéro** `LEADER_CHANGE` et **zéro** `OVERTAKE_STREAK`.
 * ✅ (P009-A) `drainFacts()` vide bien la file ; aucun fait dupliqué pour un même instant ; buffer
   borné (mémoire constante) ; course identique bit à bit quelle que soit la cadence de drain.
-* ⏳ Speaker : `MIN_IMPORTANCE`, cooldown global, cooldowns par type et quota par segment jamais violés
-  (200 seeds) ; 12 à 30 répliques par course, jamais 0, jamais > 12 par segment.
+* ✅ (P009-B) Speaker : `MIN_IMPORTANCE`, cooldown global, cooldowns par type et quota par segment
+  jamais violés (200 seeds) ; aucune réplique sans fait source, importance jamais altérée.
+* ⏳ **Arbitrage d'équilibrage (P010)** : sur 200 courses, la discipline de parole donne
+  **min 6, p25 12, médiane 14, moyenne 14,54, p75 17, max 24** répliques — plafond (30) jamais
+  atteint et quota par segment jamais saturé, mais **45 courses sur 200 passent sous les 12
+  répliques** de la cible §9.3. La règle qui filtre est le **cooldown par type** (738 332 refus sur
+  la campagne, contre 355 840 pour le global) : `OVERTAKE_STREAK` (705 faits pour 59 paroles) et
+  `BIG_COMEBACK` (1 773 faits pour 388 paroles) sont les plus étranglés. La fenêtre glissante de
+  densité ne s'est déclenchée qu'**une** fois sur 200 courses : elle n'est pas la cause. Mesure faite
+  à cadence **maximale** (une réplique libérée à chaque pas, aucune durée de texte) : c'est donc une
+  borne supérieure, que P009-C ne pourra qu'abaisser. Aucune constante n'a été modifiée par P009-B :
+  c'est à P010 de trancher entre assouplir les cooldowns de type, revoir la cible basse, ou accepter
+  des courses à faible densité d'événements.
 * ⏳ **Véracité des textes** : les valeurs interpolées correspondent exactement aux champs du fait.
 * ⏳ **Indépendance textes / gameplay** : remplacer tous les textes par des variantes différentes ne
   change **aucune** distance finale (test paramétré). Invariant clé.
-* ⏳ Préemption : une réplique d'importance 90 remplace une réplique d'importance 60 en cours ; une
-  réplique de 70 ne la remplace pas. Aucune réplique sans fait, jamais.
-* ⏳ Le module `speaker/` n'importe que `core/types` (test de frontière).
+* ✅ (P009-B) Préemption : une réplique d'importance 90 remplace une réplique d'importance 60 en
+  cours ; une réplique de 70 ne la remplace pas. Aucune réplique sans fait, jamais.
+* ✅ (P009-B) Le module `speaker/` n'importe que `core/types` (test de frontière).
 
 ---
 

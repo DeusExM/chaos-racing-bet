@@ -239,10 +239,23 @@ describe(`P009-B : discipline de parole sur ${SEED_COUNT} courses réelles`, () 
     }
 
     const summary = summarize(lineCounts);
+    const belowTarget = lineCounts.filter((value) => value < 12).length;
+    const aboveTarget = lineCounts.filter((value) => value > 30).length;
     const report =
       `${SEED_COUNT} seeds — min ${summary.min}, p25 ${summary.p25}, médiane ${summary.median}, ` +
       `moyenne ${summary.mean.toFixed(2)}, p75 ${summary.p75}, max ${summary.max} ; ` +
-      `${lineCounts.filter((value) => value < 12).length} courses sous 12 répliques`;
+      `${belowTarget} courses sous 12 répliques, ${aboveTarget} au-dessus de 30`;
+
+    // Trace de la campagne : c'est la mesure qui sert à l'arbitrage d'équilibrage (P010).
+    console.log(
+      [
+        `P009-B — campagne de ${SEED_COUNT} courses de 180 s (cadence maximale)`,
+        `min=${summary.min} p25=${summary.p25} mediane=${summary.median}`,
+        `moyenne=${summary.mean.toFixed(2)} p75=${summary.p75} max=${summary.max}`,
+        `courses=${SEED_COUNT} sous_12=${belowTarget} au_dessus_de_30=${aboveTarget}`,
+        `violations=${failures.length}`,
+      ].join('\n'),
+    );
 
     expect(failures, failures.slice(0, 20).join('\n')).toEqual([]);
 

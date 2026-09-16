@@ -416,20 +416,20 @@ describe('P009-B : file d attente', () => {
     expect(speaker.queuedCount()).toBe(3);
     expect(speaker.stats().queuedDropped).toBe(1);
 
-    // La file sort strictement par ordre de priorite : 65, 64, 62. Les instants restent dans la
-    // fenetre de peremption de 45 s et sont espaces de plus de 6 s.
+    // La file sort strictement par ordre de priorite : 65, 64, 62. Aucune duree arbitraire
+    // n'intervient : c'est la priorite seule qui decide. Un depart toutes les 6 s respecte le
+    // cooldown global, donc rien d'autre ne filtre.
     speaker.finish();
     expect(speaker.poll(20)?.importance).toBe(65);
     speaker.finish();
     expect(speaker.poll(26)?.importance).toBe(64);
     speaker.finish();
     expect(speaker.poll(32)?.importance).toBe(62);
-    speaker.finish();
 
-    // Un fait frais moins important passe ensuite normalement : la file ne s'est jamais bloquee
-    // sur un candidat devenu trop vieux.
-    expect(speaker.feed(fact('LEADER_MALUS', 38, 55, [9], ['c5']))).not.toBeNull();
-    expect(speaker.currentDecision()?.importance).toBe(55);
+    // File vide : un fait frais, meme faible, demarre immediatement.
+    speaker.finish();
+    expect(speaker.queuedCount()).toBe(0);
+    expect(speaker.feed(fact('LEADER_MALUS', 38, 55, [9], ['c5']))?.importance).toBe(55);
   });
 
   it('departage les egalites par ordre d arrivee, sans dependre d un Map ou d un Set', () => {
@@ -474,6 +474,133 @@ describe('P009-B : file d attente', () => {
       expect(speaker.queuedCount()).toBeLessThanOrEqual(SPEAKER_POLICY.queueMax);
     }
     expect(speaker.queuedCount()).toBe(3);
+  });
+
+  it('ne bloque pas la file sur un candidat de tete retenu par son cooldown de type', () => {
+    const speaker = new Speaker();
+    // Le type de A a deja parle a 0 s : son cooldown de 12 s court jusqu'a 12 s, donc A sera retenu
+    // alors que B, sans cooldown de type, sera eligible des la fin de la replique en cours.
+    speaker.feed(fact('LEADER_CHANGE', 0, 60, [1], ['c0']));
+
+    // A est plus important (90) mais reste bloque par son type ; B (70) ne peut pas couper la
+    // replique en cours, il attend donc son tour en file.
+    expect(speaker.feed(fact('LEADER_CHANGE', 6, 90, [2], ['c1']))).toBeNull();
+    expect(speaker.feed(fact('PHOTO_FINISH', 6, 70, [3]))).toBeNull();
+    expect(speaker.queuedCount()).toBe(2);
+
+    // La replique en cours se termine : A est en tete de file mais echoue sur sa porte de type, B
+    // est examine ensuite et passe. Sans parcours de file, A aurait fige la file entiere.
+    speaker.finish();
+    const decision = speaker.poll(6);
+    expect(decision?.fact.type).toBe('PHOTO_FINISH');
+    expect(decision?.importance).toBe(70);
+    expect(speaker.currentDecision()?.fact.type).toBe('PHOTO_FINISH');
+
+    // A est toujours en file, intact, et passe des que son cooldown de type est ecoule.
+    expect(speaker.queuedCount()).toBe(1);
+    expect(speaker.typeCooldownReady('LEADER_CHANGE', 11.99)).toBe(false);
+    expect(speaker.typeCooldownReady('LEADER_CHANGE', 12)).toBe(true);
+    speaker.finish();
+    const later = speaker.poll(13);
+    expect(later?.fact.type).toBe('LEADER_CHANGE');
+    expect(later?.importance).toBe(90);
+    expect(speaker.queuedCount()).toBe(0);
+  });
+
+  it('ne demarre pas un candidat sous INTERRUPT_DELTA pour autant qu il passe ses portes', () => {
+    // Complement du test precedent : un candidat eligible mais trop faible pour couper la replique
+    // en cours reste en file. Le parcours de file ne contourne pas la regle de preemption.
+    const speaker = new Speaker();
+    speaker.feed(fact('LEADER_CHANGE', 0, 80));
+    expect(speaker.feed(fact('PHOTO_FINISH', 6, 70, [2]))).toBeNull();
+    expect(speaker.currentDecision()?.importance).toBe(80);
+    expect(speaker.queuedCount()).toBe(1);
+    expect(speaker.stats().preempted).toBe(0);
+  });
+});
+
+describe('P009-B : lots de faits d un meme pas', () => {
+  /** Deux faits de types distincts, d'importances differentes, au meme instant. */
+  function pair(first: number, second: number): readonly RaceFact[] {
+    return [
+      fact('LEADER_CHANGE', 6, first, [1], ['c0']),
+      fact('BIG_BONUS', 6, second, [2], ['c1']),
+    ];
+  }
+
+  /** Amorce une replique au pas 0 pour que le lot du pas 6 trouve l'horloge globale ouverte. */
+  function seeded(): Speaker {
+    const speaker = new Speaker();
+    expect(speaker.feed(fact('CLOSE_RACE', 0, 60))).not.toBeNull();
+    speaker.finish();
+    return speaker;
+  }
+
+  it('considere tout le lot avant de parler : [50, 60] demarre le 60', () => {
+    const decision = seeded().feedAll(pair(50, 60));
+    expect(decision?.importance).toBe(60);
+    expect(decision?.fact.type).toBe('BIG_BONUS');
+  });
+
+  it('donne le meme resultat pour [60, 50] : l ordre du lot ne decide pas', () => {
+    const decision = seeded().feedAll(pair(60, 50));
+    expect(decision?.importance).toBe(60);
+    expect(decision?.fact.type).toBe('LEADER_CHANGE');
+  });
+
+  it('choisit toujours le fait le plus important du lot, quel que soit son rang d entree', () => {
+    // Les deux ordres menent a la **meme importance** gagnante : le fait fort gagne dans les deux
+    // cas, et le fait faible reste en file au lieu de demarrer en premier.
+    const forward = seeded();
+    const backward = seeded();
+    const [first] = [forward.feedAll(pair(50, 60))];
+    const [second] = [backward.feedAll(pair(60, 50))];
+    expect(first?.importance).toBe(60);
+    expect(second?.importance).toBe(60);
+    expect(forward.queuedCount()).toBe(1);
+    expect(backward.queuedCount()).toBe(1);
+  });
+
+  it('ne laisse pas un fait faible du lot demarrer avant un fait fort du meme pas', () => {
+    // Le 50 arrive en premier dans le lot : sans admission groupee, il demarrerait avant que le 60
+    // n'ait ete vu. C'est exactement ce que `feedAll` doit empecher.
+    const speaker = seeded();
+    const decision = speaker.feedAll(pair(50, 60));
+    expect(decision?.importance, 'le 50 ne doit pas demarrer').not.toBe(50);
+    expect(speaker.currentDecision()?.fact.type).toBe('BIG_BONUS');
+    // Le 50 reste en file, intact, et pourra parler plus tard.
+    expect(speaker.queuedCount()).toBe(1);
+    speaker.finish();
+    expect(speaker.poll(12)?.importance).toBe(50);
+  });
+
+  it('refuse un lot heterogene en temps plutot que de deviner l instant', () => {
+    const speaker = new Speaker();
+    expect(() =>
+      speaker.feedAll([fact('LEADER_CHANGE', 6, 60), fact('BIG_BONUS', 6.5, 60, [1], ['c1'])]),
+    ).toThrow(RangeError);
+  });
+
+  it('refuse un lot anterieur au dernier fait observe', () => {
+    const speaker = new Speaker();
+    speaker.feed(fact('LEADER_CHANGE', 10, 60));
+    expect(() => speaker.feedAll([fact('BIG_BONUS', 9, 60, [1], ['c1'])])).toThrow(RangeError);
+  });
+
+  it('n altere pas le comportement de `feed` sur un fait isole', () => {
+    // Un fait isole reste admis puis teste immediatement : `feed` et `feedAll([fait])` coincident.
+    const single = new Speaker();
+    const batched = new Speaker();
+    expect(single.feed(fact('LEADER_CHANGE', 0, 60))?.importance).toBe(60);
+    expect(batched.feedAll([fact('LEADER_CHANGE', 0, 60)])?.importance).toBe(60);
+    expect(single.stats()).toStrictEqual(batched.stats());
+  });
+
+  it('accepte un lot vide sans rien changer', () => {
+    const speaker = new Speaker();
+    expect(speaker.feedAll([])).toBeNull();
+    expect(speaker.queuedCount()).toBe(0);
+    expect(speaker.stats().fed).toBe(0);
   });
 });
 

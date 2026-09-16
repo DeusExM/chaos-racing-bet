@@ -10,16 +10,16 @@
  * ## Machine à états
  *
  * ```
- *   feed(fact, tSim) ──▶ importance < MIN           ──▶ REJECTED_IMPORTANCE
- *                    ├─▶ empreinte déjà prononcée   ──▶ DEDUPLICATED
- *                    ├─▶ file pleine & fait plus faible ─▶ REJECTED_QUEUE
- *                    └─▶ file (≤ QUEUE_MAX)          ──▶ QUEUED ─┐
- *                                                                 │
- *   poll(tSim) ──▶ meilleur candidat éligible ◀───────────────────┘
- *                    ├─▶ quota / cooldown de type / global / fenêtre ──▶ reste en file
- *                    └─▶ gate ALLOWED ──▶ CURRENT_LINE + SpeakerDecision
+ *   feed(fact) ──▶ importance < MIN           ──▶ REJECTED_IMPORTANCE
+ *              ├─▶ empreinte déjà prononcée   ──▶ DEDUPLICATED
+ *              ├─▶ file pleine & fait plus faible ─▶ REJECTED_QUEUE
+ *              └─▶ file (≤ QUEUE_MAX)          ──▶ QUEUED ─┐
+ *                                                           │
+ *   poll(tSim) ──▶ premier candidat éligible de la file ◀───┘
+ *              ├─▶ quota / cooldown de type / global / fenêtre ──▶ reste en file
+ *              └─▶ gate ALLOWED ──▶ CURRENT_LINE + SpeakerDecision
  *
- *   begin / finish / mute ─▶ signalent au speaker le cycle de vie réel de la réplique (P009-C)
+ *   begin / finish ─▶ signalent au speaker le cycle de vie réel de la réplique (P009-C)
  * ```
  *
  * Chaque décision porte le `RaceFact` source : **aucune sortie sans fait**. Un fait est gelé par le
@@ -31,6 +31,11 @@
  * Le quota est un plafond absolu, jamais franchi, même par un fait de préemption. Le cooldown par
  * type n'est jamais contournable ; seul le cooldown **global** l'est, et uniquement pour un fait
  * dont l'importance atteint `preemptImportance`.
+ *
+ * ## Bornes mémoire
+ *
+ * La file est bornée par `QUEUE_MAX` : aucun historique de faits n'est conservé au-delà, et le
+ * speaker ne connaît ni horloge, ni file non bornée.
  */
 
 import {
@@ -46,17 +51,6 @@ import { dedupFingerprint, isImportantEnough } from './importance';
 import { SPEAKER_POLICY, type SpeakerPolicy } from './policy';
 import type { RaceFact, RaceFactType } from '../core/types';
 
-/**
- * Délai maximal entre l'observation d'un fait et sa prise de parole, en secondes simulées.
- *
- * Un fait est une **situation datée** : commenter un dépassement survenu il y a plus d'un segment
- * serait faux, et le fait annoncé ne serait plus celui du classement courant. Un candidat plus vieux
- * est donc périmé, retiré de la file, et n'a consommé ni cooldown ni quota — exactement comme s'il
- * n'avait jamais été mis en file. Cette borne est aussi ce qui rend la **mémoire de la file
- * bornée** : à tout instant, elle ne peut contenir que les faits de la dernière minute.
- */
-const STALE_AFTER_S = 45;
-
 /** Décision du speaker : un fait source et l'importance qui a justifié sa prise de parole. */
 export interface SpeakerDecision {
   readonly fact: RaceFact;
@@ -65,10 +59,9 @@ export interface SpeakerDecision {
   readonly startedAtS: number;
 }
 
-/** Raison de rejet d'un fait, avant toute mise en file. */
-export type SpeakerRejection = 'REJECTED_IMPORTANCE' | 'DEDUPLICATED' | 'REJECTED_QUEUE';
-
-/** Candidat en attente : le fait, son importance et son rang d'arrivée (départage déterministe). */
+/**
+ * Candidat en attente : le fait, son importance et son rang d'arrivée (départage déterministe).
+ */
 interface QueuedCandidate {
   readonly fact: RaceFact;
   readonly importance: number;
@@ -159,41 +152,72 @@ export class Speaker {
    * pas apporter le temps réel, et une suite non monotone est refusée plutôt que devinée.
    */
   feed(fact: RaceFact): SpeakerDecision | null {
-    if (fact.tSim < this.lastObservedS) {
-      throw new RangeError(
-        `Speaker.feed : les faits doivent arriver dans l'ordre chronologique (reçu ${fact.tSim} après ${this.lastObservedS}).`,
-      );
-    }
-    this.lastObservedS = fact.tSim;
-    this.counts.fed += 1;
-
-    const rejection = this.admit(fact);
-    if (rejection !== null) {
-      return null;
-    }
+    this.observe([fact]);
     return this.poll(fact.tSim);
   }
 
-  /** Variante en lot : un seul `poll` final, les faits d'un même pas étant compatibles entre eux. */
+  /**
+   * Variante en lot pour les faits d'**un même pas** de simulation.
+   *
+   * Tous les faits sont d'abord validés et admis — donc tous entrent en file, y compris le plus
+   * important du lot — puis **un seul** `poll` a lieu, à l'instant du lot. C'est ce qui garantit
+   * qu'un fait de 50 arrivé avant un fait de 60 dans le même lot ne démarre pas avant que le 60
+   * n'ait été vu : la file est consultée une fois, dans son ordre de priorité final, et le résultat
+   * ne dépend donc pas de l'ordre d'entrée du lot lorsque les priorités diffèrent.
+   *
+   * Le lot doit être homogène en temps (`fact.tSim` identiques), sinon `RangeError` : des instants
+   * différents exigeraient une décision par instant, donc `feed` fait isolément.
+   */
   feedAll(facts: readonly RaceFact[]): SpeakerDecision | null {
-    let decision: SpeakerDecision | null = null;
-    for (const fact of facts) {
-      decision = this.feed(fact);
-    }
-    return decision;
+    this.observe(facts);
+    const instant = facts[0]?.tSim;
+    return instant === undefined ? null : this.poll(instant);
   }
 
-  /** Pourquoi un fait serait refusé **avant** mise en file, ou `null` s'il est admissible. */
-  private admit(fact: RaceFact): SpeakerRejection | null {
+  /**
+   * Valide l'ordre chronologique du lot, puis admet **chaque** fait sans jamais démarrer de
+   * réplique : admission pure, sans effet de bord sur la réplique en cours.
+   */
+  private observe(facts: readonly RaceFact[]): void {
+    const instant = facts[0]?.tSim;
+    if (instant === undefined) {
+      return;
+    }
+    if (instant < this.lastObservedS) {
+      throw new RangeError(
+        `Speaker.feed : les faits doivent arriver dans l'ordre chronologique (reçu ${instant} après ${this.lastObservedS}).`,
+      );
+    }
+    for (const fact of facts) {
+      if (fact.tSim !== instant) {
+        throw new RangeError(
+          `Speaker.feedAll : les faits d'un lot doivent partager le même instant (reçu ${fact.tSim} puis ${instant}).`,
+        );
+      }
+    }
+    this.lastObservedS = instant;
+    for (const fact of facts) {
+      this.counts.fed += 1;
+      this.admit(fact);
+    }
+  }
+
+  /**
+   * Valide un fait **avant** mise en file et l'y insère s'il est admissible.
+   *
+   * Admission pure : cette méthode ne démarre jamais de réplique, ne consomme ni cooldown, ni quota,
+   * ni fenêtre, ni empreinte. Un fait refusé ici n'a donc strictement rien consommé.
+   */
+  private admit(fact: RaceFact): void {
     if (!isImportantEnough(fact, this.policy.minImportance)) {
       this.counts.rejectedImportance += 1;
-      return 'REJECTED_IMPORTANCE';
+      return;
     }
 
     const fingerprint = dedupFingerprint(fact, this.policy.magnitudeBucketResolution);
     if (this.ledger.isDuplicate(fingerprint, fact.tSim)) {
       this.counts.deduplicated += 1;
-      return 'DEDUPLICATED';
+      return;
     }
 
     const candidate: QueuedCandidate = {
@@ -207,7 +231,7 @@ export class Speaker {
       const weakest = this.weakestCandidate();
       if (weakest !== null && !outranks(candidate, weakest)) {
         this.counts.rejectedQueue += 1;
-        return 'REJECTED_QUEUE';
+        return;
       }
       this.removeWeakest();
       this.counts.queuedDropped += 1;
@@ -215,7 +239,6 @@ export class Speaker {
 
     this.insert(candidate);
     this.counts.queued += 1;
-    return null;
   }
 
   private weakestCandidate(): QueuedCandidate | null {
@@ -259,14 +282,15 @@ export class Speaker {
   /**
    * Tente de démarrer la meilleure réplique en attente à l'instant `nowS`.
    *
-   * La file est parcourue **dans l'ordre de priorité** : un candidat bloqué par son cooldown de type
-   * reste en file, et un candidat moins important mais éligible peut passer — l'ordre du design est
-   * respecté sans qu'un blocage ponctuel ne fige la file entière.
+   * La file est parcourue **dans l'ordre de priorité** et s'arrête au **premier** candidat qui passe
+   * toutes les portes. Un candidat momentanément bloqué — typiquement par son cooldown de type —
+   * reste donc en file **sans bloquer ceux qui le suivent** : un fait moins important mais éligible
+   * peut démarrer, ce qui évite un blocage de tête de file. Le candidat réellement démarré est le
+   * seul retiré de la file ; les autres restent en attente, intacts, pour le prochain `poll`.
    *
    * Si une réplique est en cours, seuls les faits qui la **remplacent** (`INTERRUPT_DELTA`) sont
-   * examinés : un fait trop faible pour couper attend son tour en file. Un candidat plus vieux que
-   * `STALE_AFTER_S` est périmé : parler d'un fait vieux d'un segment entier serait faux, et il n'a
-   * jamais consommé de cooldown — il est retiré, ce qui libère sa place dans la file.
+   * examinés : un fait trop faible pour couper attend son tour en file. Cette condition est
+   * évaluée **par candidat**, avant ses portes.
    *
    * Retourne la décision si une réplique (re)démarre, `null` sinon.
    */
@@ -276,29 +300,20 @@ export class Speaker {
         `Speaker.poll : instant antérieur au dernier fait observé (${nowS} < ${this.lastObservedS}).`,
       );
     }
-    // Les candidats périmés sortent **avant** l'observation de la file : l'état lu juste après
-    // `poll` décrit donc exactement ce qui reste à dire.
-    this.pruneStale(nowS);
 
-    const candidate = this.queue[0];
-    if (candidate === undefined) {
-      return null;
-    }
-    if (this.current !== null && !this.wouldPreempt(candidate)) {
-      return null;
-    }
-    if (this.canSpeak(candidate, nowS) !== 'ALLOWED') {
-      return null;
-    }
     this.gateVerdict = null;
-    this.queue.shift();
-    return this.start(candidate, nowS);
-  }
-
-  /** Un fait qui n'a pas été dit en un segment entier ne sera plus dit du tout. */
-  private pruneStale(nowS: number): void {
-    const staleFrom = nowS - STALE_AFTER_S;
-    this.queue = this.queue.filter((candidate) => candidate.fact.tSim >= staleFrom);
+    for (const [position, candidate] of this.queue.entries()) {
+      if (this.current !== null && !this.wouldPreempt(candidate)) {
+        continue;
+      }
+      if (this.canSpeak(candidate, nowS) !== 'ALLOWED') {
+        continue;
+      }
+      this.gateVerdict = null;
+      this.queue.splice(position, 1);
+      return this.start(candidate, nowS);
+    }
+    return null;
   }
 
   /** Le candidat couperait-il la réplique en cours ? Règle unique : `INTERRUPT_DELTA`. */

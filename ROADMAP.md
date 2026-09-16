@@ -660,6 +660,11 @@ permanente déjà présente (P004).
   déduplication, quotas, file de 3, préemption), `tests/unit/speaker.test.ts`,
   `tests/unit/speakerBoundaries.test.ts` et `tests/unit/speakerSeeds.test.ts` (campagne de 200
   courses réelles). Aucun texte, aucun rendu : P009-B ne manipule que des faits et des candidats.
+  Trois règles structurent `poll()` : la file est parcourue **dans l'ordre de priorité** jusqu'au
+  premier candidat qui passe toutes ses portes (un candidat retenu par son cooldown de type ne fige
+  pas la file), `feedAll` admet **tout** un lot avant de parler (un seul `poll`, donc un fait de 60
+  du même pas ne peut pas être devancé par un fait de 50), et aucune durée de péremption arbitraire
+  n'existe : la seule borne mémoire est `QUEUE_MAX`.
 * **P009-C ⏳ — textes et affichage** : `src/app/strings.fr.ts` (3 à 6 variantes par type) et
   `src/render/view/SubtitleBanner.ts`.
 
@@ -691,11 +696,11 @@ permanente déjà présente (P004).
 * ✅ (P009-B) Speaker : `MIN_IMPORTANCE`, cooldown global, cooldowns par type et quota par segment
   jamais violés (200 seeds) ; aucune réplique sans fait source, importance jamais altérée.
 * ⏳ **Arbitrage d'équilibrage (P010)** : sur 200 courses, la discipline de parole donne
-  **min 6, p25 12, médiane 14, moyenne 14,54, p75 17, max 24** répliques — plafond (30) jamais
-  atteint et quota par segment jamais saturé, mais **45 courses sur 200 passent sous les 12
-  répliques** de la cible §9.3. La règle qui filtre est le **cooldown par type** (738 332 refus sur
-  la campagne, contre 355 840 pour le global) : `OVERTAKE_STREAK` (705 faits pour 59 paroles) et
-  `BIG_COMEBACK` (1 773 faits pour 388 paroles) sont les plus étranglés. La fenêtre glissante de
+  **min 8, p25 13, médiane 16, moyenne 16,12, p75 19, max 27** répliques — plafond (30) jamais
+  atteint et quota par segment jamais saturé, mais **26 courses sur 200 passent sous les 12
+  répliques** de la cible §9.3. La règle qui filtre est le **cooldown par type** (838 099 refus sur
+  la campagne, contre 329 584 pour le global) : `OVERTAKE_STREAK` (705 faits pour 60 paroles) et
+  `BIG_COMEBACK` (1 773 faits pour 476 paroles) sont les plus étranglés. La fenêtre glissante de
   densité ne s'est déclenchée qu'**une** fois sur 200 courses : elle n'est pas la cause. Mesure faite
   à cadence **maximale** (une réplique libérée à chaque pas, aucune durée de texte) : c'est donc une
   borne supérieure, que P009-C ne pourra qu'abaisser. Aucune constante n'a été modifiée par P009-B :

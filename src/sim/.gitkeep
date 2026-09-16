@@ -1,0 +1,6 @@
+Ce dossier matérialise une frontière d'architecture (voir AGENTS.md §4).
+
+`src/sim/` contiendra l'orchestration temps réel (pas fixes, compte à rebours, pauses, timeScale),
+au-dessus du noyau pur `src/core/`. Il n'importe jamais Phaser ni le DOM.
+
+Il est vide pour l'instant : son contenu commence en P004/P005.

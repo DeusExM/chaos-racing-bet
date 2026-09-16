@@ -1,0 +1,31 @@
+# Dépendances
+node_modules/
+.npm-cache/
+.pnpm-store/
+
+# Navigateurs Playwright : installés localement au projet, jamais dans AppData
+.playwright-browsers/
+
+# Build
+dist/
+.vite/
+
+# Artefacts de test
+test-results/
+playwright-report/
+coverage/
+blob-report/
+.playwright/
+
+# Fichiers temporaires locaux au projet
+.tmp/*
+!.tmp/.gitkeep
+
+# Divers
+*.log
+.DS_Store
+Thumbs.db
+
+# Image de reference des competiteurs : conservee localement, non versionnee pour l'instant
+# (retrait temporaire demande par l'utilisateur ; le fichier reste sur le disque).
+images_des_competiteurs.png

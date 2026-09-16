@@ -1,0 +1,7 @@
+Ce dossier matérialise une frontière d'architecture (voir AGENTS.md §4).
+
+`src/speaker/` produira les commentaires du speaker. Il ne reçoit que des `RaceFact` et n'a aucun
+accès à `RaceEngine`, `RaceState`, au modèle de vitesse ni aux événements : c'est ce qui garantit
+qu'il ne peut pas inventer une réplique.
+
+Il est vide pour l'instant : son contenu commence en P009.

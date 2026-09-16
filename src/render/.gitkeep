@@ -1,0 +1,7 @@
+Ce dossier matérialise une frontière d'architecture (voir AGENTS.md §4).
+
+`src/render/` contiendra l'affichage Phaser. Il est en **lecture seule** : il ne modifie jamais la
+position, la vitesse, le rang, les événements ni les faits. Il positionne des sprites à partir des
+distances produites par la simulation.
+
+Il est vide pour l'instant : son contenu commence en P005.

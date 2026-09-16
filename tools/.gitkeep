@@ -1,0 +1,7 @@
+Outillage de développement local au projet.
+
+Y vivront notamment les scripts reproductibles de génération d'assets (Blender en mode CLI /
+headless, dans `tools/blender/`). Ces scripts ne sont pas encore écrits : ils relèvent du backlog
+(P019+) et ne doivent jamais influencer la simulation.
+
+Voir AGENTS.md §3.7.

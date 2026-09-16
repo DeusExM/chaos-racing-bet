@@ -1,0 +1,8 @@
+Ce dossier est le TEMP/TMP local au projet (voir README.md).
+
+Utilisation ponctuelle, sans jamais modifier les variables globales de Windows :
+
+    $env:TEMP="$PWD\.tmp"; $env:TMP="$PWD\.tmp"
+
+Il sert aux outils et a Chromium quand ils veulent ecrire des fichiers temporaires hors
+du workspace. Le contenu de ce dossier est ignore par git (seul ce fichier est conserve).

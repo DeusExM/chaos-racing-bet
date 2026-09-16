@@ -21,6 +21,11 @@ blob-report/
 .tmp/*
 !.tmp/.gitkeep
 
+# Installeurs telecharges par erreur a la racine du depot, et dossiers temporaires
+# crees par les navigateurs de test (Chromium) : jamais des fichiers du projet.
+*.exe
+scoped_dir*/
+
 # Divers
 *.log
 .DS_Store

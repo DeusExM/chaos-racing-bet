@@ -51,12 +51,12 @@ function frozenCharacter(character: CharacterConfig): CharacterConfig {
 
 /** Les 6 personnages, dans l'ordre du roster. */
 export const CHARACTERS: readonly CharacterConfig[] = Object.freeze([
-  frozenCharacter({ id: 'c0', name: 'Bébert', color: '#e6194b' }),
-  frozenCharacter({ id: 'c1', name: 'Gaston', color: '#3cb44b' }),
-  frozenCharacter({ id: 'c2', name: 'Mireille', color: '#4363d8' }),
-  frozenCharacter({ id: 'c3', name: 'Raymond', color: '#f58231' }),
-  frozenCharacter({ id: 'c4', name: 'Josette', color: '#911eb4' }),
-  frozenCharacter({ id: 'c5', name: 'Kevin', color: '#42d4f4' }),
+  frozenCharacter({ id: 'c0', name: 'Mamie Nitro', color: '#e6194b' }),
+  frozenCharacter({ id: 'c1', name: 'Saucisse Mécanique', color: '#3cb44b' }),
+  frozenCharacter({ id: 'c2', name: 'Poulet 3000', color: '#4363d8' }),
+  frozenCharacter({ id: 'c3', name: 'Jean-Michel Turbo', color: '#f58231' }),
+  frozenCharacter({ id: 'c4', name: 'Bananix', color: '#911eb4' }),
+  frozenCharacter({ id: 'c5', name: 'Gérard le Paladin', color: '#42d4f4' }),
 ]);
 
 /**

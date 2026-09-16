@@ -9,6 +9,17 @@ describe('roster des 6 personnages', () => {
     expect(CHARACTERS.map((character) => character.id)).toEqual([...CHARACTER_IDS]);
   });
 
+  it('reprend les noms provisoires retenus pour le projet', () => {
+    expect(CHARACTERS.map((character) => character.name)).toEqual([
+      'Mamie Nitro',
+      'Saucisse Mécanique',
+      'Poulet 3000',
+      'Jean-Michel Turbo',
+      'Bananix',
+      'Gérard le Paladin',
+    ]);
+  });
+
   it('donne à chaque personnage un libellé et une couleur distincts', () => {
     const names = CHARACTERS.map((character) => character.name);
     const colors = CHARACTERS.map((character) => character.color);

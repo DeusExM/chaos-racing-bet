@@ -4,7 +4,12 @@
  * Ce module ne contient **aucun code exécutable** et n'importe rien : il décrit la forme de l'état
  * de la course, pas son comportement. Toutes les durées qui y figurent sont du **temps simulé**
  * (secondes) ; les durées réelles (compte à rebours, durée d'une pause, accélération du mode test)
- * vivent dans `SIM_CONFIG`, côté `src/sim/`, et n'atteignent jamais le noyau.
+ * vivent dans `SimConfig`, côté `src/sim/`, et n'atteignent jamais le noyau.
+ *
+ * La forme exacte de `RacePhase`, `CharacterState` et `RaceState` est un **contrat** : elle est fixée
+ * par `ROADMAP.md` §A.4, et `tests/unit/types.test.ts` refuse toute divergence silencieuse.
+ * Ici, seuls les champs qui ne doivent jamais être réaffectés sont `readonly` ; `x`, `v`, `tSim` et
+ * `steps` sont au contraire faits pour être avancés pas à pas par le moteur.
  */
 
 /**
@@ -24,13 +29,21 @@ export type CharacterId = 'c0' | 'c1' | 'c2' | 'c3' | 'c4' | 'c5';
  * terminée. Il n'existe **volontairement aucun** état de pause ni de compte à rebours ici : une
  * pause réelle consiste simplement, pour `RaceSimulation`, à ne plus appeler le moteur, si bien que
  * `tSim`, `x` et `v` sont strictement gelés sans que le noyau ait à le savoir.
+ *
+ * Le type de l'état temps réel — `idle` / `countdown` / `running` / `checkpointPause` /
+ * `userPaused` / `finished` — vit dans `src/sim/` et n'a **rien** à voir avec cette union-ci.
  */
 export type RacePhase =
   | { readonly kind: 'idle' }
   | {
       readonly kind: 'running';
-      /** Index du segment courant, de 0 à `RACE_CONFIG.SEGMENT_COUNT - 1`. */
-      readonly segment: number;
+      /**
+       * Numéro **humain** du segment courant, de `1` à `SEGMENT_COUNT` — et non un index.
+       *
+       * Attention à ne pas confondre avec `track.segmentIndexAt(tSim)`, qui reste fondé sur zéro
+       * (`0..3`). Le moteur passe de l'un à l'autre par `segmentIndexAt(tSim) + 1`.
+       */
+      readonly segment: 1 | 2 | 3 | 4;
       /** Temps simulé écoulé depuis le début du segment courant, en secondes. */
       readonly segmentElapsedS: number;
     }
@@ -46,24 +59,35 @@ export type RacePhase =
 export interface CharacterState {
   readonly id: CharacterId;
   /** Distance parcourue depuis le départ, en mètres. Seule source du classement. */
-  readonly x: number;
+  x: number;
   /** Vitesse instantanée, en m/s. */
-  readonly v: number;
+  v: number;
   /** Dérive permanente courante (processus d'Ornstein–Uhlenbeck), sans unité. */
-  readonly drift: number;
+  drift: number;
   /** Surge courant, sans unité. Vaut `0` quand aucun surge n'est actif. */
-  readonly surge: number;
-  /** Modulation d'événement courante, sans unité. Vaut `0` quand aucun événement n'est actif. */
-  readonly event: number;
+  surge: number;
+  /**
+   * Modulation de vitesse apportée par l'événement en cours, sans unité. Vaut `0` quand aucun
+   * événement n'est actif. Champ distinct de `activeEvent`, qui porte la fiche de l'événement.
+   */
+  eventBonus: number;
+  /** Événement rare en cours sur ce personnage, ou `null`. Un seul à la fois. */
+  activeEvent: ActiveEvent | null;
 }
 
 /** État complet du noyau à un instant donné. */
 export interface RaceState {
-  readonly phase: RacePhase;
+  /** Seed **affichée** (8 caractères Base32 Crockford) : la source de vérité du rejeu. */
+  readonly seed: string;
+  /** Seed interne 32 bits, dérivée de la seed affichée. */
+  readonly seedValue: number;
   /** Temps simulé écoulé depuis le départ, en secondes. */
-  readonly tSim: number;
-  /** Les personnages, dans l'ordre du roster : cet ordre est l'ordre d'itération de la physique. */
-  readonly characters: readonly CharacterState[];
+  tSim: number;
+  /** Nombre de pas de `DT_S` déjà exécutés. Une course complète en compte `TOTAL_STEPS`. */
+  steps: number;
+  phase: RacePhase;
+  /** Les personnages, dans l'ordre du roster : cet ordre **est** l'ordre des index stables. */
+  characters: readonly CharacterState[];
 }
 
 /** Un événement rare en cours d'application. */
@@ -73,6 +97,7 @@ export interface ActiveEvent {
    * livré avec le planificateur, dans `src/core/events.ts` ; le noyau ne peut pas encore le citer.
    */
   readonly id: string;
+  /** Personnage qui subit l'événement. */
   readonly target: CharacterId;
   /** Instant simulé du déclenchement, en secondes. */
   readonly startSimS: number;

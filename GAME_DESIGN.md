@@ -375,10 +375,14 @@ recevoir ni plus ni moins d'événements en fonction de sa position moyenne.
 ### 8.1 Définition
 
 ```
-rang_i = 1 + |{ j : (x_j, id_j) > (x_i, id_i) }|
+rang_i = 1 + |{ j : x_j > x_i  ou  (x_j === x_i et index_j < index_i) }|
 ```
-Tri par **distance décroissante**, égalité départagée par **index de personnage croissant** (stable,
-déterministe, indépendant du temps réel).
+
+Autrement dit, on compte les personnages qui devancent `i` : un personnage `j` devance `i` si sa
+distance est **plus grande**, ou si les distances sont **égales** et que son index de personnage est
+**plus petit**. Tri par **distance décroissante**, égalité départagée par **index de personnage
+croissant** (stable, déterministe, indépendant du temps réel) : en cas d'égalité stricte,
+`c0` devance `c1`, qui devance `c2`, et ainsi de suite.
 
 * Le classement est une **conséquence physique** des distances. Il n'est jamais stocké, jamais
   ajusté, jamais « corrigé ». Il est recalculé à partir des `x`.

@@ -1,6 +1,7 @@
 import { CHARACTER_IDS } from '../../src/core/characters';
 import { RaceEngine } from '../../src/core/engine';
-import { computeRanks, isLeaderChange, overtakesBetween } from '../../src/core/ranking';
+import { OvertakeTracker } from '../../src/core/overtakes';
+import { computeRanks, isLeaderChange } from '../../src/core/ranking';
 
 /**
  * Seeds **mesurées** et partagées entre les tests unitaires et les tests E2E.
@@ -22,23 +23,17 @@ import { computeRanks, isLeaderChange, overtakesBetween } from '../../src/core/r
 export const OVERTAKE_SEED = 'POULET42';
 
 /**
- * Valeurs **remesurées** pour `OVERTAKE_SEED` après le correctif de P008 (rejet d'un candidat tombé
- * pendant un cooldown).
+ * Valeurs **remesurées** pour `OVERTAKE_SEED` après le correctif d'hystérésis (avant P009).
  *
- * Ce correctif change la course de cette seed comme l'activation des événements l'avait fait : les
- * deux chiffres passent de 16 changements de leader / 38 dépassements à 14 / 32. La seed est
- * conservée — elle reste très largement au-dessus des minima exigés par les tests E2E (1 changement de
- * leader, 3 dépassements), et la remplacer romprait la continuité des captures E2E sans rien apporter.
- *
- * À savoir : ce comptage dépend de la **fréquence d'observation** (`OVERTAKE.MIN_MARGIN` vaut plus
- * qu'un pas de course, donc observer pas à pas ne compte aucun dépassement). Ce couplage est
- * documenté et testé dans `tests/unit/raceSeeds.test.ts` ; il doit être tranché avant P009.
+ * Le comptage n'utilise plus `overtakesBetween`, qui dépendait de la fréquence d'observation : il
+ * alimente un `OvertakeTracker` **à chaque pas simulé**, ce qui est la source de vérité de P009. Les
+ * chiffres de P008 (14 changements de leader / 32 dépassements pour un relevé tous les 20 pas, et
+ * 0 dépassement pas à pas) sont donc remplacés : ils mesuraient l'ancien couplage, pas la course.
+ * La seed est conservée : elle reste très largement au-dessus des minima exigés par les tests E2E.
  */
 export const OVERTAKE_SEED_EVIDENCE = Object.freeze({
-  /** 20 pas par frame = `timeScale 20` observé à 60 images par seconde. */
-  granularitySteps: 20,
   leaderChanges: 14,
-  overtakes: 32,
+  overtakes: 68,
 });
 
 export interface OvertakeMeasurement {
@@ -48,15 +43,33 @@ export interface OvertakeMeasurement {
 }
 
 /**
- * Compte les changements de leader et les dépassements d'une course complète.
+ * Compte les changements de leader et les dépassements d'une course, **pas à pas**.
  *
- * `granularitySteps` reproduit la fréquence à laquelle un observateur regarde la course : `1` pour
- * un examen pas à pas, `20` pour une frame en `timeScale = 20`. Cette précision est essentielle,
- * car `overtakesBetween` exige que le dépassement soit **établi** de plus de
- * `OVERTAKE.MIN_MARGIN` mètres entre deux relevés (voir le test qui documente ce point).
+ * Le détecteur est alimenté après chaque `step()` : c'est la granularité de P009, indépendante du
+ * rendu, du `timeScale` et du nombre d'images par seconde.
  */
-export function measureOvertakes(seed: string, granularitySteps: number): OvertakeMeasurement {
+export function measureOvertakes(seed: string): OvertakeMeasurement {
+  return measureObservedOvertakes(seed, 1);
+}
+
+/**
+ * Même mesure, mais en n'alimentant le détecteur qu'un pas sur `granularitySteps`.
+ *
+ * Sert uniquement à **documenter** la robustesse du détecteur à une observation plus grossière
+ * (celle du rendu) : deux relevés rapprochés peuvent manquer un aller-retour très rapide, donc cette
+ * mesure n'est jamais la source de vérité — P009 observera chaque pas simulé.
+ */
+export function measureSampledOvertakes(seed: string, granularitySteps: number): OvertakeMeasurement {
+  if (!Number.isInteger(granularitySteps) || granularitySteps < 1) {
+    throw new RangeError(`granularitySteps doit être un entier supérieur ou égal à 1 (reçu : ${granularitySteps}).`);
+  }
+
+  return measureObservedOvertakes(seed, granularitySteps);
+}
+
+function measureObservedOvertakes(seed: string, granularitySteps: number): OvertakeMeasurement {
   const engine = new RaceEngine(seed);
+  const tracker = new OvertakeTracker();
   const ids = CHARACTER_IDS;
   const distances = (): number[] => engine.getState().characters.map((character) => character.x);
 
@@ -68,16 +81,19 @@ export function measureOvertakes(seed: string, granularitySteps: number): Overta
   while (engine.getState().phase.kind !== 'finished') {
     engine.step();
     steps += 1;
+
+    const xs = distances();
+
     if (steps % granularitySteps !== 0) {
       continue;
     }
 
-    const xs = distances();
+    overtakes += tracker.observe(xs, ids).length;
+
     const ranks = computeRanks(xs, ids);
     if (isLeaderChange(previousRanks, ranks)) {
       leaderChanges += 1;
     }
-    overtakes += overtakesBetween(previousRanks, ranks, xs, ids).length;
     previousRanks = ranks;
   }
 

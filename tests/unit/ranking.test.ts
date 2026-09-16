@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { OVERTAKE, SPEED } from '../../src/core/config';
-import { computeRanks, gapMeters, gapSeconds, isLeaderChange, overtakesBetween, sortByRank } from '../../src/core/ranking';
+import { SPEED } from '../../src/core/config';
+import { computeRanks, gapMeters, gapSeconds, isLeaderChange, sortByRank } from '../../src/core/ranking';
 import { forkStream } from '../../src/core/rng';
 import type { CharacterId } from '../../src/core/types';
 
@@ -221,73 +221,9 @@ describe('isLeaderChange', () => {
   });
 });
 
-describe('overtakesBetween', () => {
-  const IDS_PAIR: readonly CharacterId[] = ['c0', 'c1'];
-
-  it('compte un dépassement franc', () => {
-    // c1 devançait c0 ; c0 le repasse avec 2 m d'avance.
-    const overtakes = overtakesBetween([2, 1], [1, 2], [100, 98], IDS_PAIR);
-
-    expect(overtakes).toEqual([{ overtaker: 'c0', overtaken: 'c1' }]);
-  });
-
-  it('ne compte pas un franchissement sous la marge de 0,5 m', () => {
-    expect(overtakesBetween([2, 1], [1, 2], [100, 99.6], IDS_PAIR)).toEqual([]);
-    expect(overtakesBetween([2, 1], [1, 2], [100, 99.5], IDS_PAIR)).toEqual([]);
-  });
-
-  it('compte un dépassement juste au-dessus de la marge', () => {
-    const justAbove = 0.5 + 1e-9;
-    expect(overtakesBetween([2, 1], [1, 2], [100, 100 - justAbove], IDS_PAIR)).toHaveLength(1);
-  });
-
-  it('ne compte aucun dépassement quand deux personnages s’échangent leur rang cent fois sous la marge', () => {
-    let counted = 0;
-    for (let round = 0; round < 100; round += 1) {
-      // Marge de 0,4 m : sous `OVERTAKE.MIN_MARGIN`, donc aucun dépassement ne doit être compté,
-      // même cent fois de suite.
-      const previous = round % 2 === 0 ? [2, 1] : [1, 2];
-      const current = round % 2 === 0 ? [1, 2] : [2, 1];
-      counted += overtakesBetween(previous, current, [100, 99.6], IDS_PAIR).length;
-    }
-
-    expect(counted).toBe(0);
-  });
-
-  it('ne compte rien quand personne n’a changé de place', () => {
-    expect(overtakesBetween([1, 2, 3], [1, 2, 3], [100, 80, 60], ['c0', 'c1', 'c2'])).toEqual([]);
-    expect(overtakesBetween([3, 2, 1], [3, 2, 1], [10, 20, 30], ['c0', 'c1', 'c2'])).toEqual([]);
-  });
-
-  it('compte un double dépassement quand un personnage franchit deux adversaires', () => {
-    // c2 était dernier (rang 3) et passe leader, en franchissant c0 puis c1 avec de la marge.
-    const previous = [1, 2, 3];
-    const current = [2, 3, 1];
-    const xs = [100, 90, 110];
-
-    expect(overtakesBetween(previous, current, xs, ['c0', 'c1', 'c2'])).toEqual([
-      { overtaker: 'c2', overtaken: 'c0' },
-      { overtaker: 'c2', overtaken: 'c1' },
-    ]);
-    expect(overtakesBetween(previous, current, xs, ['c0', 'c1', 'c2'])).toHaveLength(2);
-  });
-
-  it('reste une fonction pure : mêmes entrées, même résultat', () => {
-    const first = overtakesBetween([2, 1], [1, 2], [100, 98], IDS_PAIR);
-    const second = overtakesBetween([2, 1], [1, 2], [100, 98], IDS_PAIR);
-
-    expect(second).toEqual(first);
-  });
-
-  it('respecte la marge documentée dans la configuration', () => {
-    expect(OVERTAKE.MIN_MARGIN).toBe(0.5);
-  });
-});
-
 describe('robustesse des entrées', () => {
   it('refuse des tableaux de longueurs différentes', () => {
     expect(() => computeRanks([1, 2], ['c0'])).toThrow(RangeError);
-    expect(() => overtakesBetween([1, 2], [1, 2], [1, 2, 3], ['c0', 'c1', 'c2'])).toThrow(RangeError);
     expect(() => isLeaderChange([1, 2], [1])).toThrow(RangeError);
   });
 

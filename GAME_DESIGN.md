@@ -505,11 +505,23 @@ croissant** (stable, déterministe, indépendant du temps réel) : en cas d'éga
 
 ### 8.3 Dépassements (pour le speaker)
 
-* Un **dépassement** n'est compté que si le dépassé est effectivement franchi avec une marge :
-  au pas où `rang_i` s'améliore de `k`, on compte `k` dépassements pour `i`, **à condition** que
-  `x_i − x_j > OVERTAKE.MIN_MARGIN` pour chaque personnage `j` franchi.
-* `OVERTAKE.MIN_MARGIN = 0.5 m` : filtre le bruit numérique (deux personnages quasi à égalité qui
-  s'échangent leur rang 20 fois par seconde ne génèrent pas 20 « dépassements »).
+* La détection est une **hystérésis** (bascule de Schmitt) menée **paire par paire** : chaque paire
+  non ordonnée `(A, B)` mémorise le dernier côté **confirmé** (`neutral`, `A ahead`, `B ahead`).
+* Un côté est confirmé lorsqu'il mène de **plus de** `OVERTAKE.MIN_MARGIN = 0.5 m`.
+* Un **dépassement** `A overtakes B` n'est émis que si `B ahead` était confirmé et que `A` franchit la
+  marge (`x_A − x_B > OVERTAKE.MIN_MARGIN`) : ce franchissement émet **exactement un** dépassement et
+  confirme `A ahead`. Symétriquement pour `B`.
+* L'établissement initial d'une paire n'est **jamais** un dépassement : au départ les 6 personnages
+  sont à égalité, et le premier à s'éloigner de plus de 0,5 m ne fait que confirmer son côté. Un
+  dépassement suppose qu'un côté ait **déjà** été confirmé puis cède la place.
+* Dans la bande `±OVERTAKE.MIN_MARGIN`, rien n'est émis et le côté confirmé est **conservé** : une
+  simple inversion de rang à quelques centimètres ne suffit pas, et deux personnages quasi à égalité
+  qui s'échangent leur rang ne génèrent aucun dépassement.
+* `OVERTAKE.MIN_MARGIN = 0.5 m` reste **inchangé** : c'est une règle d'observation, pas de simulation.
+* Le détecteur (`src/core/overtakes.ts`) est alimenté **à chaque pas simulé** : le nombre de
+  dépassements ne dépend ni du `timeScale`, ni du framerate, ni de la fréquence de rendu. C'est un
+  état purement observationnel (mémoire bornée : une valeur par paire, soit 15 pour 6 personnages) :
+  il ne modifie jamais `x`, `v`, le rang, les événements ni le résultat de la course.
 * Un **changement de leader** n'est reconnu que si le nouveau leader conserve le rang 1 pendant
   `LEADER.DEBOUNCE_S = 0.75 s` **et** mène d'au moins `LEADER.MIN_MARGIN = 1.0 m`.
 

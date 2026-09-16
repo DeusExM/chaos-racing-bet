@@ -1,15 +1,16 @@
-import { OVERTAKE, RANK, SPEED } from './config';
+import { RANK, SPEED } from './config';
 import type { CharacterId } from './types';
 
 /**
- * Classement, écarts et dépassements.
+ * Classement et écarts.
  *
  * ## Invariant fondamental
  *
  * Le classement dépend **uniquement** des distances `x` et de l'identifiant stable qui départage les
  * égalités. Rien d'autre : ni l'historique, ni l'ordre d'appel, ni le rang précédent, ni le temps, ni
  * la position d'affichage. Toutes les fonctions de ce module sont **pures** et ne conservent aucun
- * état entre deux appels — il n'existe ici aucun « historique caché ».
+ * état entre deux appels — il n'existe ici aucun « historique caché ». La détection des dépassements,
+ * qui a besoin d'une mémoire, vit à part dans `./overtakes.ts`.
  *
  * ## Ce que ce module ne fait jamais
  *
@@ -20,20 +21,9 @@ import type { CharacterId } from './types';
  * * Il ne stocke **jamais** de rang dans un `CharacterState` : le rang est recalculé à la demande.
  */
 
-/** Un dépassement effectivement constaté entre deux relevés de classement. */
-export interface Overtake {
-  readonly overtaker: CharacterId;
-  readonly overtaken: CharacterId;
-}
-
 interface Entry {
   readonly x: number;
   readonly id: CharacterId;
-}
-
-interface RankedEntry extends Entry {
-  readonly previousRank: number;
-  readonly currentRank: number;
 }
 
 function requireFiniteDistances(xs: readonly number[]): void {
@@ -197,58 +187,4 @@ export function isLeaderChange(
   }
 
   return previousLeader !== currentLeader;
-}
-
-/**
- * Dépassements réellement constatés entre deux relevés.
- *
- * Un dépassement est compté si `j` devançait `i` au relevé précédent, si `i` devance `j` maintenant,
- * **et** si `i` mène alors de plus de `OVERTAKE.MIN_MARGIN` mètres. Cette marge est ce qui empêche
- * deux personnages quasi à égalité, qui s'échangent leur rang plusieurs fois par seconde, de générer
- * des dizaines de « dépassements » qui n'en sont pas.
- *
- * Aucun historique n'est conservé : les deux relevés sont fournis par l'appelant.
- */
-export function overtakesBetween(
-  previousRanks: readonly number[],
-  currentRanks: readonly number[],
-  xs: readonly number[],
-  ids: readonly CharacterId[],
-): readonly Overtake[] {
-  requireSameLength(previousRanks, currentRanks, 'previousRanks', 'currentRanks');
-  requireIntegerRanks(previousRanks, 'previousRanks');
-  requireIntegerRanks(currentRanks, 'currentRanks');
-
-  const entries = buildEntries(xs, ids);
-  if (entries.length !== previousRanks.length) {
-    throw new RangeError(
-      `xs (${entries.length}) doit avoir la même longueur que previousRanks (${previousRanks.length}).`,
-    );
-  }
-
-  const ranked: RankedEntry[] = [];
-  for (const [index, entry] of entries.entries()) {
-    const previousRank = previousRanks[index];
-    const currentRank = currentRanks[index];
-    if (previousRank === undefined || currentRank === undefined) {
-      throw new RangeError(`Rang manquant à l'index ${index}.`);
-    }
-    ranked.push({ ...entry, previousRank, currentRank });
-  }
-
-  const overtakes: Overtake[] = [];
-  for (const [i, overtaker] of ranked.entries()) {
-    for (const [j, overtaken] of ranked.entries()) {
-      if (i === j) {
-        continue;
-      }
-      const wasBehind = overtaken.previousRank < overtaker.previousRank;
-      const isAhead = overtaker.currentRank < overtaken.currentRank;
-      if (wasBehind && isAhead && overtaker.x - overtaken.x > OVERTAKE.MIN_MARGIN) {
-        overtakes.push({ overtaker: overtaker.id, overtaken: overtaken.id });
-      }
-    }
-  }
-
-  return overtakes;
 }

@@ -38,7 +38,8 @@ chaos-race/
       rng.ts                  #   hash32, splitmix32, sfc32, RngStream, fork(seed, label)
       math.ts                 #   clamp, lerp, approach(up/down), gaussian, stepOu
       track.ts                #   structure TEMPORELLE : segments, instants de checkpoint, tSim total
-      ranking.ts              #   rang, écarts, dépassements (fonctions pures sur les distances)
+      ranking.ts              #   rang, écarts (fonctions pures sur les distances)
+      overtakes.ts            #   OvertakeTracker : hystérésis par paire (état observationnel borné)
       speedModel.ts           #   drift + surge + event ⇒ v_cible ⇒ v (rampe) ⇒ x
       events.ts               #   catalogue, tirage pondéré, planificateur, cooldowns
       observer.ts             #   détection des faits + buffer d'historique borné
@@ -400,8 +401,9 @@ par `seedTextFromBytes`. Détails dans `GAME_DESIGN.md` §10.
 * `src/core/track.ts` : **structure temporelle uniquement** — `segmentIndexAt(tSim)`,
   `segmentElapsedS(tSim)`, `isCheckpointInstant(tSim)` (vrai à `tSim = 45`, `90`, `135`),
   `isRaceOver(tSim)` (`tSim >= TOTAL_SIM_S`). **Aucune fonction de distance, aucun repère de décor.**
-* `src/core/ranking.ts` : `computeRanks(xs, ids)`, `gapMeters`, `gapSeconds`, `overtakesBetween`,
-  `isLeaderChange`, `sortByRank`. Fonctions **pures**, sans état.
+* `src/core/ranking.ts` : `computeRanks(xs, ids)`, `gapMeters`, `gapSeconds`, `isLeaderChange`,
+  `sortByRank`. Fonctions **pures**, sans état. Le comptage des dépassements (`overtakesBetween`) a
+  été **remplacé avant P009** par `src/core/overtakes.ts` (`OvertakeTracker`) — voir § Backlog.
 
 **Tests (DoD)**
 * 4 × 45 = 180 s ; `STEPS_PER_SEGMENT = 2700` ; `TOTAL_STEPS = 10800`.
@@ -418,8 +420,9 @@ par `seedTextFromBytes`. Détails dans `GAME_DESIGN.md` §10.
 * Propriété (*property test* sur 10 000 tableaux aléatoires) : `rang_i < rang_j ⇔ (x_i, i) > (x_j, j)`
   — le classement est bien une fonction des seules distances.
 * `gapSeconds` cohérent (`gap_m / SPEED.BASE`), jamais négatif pour le leader.
-* Dépassements : marge de 0,5 m respectée ; deux personnages qui s'échangent leur rang 100 fois de
-  suite avec une marge < 0,5 m ne produisent **aucun** dépassement compté.
+* Dépassements : hystérésis à `OVERTAKE.MIN_MARGIN = 0,5 m` respectée ; un bruit autour de zéro et
+  deux personnages qui s'échangent leur rang 100 fois de suite sous la marge ne produisent **aucun**
+  dépassement compté (tests dans `tests/unit/overtakes.test.ts`).
 * Test explicite « pas de téléportation » : un tableau de distances fixes produit toujours le même
   classement, quel que soit l'historique ou l'ordre d'appel.
 
@@ -523,7 +526,7 @@ autre fonctionnalité.
   téléportation), et sur **chaque** frame l'ordre des positions écran est exactement l'ordre des
   distances. Aucune constante n'a été modifiée pour obtenir ce résultat.
 * **Dépassements visibles** : sur une course `fast=1`, au moins un changement de leader et au moins
-  3 dépassements comptés par `core/ranking.ts` sont observés (seuil volontairement bas à ce stade :
+  3 dépassements comptés par `core/overtakes.ts` sont observés (seuil volontairement bas à ce stade :
   on vérifie surtout que le mouvement est réellement visible et non figé).
 * Mode test neutre : `timeScale = 1` et `timeScale = 20` ⇒ distances finales identiques au bit près.
 * Un `realDt` énorme (2 s d'un coup) ne change pas le résultat final.
@@ -929,15 +932,19 @@ Si le jalon retient une option 3D, cette étape s'appuie dessus ; sinon elle res
   ni Three.js ni Babylon.js par défaut, et **aucune dépendance 3D n'est installée** tant que le
   **Jalon 3D (P013.5)** n'a pas produit son prototype comparatif A/B/C. Toute demande d'installer un
   moteur 3D avant ce jalon est à signaler, pas à exécuter.
-* **Marge de dépassement dépendante de la fréquence d'observation** (constat P005, reconfirmé en P008) :
-  `overtakesBetween` ne compte un dépassement que si le nouvel arrivant mène de plus de
-  `OVERTAKE.MIN_MARGIN` (**0,5 m**) au moment du relevé. Or à la vitesse de base, un pas ne fait
-  avancer que de `SPEED.BASE × DT_S = 0,2 m` : observée **pas à pas** (60 Hz en `timeScale = 1`), une
-  course ne produit donc **aucun** dépassement compté, alors que la même course en produit une
-  vingtaine observée image par image en mode accéléré. Mesure P008 sur `OVERTAKE_SEED` : **20 pas →
-  32 dépassements et 14 changements de leader ; 1 pas → 0 dépassement** (et 14 changements de leader,
-  eux, bien détectés). Le nombre de dépassements dépend donc de la fréquence à laquelle on regarde,
-  ce qui est intenable dès que le speaker (P009) ou le HUD devront s'appuyer dessus.
-  **À corriger avant P009** (P009 ne doit pas commencer avant) : par exemple exiger que le dépassement
-  **tienne** pendant une durée simulée, plutôt qu'une marge mesurée entre deux relevés. Aucune constante
-  ne doit être changée avant cette décision, et les seeds dorées devront alors être réévaluées.
+* **✅ Résolu avant P009 — Marge de dépassement dépendante de la fréquence d'observation**
+  (constat P005, reconfirmé en P008). `overtakesBetween` ne comptait un dépassement que si le nouvel
+  arrivant menait de plus de `OVERTAKE.MIN_MARGIN` (**0,5 m**) **au moment du relevé**. Or à la
+  vitesse de base un pas ne fait avancer que de `SPEED.BASE × DT_S = 0,2 m` : observée **pas à pas**,
+  une course ne produisait **aucun** dépassement compté (mesure P008 sur `OVERTAKE_SEED` : 20 pas →
+  32 dépassements / 14 changements de leader ; 1 pas → **0** dépassement).
+  **Correction** : `overtakesBetween` est remplacé par `src/core/overtakes.ts` (`OvertakeTracker`),
+  une hystérésis par paire de personnages (§8.3 de `GAME_DESIGN.md`). `OVERTAKE.MIN_MARGIN` reste
+  inchangée ; c'est le **franchissement de la marge par le nouveau côté confirmé**, et non une
+  inversion de rang entre deux relevés, qui vaut dépassement. Le détecteur est alimenté à chaque pas
+  simulé — donc indépendant du `timeScale`, du framerate et de la fréquence de rendu — et son état
+  reste purement observationnel (aucun effet sur `x`, `v`, le rang ou le résultat).
+  Nouvelle mesure sur `OVERTAKE_SEED`, pas à pas : **68 dépassements / 14 changements de leader**
+  (65 pour un relevé tous les 20 pas : un observateur grossier peut manquer un aller-retour plus
+  rapide que son intervalle, raison pour laquelle P009 observera chaque pas du noyau). Les seeds
+  dorées sont inchangées au bit près.

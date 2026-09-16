@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test';
 
 import { CHARACTER_IDS } from '../../src/core/characters';
 import { RACE_CONFIG } from '../../src/core/config';
-import { computeRanks, isLeaderChange, overtakesBetween } from '../../src/core/ranking';
+import { OvertakeTracker } from '../../src/core/overtakes';
+import { computeRanks, isLeaderChange } from '../../src/core/ranking';
 import { VIEW } from '../../src/render/viewConfig';
 import { OVERTAKE_SEED } from '../fixtures/seeds';
 import {
@@ -144,8 +145,8 @@ test('des dépassements réels sont observés pendant la course', async ({ page 
   const samples = await collectRace(page);
   expect(samples.length).toBeGreaterThan(10);
 
-  // Le décompte est fait ici, par le test, avec `core/ranking.ts` — celui-là même qu'utilise
-  // l'application. Un classement parallèle côté rendu ne pourrait pas tromper ce test.
+  // Le décompte est fait ici, par le test, avec `core/overtakes.ts` — celui-là même que P009
+  // utilisera. Un classement parallèle côté rendu ne pourrait pas tromper ce test.
   const firstSample = samples[0];
   expect(firstSample).toBeDefined();
   if (firstSample === undefined) {
@@ -153,6 +154,7 @@ test('des dépassements réels sont observés pendant la course', async ({ page 
   }
 
   let previousRanks = computeRanks(firstSample.distances, CHARACTER_IDS);
+  const tracker = new OvertakeTracker();
   let leaderChanges = 0;
   let overtakes = 0;
 
@@ -165,7 +167,7 @@ test('des dépassements réels sont observés pendant la course', async ({ page 
     if (isLeaderChange(previousRanks, ranks)) {
       leaderChanges += 1;
     }
-    overtakes += overtakesBetween(previousRanks, ranks, sample.distances, CHARACTER_IDS).length;
+    overtakes += tracker.observe(sample.distances, CHARACTER_IDS).length;
     previousRanks = ranks;
   }
 

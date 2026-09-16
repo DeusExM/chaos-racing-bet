@@ -10,10 +10,18 @@ import type { ActiveEvent, CharacterId, EventId, RaceFact, RaceFactType } from '
 /**
  * P009-A : véracité des faits sur de vraies courses.
  *
- * Ce test ne fait pas confiance à l'observateur : il rejoue chaque course pas à pas, tient **sa
- * propre** mesure du classement, des écarts et des dépassements, puis exige que chaque fait publié
- * soit exactement recomposable à partir de cette mesure — type, personnages, magnitudes, instant et
- * importance. Un fait non mesurable est un échec ; deux faits identiques au même instant aussi.
+ * L'auditeur rejoue chaque course pas à pas et tient **sa propre** mesure, recomposée indépendamment
+ * de l'observateur : classement (par `computeRanks`), écarts P1–P2 et P1–P3, rangs occupés dans les
+ * fenêtres de 5, 10 et 30 s, et événements actifs (magnitude, durée, début réel, rang au tirage).
+ * Chaque fait publié doit être exactement recomposable à partir de cette mesure — type, personnages,
+ * magnitudes, instant et importance. Un fait non mesurable est un échec ; deux faits identiques au
+ * même instant aussi.
+ *
+ * Une exception assumée : les **dépassements** viennent du même `OvertakeTracker` que l'observateur,
+ * parce que c'est le contrat de conception — une seule source de dépassements pour toute la course.
+ * Ce test ne revalide donc pas l'hystérésis elle-même : il vérifie que l'agrégation par fenêtre et le
+ * fait publié en découlent exactement. L'hystérésis et son contrat d'ordre sont validés séparément par
+ * `tests/unit/overtakes.test.ts`, et la granularité par pas par `tests/unit/raceSeeds.test.ts`.
  */
 
 const DT = RACE_CONFIG.DT_S;
@@ -63,7 +71,7 @@ function canonicalSeeds(count: number): readonly string[] {
 
 type Snapshot = ReturnType<RaceEngine['getState']>;
 
-/** Mesure indépendante d'une course, et vérification de chaque fait publié. */
+/** Mesure indépendante d'une course (dépassements exceptés : même `OvertakeTracker`, cf. en-tête). */
 class FactAuditor {
   readonly counts: Partial<Record<RaceFactType, number>> = {};
   readonly splitTimes: number[] = [];

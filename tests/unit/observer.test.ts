@@ -19,6 +19,9 @@ const DT = RACE_CONFIG.DT_S;
 const SIX = CHARACTER_IDS;
 const SEED = 'POULET42';
 
+/** Distances neutres : aucune condition de fait n'y est vraie (aucun test ne dépasse 300 pas). */
+const NEUTRAL_XS: readonly number[] = [1, 2, 3, 4, 5, 6];
+
 /** Photographie d'un pas construite à partir des seules distances, dans l'ordre officiel. */
 function snapshot(
   steps: number,
@@ -102,13 +105,38 @@ describe('contrat d’entrée : les 6 identifiants officiels, dans l’ordre sta
     expect(() => observer.observe(notFinite)).toThrow(RangeError);
   });
 
-  it('refuse un pas rejoué ou revenu en arrière, qui corromprait les fenêtres', () => {
-    const observer = new RaceObserver();
-    observer.observe(snapshot(10, [1, 2, 3, 4, 5, 6]));
+  it('exige que le premier relevé soit le pas 1', () => {
+    expect(() => new RaceObserver().observe(snapshot(1, NEUTRAL_XS))).not.toThrow();
+    expect(() => new RaceObserver().observe(snapshot(2, NEUTRAL_XS))).toThrow(/première observation/);
+  });
 
-    expect(() => observer.observe(snapshot(10, [1, 2, 3, 4, 5, 6]))).toThrow(RangeError);
-    expect(() => observer.observe(snapshot(9, [1, 2, 3, 4, 5, 6]))).toThrow(RangeError);
-    expect(() => observer.observe(snapshot(11, [1, 2, 3, 4, 5, 6]))).not.toThrow();
+  it('exige des pas consécutifs : 1 → 2 passe, un saut de pas échoue', () => {
+    const observer = new RaceObserver();
+
+    expect(() => observer.observe(snapshot(1, NEUTRAL_XS))).not.toThrow();
+    expect(() => observer.observe(snapshot(2, NEUTRAL_XS))).not.toThrow();
+
+    // Saut : le pas 3 manque. Le relevé est refusé, et rien n'a bougé : le pas 3 reste attendu.
+    expect(() => observer.observe(snapshot(4, NEUTRAL_XS))).toThrow(/consécutifs/);
+    expect(() => observer.observe(snapshot(3, NEUTRAL_XS))).not.toThrow();
+    expect(() => observer.observe(snapshot(4, NEUTRAL_XS))).not.toThrow();
+  });
+
+  it('refuse un pas répété, qui compterait deux fois le même pas', () => {
+    const observer = new RaceObserver();
+    observer.observe(snapshot(1, NEUTRAL_XS));
+
+    expect(() => observer.observe(snapshot(1, NEUTRAL_XS))).toThrow(RangeError);
+    expect(() => observer.observe(snapshot(1, NEUTRAL_XS))).toThrow(/consécutifs/);
+  });
+
+  it('refuse un retour en arrière', () => {
+    const observer = new RaceObserver();
+    observer.observe(snapshot(1, NEUTRAL_XS));
+    observer.observe(snapshot(2, NEUTRAL_XS));
+
+    expect(() => observer.observe(snapshot(1, NEUTRAL_XS))).toThrow(/consécutifs/);
+    expect(() => observer.observe(snapshot(0, NEUTRAL_XS))).toThrow(RangeError);
   });
 });
 

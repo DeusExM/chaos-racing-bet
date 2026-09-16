@@ -22,6 +22,11 @@ import type { ActiveEvent, CharacterId, EventId, RaceFact, RaceFactType } from '
  * `RangeError`. Les détections indexées par personnage supposent cet ordre : le vérifier est ce qui
  * empêche d'attribuer un fait au mauvais personnage.
  *
+ * Les relevés doivent former une suite **exactement consécutive** : le premier est le pas
+ * `FIRST_STEP` (1), puis chaque relevé vaut le précédent plus un. Répéter un pas, revenir en arrière
+ * ou **sauter** un pas lève une `RangeError` : les fenêtres glissantes comptent des pas entiers, un
+ * trou fausserait silencieusement toutes les mesures.
+ *
  * ## Faits et règles exactes
  *
  * * `LEADER_CHANGE` : nouveau leader **confirmé** seulement s'il conserve le rang 1 pendant
@@ -120,6 +125,12 @@ export interface ObservationInput {
   /** Les 6 personnages officiels, dans leur ordre stable. */
   readonly characters: readonly ObservedCharacter[];
 }
+
+/**
+ * Premier pas observé. Le noyau appelle l'observateur après l'intégration du pas, donc à partir du
+ * pas 1 ; aucun relevé antérieur (départ, pas 0) ne lui est transmis.
+ */
+const FIRST_STEP = 1;
 
 /** Convertit une durée de jeu en pas : unique endroit où le temps continu devient discret. */
 function stepsForSeconds(seconds: number, config: GameConfig): number {
@@ -767,16 +778,27 @@ export class RaceObserver {
   }
 
   /**
-   * Vérifie le contrat d'entrée : roster officiel exact, dans l'ordre, distances finies, et pas
-   * strictement croissants. Un pas rejoué deux fois corromprait silencieusement les fenêtres.
+   * Vérifie le contrat d'entrée : roster officiel exact, dans l'ordre, distances finies, et suite de
+   * pas **exactement** consécutive — le premier relevé est le pas 1, puis chaque relevé vaut le
+   * précédent plus un. Une répétition, un retour en arrière ou un saut corromprait silencieusement
+   * les fenêtres glissantes : les trois cas sont refusés.
    */
   private requireInput(input: ObservationInput): void {
     if (!Number.isFinite(input.tSim) || input.tSim < 0) {
       throw new RangeError(`tSim doit être un temps simulé fini et positif ou nul (reçu : ${input.tSim}).`);
     }
-    if (!Number.isInteger(input.steps) || input.steps <= this.lastSteps) {
+    if (!Number.isInteger(input.steps)) {
+      throw new RangeError(`Le numéro de pas doit être un entier (reçu : ${input.steps}).`);
+    }
+    if (this.lastSteps < 0) {
+      if (input.steps !== FIRST_STEP) {
+        throw new RangeError(
+          `La première observation doit être le pas ${FIRST_STEP} (reçu : ${input.steps}).`,
+        );
+      }
+    } else if (input.steps !== this.lastSteps + 1) {
       throw new RangeError(
-        `Les observations doivent avancer d'au moins un pas, sans revenir en arrière (reçu : ${input.steps}, précédent : ${this.lastSteps}).`,
+        `Les observations doivent être des pas consécutifs : ${this.lastSteps + 1} attendu après le pas ${this.lastSteps} (reçu : ${input.steps}).`,
       );
     }
     if (input.characters.length !== CHARACTER_COUNT) {

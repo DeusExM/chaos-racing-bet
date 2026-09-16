@@ -340,8 +340,8 @@ Blender.
 * `src/core/rng.ts` : `hash32(str)`, `splitmix32`, `sfc32`, classe `RngStream` (`next()`,
   `nextFloat()`, `nextInt(min,max)`, `nextGaussian()`, `pick<T>(arr)`, `weightedPick`),
   `forkStream(seed, label)`.
-* `src/core/seed.ts` (ou dans `rng.ts`) : seed 32 bits ⇄ chaîne Base32 Crockford 8 caractères ;
-  toute entrée est acceptée (hachée).
+* `src/core/seed.ts` : seed affichée en 8 caractères Base32 Crockford (**source de vérité**) ⇄ seed
+  interne 32 bits par hachage ; toute entrée est acceptée (hachée).
 * Affichage de la seed + lecture de `?seed=` dans `app/main.ts`.
 * `tests/unit/boundaries.test.ts` : scan des fichiers par `node:fs` et échec si `src/core/**`
   contient `phaser`, `window`, `document`, `Math.random`, `Date.now`, `performance.now`,
@@ -359,6 +359,12 @@ Blender.
 * La seed affichée correspond au paramètre d'URL et survit au rechargement.
 * Le test de frontière passe, **et échoue bien** si on injecte volontairement un `Math.random` dans
   `core/` (vérifier le test lui-même, puis retirer l'injection).
+
+**Passe corrective (même étape)** : le bruit gaussien n'utilise plus Box-Muller mais une **somme de
+12 tirages uniformes** (multiples exacts de `2^-32`, donc reproductibles d'un moteur JavaScript à
+l'autre) ; le garde-fou interdit désormais aussi les **fonctions transcendantes** dans le noyau ; le
+contrat de seed est clarifié — la seed affichée est la source de vérité, `seedToText` est remplacé
+par `seedTextFromBytes`. Détails dans `GAME_DESIGN.md` §10.
 
 ---
 

@@ -151,6 +151,33 @@ describe('distributions', () => {
 
     expect(Math.abs(average)).toBeLessThan(0.02);
     expect(Math.abs(standardDeviation - 1)).toBeLessThan(0.02);
+
+    // Forme en cloche : environ 68 % à moins d'un écart-type, 95 % à moins de deux.
+    const withinOne = values.filter((value) => Math.abs(value) < 1).length / DRAWS;
+    const withinTwo = values.filter((value) => Math.abs(value) < 2).length / DRAWS;
+    expect(withinOne).toBeGreaterThan(0.65);
+    expect(withinOne).toBeLessThan(0.72);
+    expect(withinTwo).toBeGreaterThan(0.93);
+    expect(withinTwo).toBeLessThan(0.98);
+  });
+
+  it('produit un bruit identique d\'un moteur à l\'autre : multiples exacts de 2⁻³², borné', () => {
+    const values = collect(
+      forkStream(SEED, 'test:gaussian-exact'),
+      DRAWS,
+      (source) => source.nextGaussian(),
+    );
+
+    // Un résultat obtenu via une fonction transcendante ne serait, en général, pas un multiple
+    // exact de 2⁻³². Ce test verrouille donc l'absence de Math.log / Math.cos / Math.sqrt dans la
+    // génération du bruit, c'est-à-dire la reproductibilité inter-moteurs.
+    for (const value of values) {
+      expect(Number.isInteger(value * 0x1_0000_0000)).toBe(true);
+      expect(Math.abs(value)).toBeLessThan(6);
+    }
+
+    expect(values.some((value) => value > 0)).toBe(true);
+    expect(values.some((value) => value < 0)).toBe(true);
   });
 
   it('respecte les poids de weightedPick à 2 % près', () => {
@@ -229,6 +256,13 @@ describe("verrouillage de l'algorithme", () => {
     const stream = forkStream(0, 'lock');
     expect([stream.next(), stream.next(), stream.next(), stream.next()]).toEqual([
       263_522_509, 2_789_401_385, 4_190_843_444, 119_588_659,
+    ]);
+  });
+
+  it('conserve les mêmes bruits gaussiens pour une seed et un label donnés', () => {
+    const stream = forkStream(0, 'lock-gaussian');
+    expect([stream.nextGaussian(), stream.nextGaussian(), stream.nextGaussian()]).toEqual([
+      -0.489_674_853_626_638_65, -0.851_710_828_719_660_6, -1.303_965_093_800_798,
     ]);
   });
 });

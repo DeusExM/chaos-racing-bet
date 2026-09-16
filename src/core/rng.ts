@@ -9,6 +9,17 @@
 const UINT32_RANGE = 0x1_0000_0000;
 
 /**
+ * Nombre de tirages uniformes additionnés pour approcher une loi normale.
+ *
+ * 12 est la valeur classique : la somme a alors exactement une variance de 1 après centrage, sans
+ * aucune correction à appliquer.
+ */
+const GAUSSIAN_DRAWS = 12;
+
+/** Espérance de la somme : `6 × 2^32`. Multiple exact, donc représentation flottante exacte. */
+const GAUSSIAN_OFFSET = (GAUSSIAN_DRAWS / 2) * UINT32_RANGE;
+
+/**
  * Hachage FNV-1a 32 bits, calculé sur les unités de code UTF-16 de `text`.
  *
  * `charCodeAt` est utilisé volontairement : la spec ECMAScript garantit la même valeur partout,
@@ -113,18 +124,25 @@ export class RngStream {
   }
 
   /**
-   * Loi normale centrée réduite, par la méthode de Box-Muller.
+   * Loi normale approchée, centrée réduite, **sans aucune fonction transcendante**.
    *
-   * Le second tirage de la paire est volontairement ignoré : garder une valeur de côté rendrait le
-   * stream dépendant de l'ordre des appels, ce que l'architecture interdit.
+   * La somme de 12 tirages uniformes sur `[0, 2^32)` a pour espérance `6 × 2^32` et pour variance
+   * `(2^32)^2`. Après centrage puis division par `2^32` — une mise à l'échelle binaire exacte — la
+   * moyenne est exactement 0 et la variance exactement 1.
+   *
+   * Chaque résultat est un multiple exact de `2^-32`, donc identique d'un moteur JavaScript à
+   * l'autre. C'est la raison de ce choix : `Math.log`, `Math.cos` et `Math.sqrt` ne garantissent pas
+   * le même bit près selon le moteur, ce qui interdirait la reproductibilité inter-moteurs.
+   *
+   * La somme maximale vaut `12 × (2^32 − 1) ≈ 5,15 × 10^10`, très en dessous de
+   * `Number.MAX_SAFE_INTEGER` : tous les entiers intermédiaires sont exacts.
    */
   nextGaussian(): number {
-    let u = this.nextFloat();
-    while (u === 0) {
-      u = this.nextFloat();
+    let total = 0;
+    for (let index = 0; index < GAUSSIAN_DRAWS; index += 1) {
+      total += this.next();
     }
-    const v = this.nextFloat();
-    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    return (total - GAUSSIAN_OFFSET) / UINT32_RANGE;
   }
 
   /** Élément uniformément choisi dans `items`. */

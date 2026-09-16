@@ -1,6 +1,6 @@
 import { AUTO, Game, Scene } from 'phaser';
 
-import { seedToText } from '../core/seed';
+import { SEED_TEXT_LENGTH, seedTextFromBytes } from '../core/seed';
 
 /** Résolution de référence (16:9). Le redimensionnement réel arrive en P005. */
 const GAME_WIDTH = 1280;
@@ -37,12 +37,13 @@ function readSeedFromUrl(search: string): string | null {
  * Tire une seed au hasard.
  *
  * Le tirage vit ici, dans `app/`, et jamais dans le noyau : `src/core/` doit rester pur et
- * reproductible, donc sans aucune source de hasard propre.
+ * reproductible, donc sans aucune source de hasard propre. La seed tirée est directement la chaîne
+ * affichable — c'est elle la source de vérité, la seed interne n'en est qu'une réduction.
  */
 function createRandomSeedText(): string {
-  const buffer = new Uint32Array(1);
-  crypto.getRandomValues(buffer);
-  return seedToText(buffer[0] ?? 0);
+  const bytes = new Uint8Array(SEED_TEXT_LENGTH);
+  crypto.getRandomValues(bytes);
+  return seedTextFromBytes(bytes);
 }
 
 /**

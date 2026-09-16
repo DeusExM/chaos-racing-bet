@@ -1,8 +1,9 @@
 /**
- * Conversion entre une seed 32 bits et sa forme affichable.
+ * Seed affichée et seed interne.
  *
- * La seed visible est une chaîne de 8 caractères en Base32 Crockford, choisie parce qu'elle évite
- * les caractères ambigus à la lecture comme à la recopie (voir `GAME_DESIGN.md` §10).
+ * La **seed affichée est la source de vérité** : c'est elle qu'on lit à l'écran, qu'on recopie dans
+ * `?seed=` et qu'on partage. La seed interne 32 bits qui alimente les streams aléatoires en est
+ * dérivée par hachage, toujours par la même règle et pour toutes les entrées.
  */
 
 import { hash32 } from './rng';
@@ -14,25 +15,47 @@ export const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 export const SEED_TEXT_LENGTH = 8;
 
 /**
- * Convertit un entier 32 bits en seed affichable.
+ * Convertit des octets aléatoires en seed affichable.
  *
- * 8 caractères représentent 40 bits, donc tout entier 32 bits y tient sans perte.
+ * 256 est un multiple de 32 : prendre `octet % 32` répartit donc exactement les 32 symboles, sans
+ * biais de modulo. Chaque caractère porte 5 bits utiles, soit 40 bits d'entropie pour une seed.
  */
-export function seedToText(seed: number): string {
-  let value = seed >>> 0;
+export function seedTextFromBytes(bytes: Uint8Array): string {
+  if (bytes.length < SEED_TEXT_LENGTH) {
+    throw new RangeError(
+      `seedTextFromBytes : ${SEED_TEXT_LENGTH} octets attendus au minimum, ${bytes.length} reçus.`,
+    );
+  }
+
   let text = '';
   for (let index = 0; index < SEED_TEXT_LENGTH; index += 1) {
-    text = CROCKFORD_ALPHABET.charAt(value % 32) + text;
-    value = Math.floor(value / 32);
+    text += CROCKFORD_ALPHABET.charAt((bytes[index] ?? 0) % 32);
   }
   return text;
 }
 
+/** Vrai si le texte a exactement la forme d'une seed affichable. */
+export function isCanonicalSeedText(text: string): boolean {
+  if (text.length !== SEED_TEXT_LENGTH) {
+    return false;
+  }
+  for (let index = 0; index < text.length; index += 1) {
+    if (!CROCKFORD_ALPHABET.includes(text.charAt(index))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
- * Convertit une seed saisie en entier 32 bits.
+ * Réduit une seed saisie à la seed interne 32 bits.
  *
- * Toute chaîne est acceptée : une seed qui n'est pas au format affichable est hachée. Deux textes
- * différents donnent donc deux courses différentes, sans qu'aucune saisie ne puisse être rejetée.
+ * Une seule règle pour toutes les entrées : le texte est haché, qu'il ait ou non la forme
+ * affichable. Recopier une seed affichée dans `?seed=` redonne donc toujours exactement la même
+ * seed interne, et par conséquent la même course.
+ *
+ * La réduction de 40 bits (8 caractères) vers 32 bits n'est pas injective : deux textes différents
+ * peuvent produire la même seed interne. C'est admis, et jamais nié.
  */
 export function normalizeSeed(text: string): number {
   return hash32(text);

@@ -44,6 +44,10 @@ Deux règles de fond complètent le tableau :
   `sessionStorage`, `Math.random`, `Date`, `performance`, `setTimeout`, `setInterval`,
   `setImmediate`, `requestAnimationFrame`, `timeScale`, `countdown`, `finishDistance`,
   `FINISH_DISTANCE` ;
+* utilise une **fonction transcendante** (`Math.log`, `Math.cos`, `Math.sqrt`, `Math.pow`, …) :
+  ECMAScript ne garantit pas leur arrondi, un dernier bit peut donc varier d'un moteur JavaScript à
+  l'autre. Les opérations exactes (`Math.imul`, `Math.floor`, `Math.abs`, `Math.min`, `Math.max`,
+  décalages, `>>> 0`) restent évidemment autorisées ;
 * importe quelque chose hors du noyau : un paquet externe (`phaser`, un module Node) ou
   `../render`, `../app`, `../sim`.
 
@@ -62,11 +66,17 @@ franchit la frontière — pas le test.
 
 ## 4. Reproductibilité : seed et streams
 
-* Une course est identifiée par une **seed 32 bits**, affichée en Base32 Crockford sur 8 caractères
-  (`src/core/seed.ts`). Toute chaîne saisie est acceptée : elle est hachée (`hash32`, FNV-1a 32 bits).
-* L'aléatoire vient de générateurs entièrement entiers — `sfc32` amorcé par `splitmix32` — pour que
-  le résultat soit identique sur n'importe quel appareil (`src/core/rng.ts`).
-* Chaque usage a son **stream nommé**, dérivé de `hash32(seed + ':' + label)` :
+* La **seed affichée est la source de vérité** : une chaîne de 8 caractères Base32 Crockford
+  (ex. `K7QM2X9A`), générée directement sous forme de texte (`src/core/seed.ts`).
+* La **seed interne** est l'entier 32 bits `hash32(seed affichée)` (FNV-1a). Une seule règle sert
+  pour toutes les entrées : une seed au format affichable comme une chaîne libre sont hachées de la
+  même façon. Recopier la seed affichée dans `?seed=` reproduit donc exactement la même course.
+* La réduction de 40 bits (8 caractères) vers 32 bits n'est **pas injective** : des collisions sont
+  possibles, et assumées.
+* L'aléatoire vient de générateurs **entièrement entiers** — `sfc32` amorcé par `splitmix32` — et
+  d'un bruit normal approché par une **somme de 12 tirages uniformes**, sans aucune fonction
+  transcendante : le résultat est donc identique d'un moteur JavaScript à l'autre (`src/core/rng.ts`).
+* Chaque usage a son **stream nommé**, dérivé de `hash32(seedInterne + ':' + label)` :
   `drift:<charId>`, `surge:<charId>`, `events:global`, `events:<charId>`, `speaker:lines`,
   `cosmetic`. Consommer ou modifier un stream ne décale jamais les autres, et l'ordre des appels
   entre streams est sans effet. C'est ce qui permettra d'ajouter un tirage quelque part sans

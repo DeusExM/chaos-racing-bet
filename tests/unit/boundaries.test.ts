@@ -23,7 +23,42 @@ interface Rule {
   readonly rule: string;
 }
 
+/**
+ * Fonctions dont ECMAScript ne garantit pas l'arrondi : leur dernier bit peut différer d'un moteur
+ * JavaScript à l'autre. Elles sont donc interdites dans le noyau, où tout calcul influence la
+ * course. Les constantes qui en dépendent doivent être pré-calculées et figées.
+ */
+const TRANSCENDENTAL_FUNCTIONS = [
+  'log',
+  'log2',
+  'log10',
+  'log1p',
+  'exp',
+  'expm1',
+  'sqrt',
+  'cbrt',
+  'pow',
+  'hypot',
+  'sin',
+  'cos',
+  'tan',
+  'asin',
+  'acos',
+  'atan',
+  'atan2',
+  'sinh',
+  'cosh',
+  'tanh',
+  'asinh',
+  'acosh',
+  'atanh',
+];
+
 const FORBIDDEN_TOKENS: readonly Rule[] = [
+  {
+    pattern: new RegExp(`\\bMath\\s*\\.\\s*(?:${TRANSCENDENTAL_FUNCTIONS.join('|')})\\b`),
+    rule: "aucune fonction transcendante dans le noyau : leur arrondi peut varier d'un moteur à l'autre",
+  },
   { pattern: /\bphaser\b/i, rule: 'Phaser est interdit dans le noyau' },
   { pattern: /\bwindow\b/, rule: 'le noyau ne touche pas aux globales du navigateur' },
   { pattern: /\bdocument\b/, rule: 'le noyau ne touche pas au DOM' },
@@ -133,6 +168,10 @@ describe('le détecteur lui-même', () => {
   it('signale chaque API interdite', () => {
     const cases = [
       'const tirage = Math.random();',
+      'const racine = Math.sqrt(valeur);',
+      'const puissance = Math.pow(valeur, 2);',
+      'const logarithme = Math.log(valeur);',
+      'const angle = Math.cos(valeur);',
       'const maintenant = Date.now();',
       'const mesure = performance.now();',
       'setTimeout(fn, 100);',
@@ -153,6 +192,21 @@ describe('le détecteur lui-même', () => {
 
     for (const source of cases) {
       expect(findViolations('/src/core/faux.ts', source).length, source).toBeGreaterThan(0);
+    }
+  });
+
+  it('accepte les opérations exactes', () => {
+    for (const source of [
+      'const a = Math.imul(x, y);',
+      'const b = Math.floor(x);',
+      'const c = Math.ceil(x);',
+      'const d = Math.trunc(x);',
+      'const e = Math.abs(x);',
+      'const f = Math.min(x, y);',
+      'const g = Math.max(x, y);',
+      'const h = Math.round(x * 32);',
+    ]) {
+      expect(findViolations('/src/core/faux.ts', source), source).toEqual([]);
     }
   });
 

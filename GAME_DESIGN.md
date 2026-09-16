@@ -249,6 +249,10 @@ drift_i(0) = 0  pour les 6
 | `DRIFT.CLAMP` | `0.20` (±20 %) |
 | `DRIFT.STATIONARY_SD` | `≈ 0.127` (dérivée : `SIGMA / √(2·THETA)`) |
 
+Le bruit `gauss_i(t)` est une **approximation gaussienne déterministe** — somme de 12 tirages
+uniformes, sans aucune fonction transcendante — et **non** Box-Muller : voir §10.3. C'est ce qui rend
+le drift reproductible bit à bit d'un moteur JavaScript à l'autre.
+
 Pourquoi OU et pas une marche aléatoire : le rappel vers 0 garantit que **la vitesse moyenne de chaque
 personnage reste `SPEED.BASE`** (personnages équivalents, aucun trait permanent) tout en créant une
 variance locale qui fait que **le leader peut toujours être rattrapé**, sans jamais tirer un
@@ -464,18 +468,54 @@ plus de 12 par segment.
 
 ## 10. Reproductibilité (seed)
 
-* Chaque course a une **seed** : chaîne courte affichée à l'écran (8 caractères Base32 Crockford,
-  ex. `K7QM2X9A`), dérivée d'un entier 32 bits. Toute chaîne saisie est acceptée (hachée en 32 bits).
-* **Invariant central** : `résultat(seed, config) = résultat(seed, config)`, bit pour bit, sur
-  n'importe quel appareil, n'importe quel framerate, n'importe quelle vitesse de test.
-* Le moteur avance **par pas fixes** de `DT = 1/60 s`. `SIM.TIME_SCALE` (mode test) ne change que le
-  **nombre de pas exécutés par frame**, jamais la taille du pas ⇒ même résultat en ×1 et en ×20.
-* Aléatoire : `sfc32` initialisé par `splitmix32(hash(seed))`. **Streams indépendants** par usage,
-  dérivés de `hash(seed + ':' + label)` :
+### 10.1 Contrat de seed
+
+* La **seed affichée est la source de vérité**. C'est une chaîne de 8 caractères Base32 Crockford
+  (ex. `K7QM2X9A`) : c'est elle qui est lue à l'écran, recopiée dans `?seed=` et partagée.
+* La **seed interne** est l'entier 32 bits `hash32(seed affichée)`. **Une seule règle** s'applique à
+  toutes les entrées : une seed au format affichable comme une chaîne libre saisie par l'utilisateur
+  sont hachées de la même façon. Aucune saisie n'est jamais rejetée.
+* Conséquence, et c'est le point qui compte : **recopier la seed affichée dans `?seed=` reproduit
+  exactement la même seed interne, donc exactement la même course.**
+* Une seed neuve est tirée **directement sous forme de chaîne** : 8 caractères uniformes sur
+  l'alphabet, soit 40 bits d'entropie. Aucune seed affichée n'est donc impossible à produire.
+* La réduction de 40 bits (8 caractères) vers 32 bits **n'est pas injective** : deux textes différents
+  peuvent donner la même seed interne. C'est admis, et jamais nié.
+* Les streams sont dérivés de la seed interne : `sfc32` initialisé par
+  `splitmix32(hash(seedInterne + ':' + label))`. **Streams indépendants** par usage :
   `drift:<charId>`, `surge:<charId>`, `events:global`, `events:<charId>`, `speaker:lines`,
   `cosmetic` (rendu). L'ordre et le nombre d'appels dans un stream n'influencent aucun autre stream.
+
+### 10.2 Reproductibilité stricte
+
+* **Invariant central** : `résultat(seed, config) = résultat(seed, config)`, bit pour bit, sur
+  n'importe quel appareil, **n'importe quel moteur JavaScript**, n'importe quel framerate, n'importe
+  quelle vitesse de test.
+* Le moteur avance **par pas fixes** de `DT = 1/60 s`. `SIM.TIME_SCALE` (mode test) ne change que le
+  **nombre de pas exécutés par frame**, jamais la taille du pas ⇒ même résultat en ×1 et en ×20.
+* **Fonctions transcendantes interdites dans la simulation.** Aucun calcul influençant la course ne
+  doit reposer sur une fonction `Math.*` dont le résultat peut varier d'un moteur à l'autre
+  (`Math.log`, `Math.cos`, `Math.sin`, `Math.tan`, `Math.exp`, `Math.pow`, `Math.sqrt`, …) :
+  ECMAScript ne les tient pas pour correctement arrondies, un dernier bit peut donc différer entre
+  V8, SpiderMonkey et JavaScriptCore, et cette divergence suffirait à faire dériver deux courses. Une
+  constante qui en dépend doit être **pré-calculée et figée** dans `src/core/config.ts`.
+  Sont autorisées les opérations **exactes** : entiers 32 bits (`Math.imul`, décalages, `>>> 0`),
+  additions, soustractions, multiplications, et divisions par une puissance de deux.
 * Interdit dans `src/core/**` : `Math.random`, `Date.now`, `performance.now`, `setTimeout`,
   `window`, `document`, `phaser`. Vérifié par un test de frontière (ROADMAP P002).
+
+### 10.3 Bruit du drift
+
+Le bruit gaussien du drift (§6.3) **n'est pas produit par Box-Muller**. Il utilise l'approximation
+déterministe classique : **somme de 12 tirages uniformes** sur `[0, 2^32)`, centrée sur l'espérance
+`6 × 2^32`, puis divisée par `2^32` (mise à l'échelle binaire exacte). La moyenne vaut alors
+exactement 0 et la variance exactement 1, le bruit est borné à `±6`, et chaque résultat est un
+multiple exact de `2^-32` — donc **identique d'un moteur à l'autre**. Cette approximation (Irwin-Hall
+à 12 termes) est suffisamment proche d'une gaussienne pour un drift d'ambiance, et elle est la seule
+des deux méthodes à être bit à bit reproductible.
+
+### 10.4 Affichage et paramètres
+
 * Paramètres d'URL : `?seed=K7QM2X9A`, `&fast=1`, `&debug=1`, `&autostart=1`.
 * Debug : seed affichée en permanence (coin d'écran, copiable), avec `tSim`, segment courant, et à la
   demande un panneau (`debug=1`) : distances, vitesses, drift/surge/événement actifs, classement brut.

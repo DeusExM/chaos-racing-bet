@@ -130,6 +130,9 @@ Règles concrètes :
    Il ne contient **jamais** non plus de durée réelle (`countdown`, pause, `timeScale`, `maxStepsPerFrame`)
    ni de constante de distance d'arrivée (`finishDistance`, `FINISH_DISTANCE`) : la fin de course est
    `tSim = 180 s`, et le temps réel appartient à `SIM_CONFIG` (`src/sim/`).
+   Enfin, **aucune fonction transcendante** (`Math.log`, `Math.cos`, `Math.sqrt`, `Math.pow`, …) :
+   ECMAScript ne garantit pas leur arrondi, donc leur dernier bit peut varier d'un moteur à l'autre.
+   Les constantes qui en dépendent sont pré-calculées et figées dans `src/core/config.ts`.
 3. `src/render/**` est **lecture seule** : il ne modifie jamais `x`, `v`, le rang, les événements ou
    les faits. Il positionne des sprites à partir des distances.
 4. `src/speaker/**` ne reçoit que des `RaceFact`. Il n'a **aucun accès** à `RaceEngine`, `RaceState`,
@@ -144,8 +147,18 @@ Règles concrètes :
 
 À vérifier mentalement à chaque changement, et par les tests :
 
-1. **Reproductibilité** : `(seed, config)` ⇒ course identique, bit à bit, sur n'importe quel appareil
-   et n'importe quel framerate.
+1. **Reproductibilité** : `(seed, config)` ⇒ course identique, bit à bit, sur n'importe quel appareil,
+   **n'importe quel moteur JavaScript** et n'importe quel framerate.
+   Aucun calcul influençant la course n'utilise de fonction transcendante `Math.*` (`log`, `cos`,
+   `sqrt`, …) : ECMAScript ne les tient pas pour correctement arrondies, un dernier bit peut donc
+   différer d'un moteur à l'autre. Une constante qui en dépend est **pré-calculée et figée** dans
+   `src/core/config.ts`. Le bruit du drift est une approximation déterministe (somme de 12 tirages
+   uniformes), jamais Box-Muller.
+   **Contrat de seed** : la **seed affichée** (8 caractères Base32 Crockford) est la source de
+   vérité ; la seed interne 32 bits est `hash32(seed affichée)`, par la même règle pour toute entrée,
+   canonique ou libre ; recopier la seed affichée dans `?seed=` reproduit donc exactement la même
+   course. La réduction 40 → 32 bits n'est pas injective : des collisions sont possibles, et jamais
+   niées.
 2. **Pas fixe** : la simulation avance par pas de `DT = 1/60 s`. `RaceEngine.step()` ne prend
    **aucun argument** de temps. Le mode test ne change que le **nombre** de pas par frame, jamais
    leur taille.

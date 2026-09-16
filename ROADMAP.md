@@ -413,7 +413,7 @@ par `seedTextFromBytes`. Détails dans `GAME_DESIGN.md` §10.
 
 ---
 
-### P004 — Moteur minimal + modèle de vitesse
+### P004 — Moteur minimal + modèle de vitesse `[x]`
 
 **Objectif** : un noyau déterministe qui fait courir 6 personnages pendant 180 s de temps simulé, avec
 des vitesses qui varient **progressivement** et produisent des dépassements naturels. Pas encore de
@@ -442,8 +442,21 @@ segments officiels, pas de checkpoints, pas d'événements, pas de rendu.
 * `SPEED.MIN <= v <= SPEED.MAX` toujours.
 * Dérive : sur 30 000 pas, moyenne de `drift` ≈ 0 (±0,01), écart-type stationnaire ≈ 0,127 (±15 %),
   jamais hors de `±CLAMP`.
+  * *Correction P004, mesurée* : `CLAMP = 0,20` coupe à 1,57 σ, donc l'écart-type **effectif** du
+    drift vaut ≈ 0,100, pas 0,127 (constat détaillé dans `GAME_DESIGN.md` §6.3). Le test compare
+    l'écart-type mesuré à cette valeur effective (±15 %), et vérifie **séparément** que le modèle
+    retrouve bien 0,127 (±15 %) dès que l'écrêtage est rendu non contraignant. **Aucune constante de
+    jeu n'a été modifiée** : élargir `CLAMP` est une décision de game design, pas une correction.
+  * *Correction P004, statistique* : la moyenne est agrégée sur 2 160 000 tirages (6 personnages ×
+    12 seeds × 30 000 pas). Sur un **seul** processus de 30 000 pas, l'écart-type de la moyenne vaut
+    ≈ 0,0126 (temps de corrélation `1/THETA = 4 s`) : le seuil ±0,01 serait franchi une fois sur deux
+    par simple bruit, et le test serait donc faux plutôt que strict.
 * **Équivalence** : sur 200 000 pas, la vitesse moyenne des 6 personnages reste dans
   `SPEED.BASE ± 1,5 %` (aucun personnage ne « gagne » structurellement).
+  * *Correction P004, statistique* : le test porte sur 96 courses, soit 1 036 800 pas. Sur 19 courses
+    (205 200 pas), l'écart-type de la moyenne d'un personnage vaut ≈ 0,46 %, ce qui ne laisse que
+    3 σ de marge à ±1,5 % : un test fragile, effectivement franchi par une seed du premier jeu
+    essayé. Sur 96 courses il tombe à ≈ 0,21 %, et le seuil devient inatteignable par le hasard.
 * Départ identique : `drift(0) = 0` ⇒ `x_i(0) = 0` et `v_i(0) = SPEED.BASE` pour les 6.
 * Aucune dépendance croisée : simuler `c0` seul puis les 6 ensemble donne le même `x_c0`.
 * **Fin par le temps, jamais par la distance** (test central de la correction 1) :

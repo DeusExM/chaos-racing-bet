@@ -10,6 +10,7 @@ import {
   RANK,
   SPEAK,
   SPEED,
+  SQRT_DT,
   SURGE,
   validateConfig,
 } from '../../src/core/config';
@@ -65,6 +66,25 @@ describe('constantes de temps simulé', () => {
       'TOTAL_SIM_S',
       'TOTAL_STEPS',
     ]);
+  });
+});
+
+describe('constante dérivée SQRT_DT', () => {
+  it('vaut √DT sans que le noyau ait à calculer de racine', () => {
+    // Vérification algébrique par élévation au carré : aucune fonction transcendante n'est appelée,
+    // ni ici ni dans le noyau.
+    expect(SQRT_DT * SQRT_DT).toBeCloseTo(RACE_CONFIG.DT_S, 15);
+    expect(SQRT_DT).toBeCloseTo(0.12909944487358055, 15);
+    expect(SQRT_DT).toBeGreaterThan(0);
+    expect(SQRT_DT).toBeLessThan(1);
+  });
+
+  it('est la valeur correctement arrondie de la racine carrée du pas', () => {
+    // `Math.sqrt` est légitime ici, dans un test : c'est précisément ce que le noyau n'a pas le
+    // droit de faire, puisque son arrondi n'est pas garanti d'un moteur JavaScript à l'autre. Ce
+    // test vérifie que la constante figée ne dérive pas d'une valeur fausse ou tronquée.
+    const exact = Math.sqrt(RACE_CONFIG.DT_S);
+    expect(Math.abs(SQRT_DT - exact) / exact).toBeLessThan(1e-15);
   });
 });
 

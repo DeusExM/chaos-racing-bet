@@ -261,6 +261,16 @@ Le bruit `gauss_i(t)` est une **approximation gaussienne déterministe** — som
 uniformes, sans aucune fonction transcendante — et **non** Box-Muller : voir §10.3. C'est ce qui rend
 le drift reproductible bit à bit d'un moteur JavaScript à l'autre.
 
+> **Constat de mesure (P004).** `DRIFT.STATIONARY_SD` est l'écart-type stationnaire du processus
+> **sans écrêtage**. Or avec `CLAMP = 0,20`, l'écrêtage coupe à `0,20 / 0,127 ≈ 1,57 σ` : ce n'est
+> donc pas un filet de sécurité lointain, il participe réellement à la dynamique et resserre la
+> distribution. L'écart-type **effectif** du drift vaut ainsi `≈ 0,100` (mesuré sur 2 160 000
+> tirages : 6 personnages × 12 seeds × 30 000 pas), et non `0,127`. Le drift reste centré et borné à
+> ±20 % comme spécifié ; il est simplement plus resserré que ne le suggère la valeur théorique. Si
+> l'on veut un drift effectivement proche de ±13 %, il faut élargir `CLAMP` — `0,5` redonne `0,1272`,
+> soit la valeur théorique à 0,1 % près. C'est une **décision de game design**, pas une conséquence
+> de l'implémentation : aucune constante de ce tableau n'est modifiée par P004.
+
 Pourquoi OU et pas une marche aléatoire : le rappel vers 0 garantit que **la vitesse moyenne de chaque
 personnage reste `SPEED.BASE`** (personnages équivalents, aucun trait permanent) tout en créant une
 variance locale qui fait que **le leader peut toujours être rattrapé**, sans jamais tirer un

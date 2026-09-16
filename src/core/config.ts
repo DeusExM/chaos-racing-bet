@@ -111,6 +111,21 @@ export const RACE_CONFIG: RaceTimeConfig = Object.freeze({
   TOTAL_STEPS: 10800,
 });
 
+/**
+ * `√DT_S`, pré-calculé (≈ 0,1291).
+ *
+ * Ce n'est **pas** une constante de jeu : c'est une constante d'**implémentation**, déduite du pas
+ * fixe et utilisée par l'étape d'Ornstein–Uhlenbeck du drift (`SIGMA × √DT × bruit`). Elle est figée
+ * ici pour la même raison que `DRIFT.STATIONARY_SD` : le noyau n'a pas le droit d'appeler
+ * `Math.sqrt`, dont l'arrondi n'est pas garanti par la norme ECMAScript, donc dont le bit de poids
+ * faible peut différer d'un moteur JavaScript à l'autre et casser la reproductibilité
+ * inter-moteurs.
+ *
+ * `validateConfig()` vérifie algébriquement que `SQRT_DT² = DT_S`, avec la même tolérance relative
+ * que les autres constantes dérivées — et sans jamais calculer de racine.
+ */
+export const SQRT_DT = 0.12909944487358055;
+
 /** Vitesses et rampes. `BASE` est identique pour les 6 personnages : aucun n'a d'avantage. */
 export const SPEED: SpeedConfig = Object.freeze({
   BASE: 12.0,
@@ -346,6 +361,9 @@ export function validateConfig(config: GameConfig = GAME_CONFIG): void {
       `RACE_CONFIG : SEGMENT_COUNT × STEPS_PER_SEGMENT (${RACE.SEGMENT_COUNT * RACE.STEPS_PER_SEGMENT}) doit valoir exactement TOTAL_STEPS (${RACE.TOTAL_STEPS}).`,
     );
   }
+
+  // Constante d'implémentation dérivée du pas : vérifiée sans racine carrée, par élévation au carré.
+  requireCloseTo(SQRT_DT * SQRT_DT, RACE.DT_S, 'SQRT_DT² doit valoir RACE_CONFIG.DT_S');
 
   requirePositive(S.BASE, 'SPEED.BASE');
   requirePositive(S.MIN, 'SPEED.MIN');

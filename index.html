@@ -9,12 +9,28 @@
   </head>
   <body>
     <main class="shell">
-      <h1 class="title">Chaos Race</h1>
-      <p class="subtitle">
-        Course humoristique à 6 personnages — 100 % locale, reproductible par seed.
-      </p>
-      <p class="seed">Seed : <span id="seed-value" data-testid="seed-value">—</span></p>
-      <div id="game" class="game" role="img" aria-label="Zone de jeu (canvas)"></div>
+      <header class="head">
+        <h1 class="title">Chaos Race</h1>
+        <p class="subtitle">
+          Course humoristique à 6 personnages — 100 % locale, reproductible par seed.
+        </p>
+        <p class="seed">Seed : <span id="seed-value" data-testid="seed-value">—</span></p>
+      </header>
+
+      <section class="stage">
+        <div id="game" class="game" role="img" aria-label="Zone de jeu (canvas)"></div>
+        <div class="hud">
+          <p id="race-status" class="hud-status" data-testid="race-status">—</p>
+          <div id="leaderboard" class="hud-panel" data-testid="leaderboard"></div>
+        </div>
+      </section>
+
+      <div class="controls">
+        <button id="start-button" type="button" data-testid="start-button"></button>
+        <button id="replay-button" type="button" data-testid="replay-button"></button>
+      </div>
+
+      <section id="debug" class="debug" data-testid="debug" hidden></section>
     </main>
     <script type="module" src="/src/app/main.ts"></script>
   </body>

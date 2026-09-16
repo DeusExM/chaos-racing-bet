@@ -473,7 +473,7 @@ segments officiels, pas de checkpoints, pas d'événements, pas de rendu.
 
 ---
 
-### P005 — Première course visible (JALON : « est-ce que c'est amusant ? »)
+### P005 — Première course visible (JALON : « est-ce que c'est amusant ? ») `[x]`
 
 **Objectif** : **voir la course le plus tôt possible.** 6 formes simples qui avancent réellement selon
 les distances du noyau, se dépassent, avec le classement affiché à l'écran — jugeable avant toute
@@ -504,6 +504,12 @@ autre fonctionnalité.
 * E2E `?seed=X&fast=1&autostart=1` : les 6 sprites existent ; leurs positions écran augmentent ; le
   classement affiché correspond **exactement** au classement du noyau exposé par les hooks, à
   plusieurs instants de la course.
+  *Correction de formulation (constatée en P005)* : la caméra suit le peloton dans une fenêtre
+  bornée (`GAME_DESIGN.md` §5), donc les positions écran **ne peuvent pas** croître indéfiniment —
+  le peloton resterait sinon collé au bord droit. Ce qui est vérifié à la place, et qui est plus
+  fort : les distances du noyau croissent **strictement et sans jamais décroître** (aucune
+  téléportation), et sur **chaque** frame l'ordre des positions écran est exactement l'ordre des
+  distances. Aucune constante n'a été modifiée pour obtenir ce résultat.
 * **Dépassements visibles** : sur une course `fast=1`, au moins un changement de leader et au moins
   3 dépassements comptés par `core/ranking.ts` sont observés (seuil volontairement bas à ce stade :
   on vérifie surtout que le mouvement est réellement visible et non figé).
@@ -826,3 +832,13 @@ permanente déjà présente (P004).
 * Classements cumulés sur plusieurs courses (localStorage uniquement, jamais une base de données).
 * Banque de textes du speaker étendue — sans jamais toucher au gameplay.
 * Localisation (EN) via `strings.*.ts`.
+* **Marge de dépassement dépendante de la fréquence d'observation** (constat P005) :
+  `overtakesBetween` ne compte un dépassement que si le nouvel arrivant mène de plus de
+  `OVERTAKE.MIN_MARGIN` (**0,5 m**) au moment du relevé. Or à la vitesse de base, un pas ne fait
+  avancer que de `SPEED.BASE × DT_S = 0,2 m` : observée **pas à pas** (60 Hz en `timeScale = 1`), une
+  course ne produit donc **aucun** dépassement compté, alors que la même course en produit une
+  vingtaine observée image par image en mode accéléré. Le nombre de dépassements dépend donc de la
+  fréquence à laquelle on regarde, ce qui est intenable dès que le speaker (P009) ou le HUD devront
+  s'appuyer dessus. À trancher explicitement (par exemple : exiger que le dépassement **tienne**
+  pendant une durée simulée, plutôt qu'une marge mesurée entre deux relevés). Aucune constante ne
+  doit être changée avant cette décision, et les seeds dorées devront alors être réévaluées.

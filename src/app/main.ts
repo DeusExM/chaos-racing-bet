@@ -1,33 +1,24 @@
-import { AUTO, Game, Scene } from 'phaser';
-
 import { SEED_TEXT_LENGTH, seedTextFromBytes } from '../core/seed';
+import { createGame } from '../render/Game';
+import { RaceSimulation } from '../sim/RaceSimulation';
+import { SIM_PRESETS } from '../sim/config';
+import { installTestHooks, testHooksEnabled } from '../sim/testHooks';
+import { UI_TEXT_FR } from './strings.fr';
 
-/** Résolution de référence (16:9). Le redimensionnement réel arrive en P005. */
-const GAME_WIDTH = 1280;
-const GAME_HEIGHT = 720;
+/**
+ * Point d'entrée de l'application.
+ *
+ * `app/` est la seule couche qui a le droit de connaître à la fois le DOM de la page, les paramètres
+ * d'URL et les trois couches internes : elle assemble, elle ne décide de rien. Aucune règle de jeu,
+ * aucun cadrage, aucun classement n'est calculé ici.
+ */
 
 const SEED_PARAM = 'seed';
-const SEED_ELEMENT_ID = 'seed-value';
+const FAST_PARAM = 'fast';
+const DEBUG_PARAM = 'debug';
+const AUTOSTART_PARAM = 'autostart';
 
-/**
- * Scène vide.
- *
- * P001 ne valide que la chaîne outillage (build, typecheck, tests, montage du canvas).
- * Aucune logique de course, aucun personnage, aucun rendu de piste n'appartient à cette
- * étape : la première course visible est l'objet de P005.
- */
-class Placeholder extends Scene {
-  constructor() {
-    super('placeholder');
-  }
-}
-
-/**
- * Lit la seed dans l'URL.
- *
- * Toute chaîne est acceptée : une seed qui n'est pas au format affichable est hachée plus tard
- * (voir `GAME_DESIGN.md` §10). Une valeur absente ou vide signifie « pas de seed imposée ».
- */
+/** Lit la seed dans l'URL. Toute chaîne est acceptée : une seed libre est hachée par le noyau. */
 function readSeedFromUrl(search: string): string | null {
   const value = new URLSearchParams(search).get(SEED_PARAM);
   return value === null || value.length === 0 ? null : value;
@@ -68,29 +59,70 @@ function resolveSeedText(): string {
 
 /** Affiche la seed à l'écran : elle doit rester lisible et copiable en permanence. */
 function displaySeed(seedText: string): void {
-  const element = document.getElementById(SEED_ELEMENT_ID);
+  const element = document.getElementById('seed-value');
   if (element !== null) {
     element.textContent = seedText;
   }
 }
 
+/** Récupère un élément par identifiant, ou `null` s'il est absent. */
+function elementById(id: string): HTMLElement | null {
+  const element = document.getElementById(id);
+  return element instanceof HTMLElement ? element : null;
+}
+
 function bootstrap(): void {
-  const parent = document.getElementById('game');
-  if (!parent) {
-    throw new Error("Élément #game introuvable dans index.html.");
+  const parent = elementById('game');
+  if (parent === null) {
+    throw new Error('Élément #game introuvable dans index.html.');
   }
 
+  const params = new URLSearchParams(window.location.search);
   const seedText = resolveSeedText();
   displaySeed(seedText);
 
-  new Game({
-    type: AUTO,
+  // Le mode test ne touche pas au noyau : il ne change que le temps réel.
+  const preset = params.get(FAST_PARAM) === '1' ? SIM_PRESETS.fast : SIM_PRESETS.normal;
+  const simulation = new RaceSimulation(seedText, preset);
+
+  installTestHooks(simulation, testHooksEnabled(window.location.search, import.meta.env.DEV));
+
+  const hooksEnabled = testHooksEnabled(window.location.search, import.meta.env.DEV);
+
+  const startButton = elementById('start-button');
+  const replayButton = elementById('replay-button');
+  if (startButton !== null) {
+    startButton.textContent = UI_TEXT_FR.startButton;
+  }
+  if (replayButton !== null) {
+    replayButton.textContent = UI_TEXT_FR.replayButton;
+  }
+
+  createGame({
     parent,
-    width: GAME_WIDTH,
-    height: GAME_HEIGHT,
-    backgroundColor: '#0b0f1e',
-    scene: [Placeholder],
+    simulation,
+    text: UI_TEXT_FR,
+    leaderboard: elementById('leaderboard'),
+    status: elementById('race-status'),
+    debugPanel: params.get(DEBUG_PARAM) === '1' ? elementById('debug') : null,
+    debug: params.get(DEBUG_PARAM) === '1',
+    exposeView: hooksEnabled,
   });
+
+  // « Lancer » démarre immédiatement : P005 n'a aucun compte à rebours.
+  startButton?.addEventListener('click', () => {
+    simulation.start();
+  });
+
+  // « Rejouer » repart de zéro avec exactement la même seed.
+  replayButton?.addEventListener('click', () => {
+    simulation.restart();
+    simulation.start();
+  });
+
+  if (params.get(AUTOSTART_PARAM) === '1') {
+    simulation.start();
+  }
 }
 
 bootstrap();

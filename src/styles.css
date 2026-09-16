@@ -5,6 +5,7 @@
   --border: #1e2947;
   --text: #e8ecf8;
   --muted: #98a2c0;
+  --accent: #ffd166;
 }
 
 * {
@@ -18,20 +19,28 @@ body {
   background: radial-gradient(circle at 50% 0%, #16203c 0%, var(--bg) 70%);
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
 }
 
 .shell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
   min-height: 100vh;
-  padding: 1.5rem 1rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .title {
   margin: 0;
-  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  font-size: clamp(1.25rem, 3.2vw, 2rem);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -40,7 +49,7 @@ body {
   margin: 0;
   max-width: 42rem;
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   text-align: center;
 }
 
@@ -48,7 +57,7 @@ body {
   margin: 0;
   color: var(--muted);
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   letter-spacing: 0.08em;
 }
 
@@ -57,8 +66,19 @@ body {
   user-select: all;
 }
 
+/*
+ * L'arène garde toujours le rapport 16:9 du canvas : le HUD en HTML se superpose alors exactement
+ * au canvas, sans bandes noires, donc sans décalage possible entre les deux.
+ */
+.stage {
+  position: relative;
+  width: min(100%, 1280px, calc((100vh - 230px) * 16 / 9));
+  aspect-ratio: 16 / 9;
+}
+
 .game {
-  width: min(100%, 1280px);
+  position: absolute;
+  inset: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -68,6 +88,137 @@ body {
 
 .game canvas {
   display: block;
-  width: 100%;
-  height: auto;
+  z-index: 0;
+}
+
+.hud {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 0.5rem 0.6rem;
+  pointer-events: none;
+}
+
+.hud-status {
+  margin: 0;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #00000099;
+  color: var(--accent);
+  font-size: clamp(0.6rem, 1.4vw, 0.85rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hud-panel {
+  align-self: flex-end;
+  min-width: 12rem;
+  max-width: 46%;
+  padding: 0.4rem 0.55rem;
+  border-radius: 10px;
+  background: #05070fcc;
+  border: 1px solid var(--border);
+}
+
+.hud-title {
+  margin: 0 0 0.25rem;
+  color: var(--muted);
+  font-size: clamp(0.55rem, 1.2vw, 0.75rem);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hud-row {
+  display: grid;
+  grid-template-columns: 1.4rem 1fr auto;
+  gap: 0.35rem;
+  align-items: baseline;
+  font-size: clamp(0.6rem, 1.5vw, 0.9rem);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.hud-rank {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-gap {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.controls button {
+  min-width: 7rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #16203c;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.controls button:hover {
+  border-color: var(--accent);
+}
+
+.controls button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.debug {
+  width: min(100%, 1280px);
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.debug-body {
+  margin: 0;
+  overflow-x: auto;
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+/* Téléphone en paysage : on récupère de la hauteur pour l'arène, qui est le sujet. */
+@media (max-height: 560px) {
+  .shell {
+    gap: 0.35rem;
+    padding: 0.4rem 0.5rem calc(0.4rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .subtitle {
+    display: none;
+  }
+
+  .stage {
+    width: min(100%, 1280px, calc((100vh - 96px) * 16 / 9));
+  }
+
+  .controls button {
+    padding: 0.35rem 0.7rem;
+    min-width: 5.5rem;
+    font-size: 0.8rem;
+  }
 }

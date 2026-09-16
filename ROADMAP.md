@@ -260,9 +260,17 @@ Non implémenté en V1, mais rien ne le bloque :
 
 > **Note de réorganisation (révision 2).** La roadmap a été réordonnée sur demande explicite de
 > l'utilisateur, pour obtenir **une course visible très tôt** (P005) avant les gros événements, le
-> speaker, l'équilibrage massif et les graphismes définitifs. C'est l'**unique** exception autorisée à
-> la règle « ne jamais renuméroter » de `AGENTS.md` §1.5. À partir de maintenant, cette règle
-> s'applique de nouveau : toute nouvelle étape s'ajoute à la fin (P019+).
+> speaker, l'équilibrage massif et les graphismes définitifs. C'est la **première** exception
+> autorisée à la règle « ne jamais renuméroter » de `AGENTS.md` §1.5 (une seconde suit ci-dessous).
+> À partir de maintenant, cette règle s'applique de nouveau : toute nouvelle étape s'ajoute à la fin
+> (P019+).
+>
+> **Note d'insertion (révision 3).** Sur demande explicite de l'utilisateur, un **Jalon 3D** a été
+> inséré **juste avant P014**, à l'endroit où il est décidé, afin de trancher le moteur de rendu
+> **avant** de produire les graphismes définitifs. C'est une **seconde exception**, elle aussi
+> explicitement demandée, à la règle « ne jamais renuméroter » de `AGENTS.md` §1.5. Elle
+> n'entraîne **aucune renumérotation** : le jalon porte l'identifiant `P013.5`, les étapes existantes
+> gardent leur numéro. Après lui, la règle s'applique de nouveau (P019+).
 
 Règles : **une étape à la fois**, jamais deux en parallèle, chaque étape est terminée quand ses tests
 et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à faire, `[~]` en cours,
@@ -285,7 +293,8 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P011 | HUD complet + panneau debug | P010 | mini-carte, classement détaillé, chrono |
 | P012 | Affichage du speaker + réglages | P011 | bannières de commentaires |
 | P013 | Arrivée et podium | P012 | course complète jouable |
-| P014 | Identité visuelle et animations des 6 personnages | P013 | personnages distincts et drôles |
+| **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
+| P014 | Identité visuelle et animations des 6 personnages | P013.5 | personnages distincts et drôles |
 | P015 | Polish, accessibilité, audio optionnel | P014 | finition |
 | P016 | PWA installable, paysage, offline | P015 | installable sur téléphone |
 | P017 | E2E complets + budget de performance | P016 | non-régression bout en bout |
@@ -295,6 +304,9 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 **Jalon clé : à la fin de P005, on doit pouvoir juger si les mouvements et les dépassements sont
 amusants à regarder.** Aucune étape lourde (événements, speaker, équilibrage, graphismes) ne doit
 être commencée avant d'avoir ce verdict.
+
+**Second jalon clé : P013.5.** Le moteur de rendu (2D ou 3D) se décide **sur prototype**, jamais sur
+documentation. Aucun travail artistique lourd (P014) ne doit commencer avant cette décision.
 
 ---
 
@@ -726,7 +738,74 @@ permanente déjà présente (P004).
 
 ---
 
+### P013.5 — Jalon 3D : prototype de rendu et choix du moteur `[ ]`
+
+**Objectif** : décider **par l'expérience**, et non sur le papier, si la présentation finale doit
+passer en 3D — et avec quel moteur. Ce jalon ne produit **aucun** graphisme définitif et **aucun**
+gameplay : c'est un prototype jetable dont la seule sortie utile est une **décision**.
+
+**Pourquoi ici.** P014 (« identité visuelle et animations ») est l'étape où le travail artistique
+devient lourd. Choisir le moteur après coup reviendrait à jeter ce travail. Le jalon est donc placé
+**juste avant P014**, une fois la course complète et jugée (P013).
+
+**Motivation issue de P005** (constats visuels de la revue du jalon, non bloquants) : le classement
+en surimpression peut masquer une partie de la piste, les noms sont trop petits en téléphone
+paysage, le rendu 2D est volontairement un placeholder, et la **sensation de vitesse absolue est
+limitée** par une caméra qui suit le peloton. La profondeur et la perspective sont précisément ce
+qu'un rendu 3D peut apporter sur ce dernier point : d'où ce prototype, à mener avant d'investir.
+
+**Prototype minimal attendu**
+* réutiliser `RaceEngine` **tel quel**, sans aucune modification ;
+* seed **POULET42** (la seed de référence mesurée en P005) ;
+* 6 primitives ou modèles temporaires 3D, sans direction artistique définitive ;
+* une piste 3D basique (une courbe suffit) ;
+* conversion `x` → position sur la piste, **dans le renderer uniquement** ;
+* une caméra TV simple qui suit le peloton ;
+* **aucun** nouveau gameplay, **aucun** nouvel événement, **aucune** constante de jeu touchée.
+
+**Comparaison à mener**
+
+| Option | Description |
+| --- | --- |
+| **A** | Continuer en Phaser / 2D (statu quo, éventuellement amélioré) |
+| **B** | Renderer 3D **Three.js** |
+| **C** | Renderer 3D **Babylon.js** |
+
+**Critères de décision** — évalués **sur le prototype**, jamais sur la documentation des moteurs :
+lisibilité des dépassements · sensation de vitesse · facilité de mise en place des caméras (suivi,
+changements de plan) · intégration de modèles et d'animations · performances desktop **et** mobile
+en paysage · coût de développement assisté par IA · **conservation stricte du moteur déterministe
+existant**.
+
+**Contraintes non négociables**
+* `RaceEngine` reste l'**unique source de vérité** : le renderer 3D lit `x` et le transforme en
+  position sur la piste, **jamais l'inverse**. Aucune physique 3D ne décide du vainqueur, des
+  vitesses, des dépassements ou d'un événement de gameplay.
+* Le résultat d'une course doit être **identique au bit près** avec et sans le renderer 3D.
+* L'UI, le classement et les paris peuvent rester en **HTML/2D** au-dessus de la scène.
+* **Aucune dépendance 3D n'est installée avant que ce jalon ne soit explicitement autorisé**
+  (`AGENTS.md` §3.1). Le rendu reste le placeholder 2D de P005 jusque-là.
+* Inspiration de **mise en scène** uniquement : aucun asset, personnage ou élément protégé d'une
+  œuvre existante n'est reproduit — voir `GAME_DESIGN.md` §5.1.
+
+**Tests (DoD)**
+* Le prototype réutilise le noyau **sans le modifier** : `git diff` nul sur `src/core/**`.
+* Prototype actif ⇒ `runToCompletion` donne **exactement** les mêmes distances que le renderer 2D,
+  seed POULET42 comprise.
+* Le prototype rend 6 objets mobiles dont l'**ordre à l'écran** est celui des distances du noyau.
+* `tests/unit/boundaries.test.ts` reste vert : le renderer 3D n'écrit jamais dans l'état.
+* **Livrable de décision** : une note courte « A / B / C », argumentée sur les 7 critères ci-dessus,
+  dans le compte rendu de l'étape. **Aucun choix de moteur ne doit être fait avant ce prototype.**
+
+**Hors périmètre** : graphismes définitifs, modèles 3D réels, animations, caméras scénarisées,
+audio, budget de ressources définitif (P014 et suivants).
+
+---
+
 ### P014 — Identité visuelle et animations des 6 personnages
+
+**Dépend de P013.5** : le moteur de rendu doit être choisi avant de produire l'identité visuelle.
+Si le jalon retient une option 3D, cette étape s'appuie dessus ; sinon elle reste en Phaser/2D.
 
 **Livrables**
 * 6 personnages visuellement très distincts (couleur **et** forme/silhouette), noms définitifs FR,
@@ -832,6 +911,10 @@ permanente déjà présente (P004).
 * Classements cumulés sur plusieurs courses (localStorage uniquement, jamais une base de données).
 * Banque de textes du speaker étendue — sans jamais toucher au gameplay.
 * Localisation (EN) via `strings.*.ts`.
+* **Moteur de rendu 3D (Three.js / Babylon.js)** : le choix est **volontairement non fait**. Il n'est
+  ni Three.js ni Babylon.js par défaut, et **aucune dépendance 3D n'est installée** tant que le
+  **Jalon 3D (P013.5)** n'a pas produit son prototype comparatif A/B/C. Toute demande d'installer un
+  moteur 3D avant ce jalon est à signaler, pas à exécuter.
 * **Marge de dépassement dépendante de la fréquence d'observation** (constat P005) :
   `overtakesBetween` ne compte un dépassement que si le nouvel arrivant mène de plus de
   `OVERTAKE.MIN_MARGIN` (**0,5 m**) au moment du relevé. Or à la vitesse de base, un pas ne fait

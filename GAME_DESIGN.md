@@ -184,6 +184,37 @@ Cette section ne définit **aucune** règle de simulation.
   `+xx m` (le rendu ne recadre jamais l'échelle en cours de course).
 * Le rendu est **lecture seule** : il ne modifie jamais `x`, `v` ni le classement.
 
+### 5.1 Direction artistique cible (consignée, **non implémentée**)
+
+La présentation finale visée est une **retransmission de course 3D humoristique** : piste et
+environnement en volume, personnages modèles animés, événements visuels absurdes, caméra de type
+télévision / prise de vue hippique, **changements de caméra sur les moments importants**, et
+profondeur de perspective exploitée pour rendre les dépassements spectaculaires. Le classement, les
+paris et le HUD peuvent rester en **HTML/2D** au-dessus de la scène.
+
+**Inspiration de mise en scène, jamais de contenu.** L'esprit visé est celui d'une retransmission de
+course absurde (référence citée par l'utilisateur : « Japan World Cup »). C'est une inspiration de
+**structure et de ton** : aucun personnage, asset, modèle, animation, texte ou élément protégé de
+cette référence ne doit être reproduit. Chaos Race doit avoir son **identité propre**.
+
+**Règle structurante — la 3D n'est jamais la simulation.**
+
+* `RaceEngine` reste l'**unique source de vérité** et continue de produire `x`, `v`, le drift, le
+  classement, les événements et la seed déterministe, par pas fixes de `DT_S`.
+* Le renderer 3D se contente de **transformer la distance `x` en position sur une piste / courbe
+  3D**, exactement comme le renderer 2D transforme aujourd'hui `x` en position écran.
+* Aucune physique 3D ne décide **jamais** du vainqueur, des vitesses, des dépassements, ni d'un
+  événement de gameplay. Aucun moteur physique, aucune collision, aucune interpolation ne peut
+  modifier `x`.
+* Les invariants de `AGENTS.md` §5 restent intégralement applicables : pas de téléportation, pas de
+  rubber-banding, fin de course à `tSim = 180 s`, reproductibilité `(seed, config)`, et
+  `src/core/**` continue de n'importer **rien** hors de `core/`.
+* Changer de renderer ne doit **jamais** changer le résultat d'une course : la neutralité du rendu
+  est déjà testée (le rendu n'écrit rien dans l'état) et devra le rester.
+
+Tant que le **Jalon 3D** de `ROADMAP.md` (P013.5) n'a pas tranché, **aucune dépendance 3D n'est
+installée** et le rendu reste le placeholder 2D de P005.
+
 ---
 
 ## 6. Modèle de vitesse

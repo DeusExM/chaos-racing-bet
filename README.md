@@ -141,6 +141,10 @@ exécuté avec un accès complet.
 
 * Aucune installation globale (`npm install -g`), aucune modification de la configuration git
   globale, aucun credential helper global.
+* `git push` subit la **même limite de tubes nommés** que `verify` : Git pour Windows lance ses
+  utilitaires MSYS (`sh.exe`, `bash.exe`), qui échouent en `couldn't create signal pipe, Win32 error
+  5`, suivi d'un `could not read Username for 'https://github.com'` trompeur. Le push fonctionne avec
+  un accès complet, en utilisant les identifiants déjà stockés par Windows.
 * Vite écoute uniquement sur `127.0.0.1`, jamais sur `0.0.0.0`. Le pare-feu Windows n'est pas
   modifié.
 * L'application finale ne fait **aucun** appel réseau à l'exécution (voir `AGENTS.md` §3.4) ; les

@@ -44,6 +44,19 @@ body {
   text-align: center;
 }
 
+.seed {
+  margin: 0;
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+}
+
+.seed span {
+  color: var(--text);
+  user-select: all;
+}
+
 .game {
   width: min(100%, 1280px);
   background: var(--surface);

@@ -275,6 +275,12 @@ d'implémenter** et proposer une variante compatible (ou demander une modificati
   accès complet. Ne pas contourner en modifiant la configuration du projet (essayé :
   `resolve.preserveSymlinks` ne corrige rien, le plantage a lieu pendant le bundling du fichier de
   configuration, avant sa lecture).
+* **`git push` relève de la même limite.** L'opération réseau elle-même n'est pas le problème : Git
+  pour Windows lance ses utilitaires MSYS (`sh.exe`, `bash.exe`), qui ne parviennent pas à créer
+  leur *signal pipe* et échouent en `couldn't create signal pipe, Win32 error 5`, suivi d'un
+  `could not read Username for 'https://github.com'` trompeur. Le push fonctionne avec un accès
+  complet (les identifiants déjà stockés par le gestionnaire Windows sont alors utilisés). Ne jamais
+  configurer de gestionnaire d'identifiants global pour contourner cela.
 * **Navigateurs Playwright : installés dans `.playwright-browsers`, jamais dans AppData.**
   `.playwright.env` définit `PLAYWRIGHT_BROWSERS_PATH`, chargé par les scripts npm via
   `node --env-file=.playwright.env`. `playwright install` lui-même **échoue** dans le bac à sable

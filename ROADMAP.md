@@ -332,7 +332,7 @@ Blender.
 
 ---
 
-### P002 — Seed, RNG déterministe, garde-fous de frontière
+### P002 — Seed, RNG déterministe, garde-fous de frontière `[x]`
 
 **Objectif** : la base de la reproductibilité, et le mur qui protège le noyau.
 

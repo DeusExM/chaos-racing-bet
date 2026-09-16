@@ -3,26 +3,31 @@ import { approach, clamp } from './math';
 import type { CharacterState } from './types';
 
 /**
- * Modèle de vitesse — **P004 : vitesse de base + dérive permanente, et rien d'autre.**
+ * Modèle de vitesse — **vitesse de base + dérive permanente (P004) + surges (P007).**
  *
  * Ces trois fonctions sont pures et sans état : elles reçoivent une valeur et un pas, elles
  * retournent la valeur suivante. Le seul état de la course vit dans `RaceEngine`.
  *
- * Les surfaces d'extension sont déjà typées mais **délibérément inutilisées** ici :
- * `CharacterState.surge` et `CharacterState.eventBonus` restent à `0` jusqu'à leurs étapes
- * respectives (P007 pour les surges, P008 pour les événements). Les brancher maintenant
- * introduirait une règle de jeu que personne n'a encore calibrée.
+ * `CharacterState.eventBonus` et `CharacterState.activeEvent` restent **délibérément inutilisés** :
+ * les événements rares arrivent avec P008. La formule cible est donc, pour l'instant,
+ * `SPEED.BASE × (1 + drift + surge)`.
  */
 
 /**
- * Vitesse visée par un personnage à cet instant : `SPEED.BASE × (1 + drift)`.
+ * Vitesse visée par un personnage à cet instant : `SPEED.BASE × (1 + drift + surge)`.
  *
- * La dérive est **relative** et multiplicative : `drift = +0,1` signifie « 10 % plus vite que la
- * base », ce que `DRIFT.CLAMP = 0,2` borne à ±20 %. Le facteur est symétrique : un personnage lent
- * peut devenir rapide et inversement, aucun n'est structurellement avantagé.
+ * Les deux modulations sont **relatives** et multiplicatives, donc cumulables telles quelles :
+ * `+0,1` signifie « 10 % plus vite que la base », qu'il vienne de la dérive ou d'un surge. La dérive
+ * est bornée à ±20 % par `DRIFT.CLAMP`, les surges à leurs bornes propres, et leur somme est
+ * volontairement **non écrêtée** : chaque source garde son échelle, et l'écrêtage final reste celui
+ * de `SPEED.MIN`/`SPEED.MAX`, appliqué après la rampe.
+ *
+ * Le facteur est symétrique : un personnage lent peut devenir rapide et inversement, aucun n'est
+ * structurellement avantagé. Les surges ne dépendent ni du rang, ni de la distance, ni de la
+ * position dans le peloton — sinon ils seraient un rubber-banding déguisé.
  */
 export function computeTargetSpeed(character: CharacterState, config: GameConfig): number {
-  return config.SPEED.BASE * (1 + character.drift);
+  return config.SPEED.BASE * (1 + character.drift + character.surge);
 }
 
 /**

@@ -40,15 +40,24 @@ describe('computeTargetSpeed', () => {
     expect(fast - SPEED.BASE).toBeCloseTo(SPEED.BASE - slow, 12);
   });
 
-  it('ignore encore surge et eventBonus : ils appartiennent à P007 et P008', () => {
+  it('applique le surge, mais ignore encore eventBonus : les événements sont en P008', () => {
     const plain = computeTargetSpeed(character(), GAME_CONFIG);
-    const loaded = computeTargetSpeed(
-      character({ surge: 0.35, eventBonus: 0.75 }),
-      GAME_CONFIG,
-    );
+    const withSurge = computeTargetSpeed(character({ surge: 0.35 }), GAME_CONFIG);
+    const withBoth = computeTargetSpeed(character({ surge: 0.35, eventBonus: 0.75 }), GAME_CONFIG);
 
-    // Garde-fou : brancher l'un ou l'autre ici introduirait une règle de jeu non calibrée.
-    expect(loaded).toBe(plain);
+    expect(withSurge).toBe(SPEED.BASE * (1 + 0.35));
+    expect(withSurge).toBeGreaterThan(plain);
+    // Brancher `eventBonus` ici introduirait une règle de jeu que personne n'a calibrée : P008.
+    expect(withBoth).toBe(withSurge);
+  });
+
+  it('additionne dérive et surge dans la même parenthèse, sans écrêtage intermédiaire', () => {
+    expect(computeTargetSpeed(character({ drift: 0.2, surge: -0.3 }), GAME_CONFIG)).toBe(
+      SPEED.BASE * (1 + 0.2 - 0.3),
+    );
+    expect(computeTargetSpeed(character({ drift: -0.2, surge: 0.35 }), GAME_CONFIG)).toBe(
+      SPEED.BASE * (1 - 0.2 + 0.35),
+    );
   });
 });
 

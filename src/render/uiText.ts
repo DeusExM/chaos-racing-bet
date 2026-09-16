@@ -32,6 +32,8 @@ export interface UiText {
   readonly debugDistance: string;
   readonly debugSpeed: string;
   readonly debugDrift: string;
+  /** Surge courant d'un personnage (P007) : `0` quand aucun surge n'est actif. */
+  readonly debugSurge: string;
   /** Libellé du repère décoratif de l'échelle nominale. */
   readonly nominalScale: string;
   /** Libellé du bouton qui lance la course. */

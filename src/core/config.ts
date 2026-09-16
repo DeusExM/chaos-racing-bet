@@ -437,6 +437,15 @@ export function validateConfig(config: GameConfig = GAME_CONFIG): void {
     G.MAGNITUDE_BRAKE_MAX,
     'SURGE : MAGNITUDE_BRAKE_MIN / MAGNITUDE_BRAKE_MAX',
   );
+  // Non-cumul **structurel** (P007) : « un seul surge actif par personnage » n'est pas vérifié après
+  // coup, il découle de cette inégalité. Si la durée maximale dépassait l'intervalle minimal entre
+  // deux débuts, deux surges pourraient se chevaucher et la règle de `GAME_DESIGN.md` §6.4 serait
+  // silencieusement violée.
+  requireOrder(
+    G.DURATION_MAX_S,
+    G.INTERVAL_MIN_S,
+    'SURGE : DURATION_MAX_S doit rester inférieur ou égal à INTERVAL_MIN_S, sinon deux surges pourraient se chevaucher',
+  );
 
   requirePositive(E.RATE_PER_S, 'EVENT.RATE_PER_S');
   requireNonNegative(E.GLOBAL_COOLDOWN_S, 'EVENT.GLOBAL_COOLDOWN_S');

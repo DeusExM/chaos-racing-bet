@@ -326,6 +326,41 @@ Par personnage, indépendant, via un flux aléatoire dédié :
 Un surge est un multiplicateur relatif borné, temporaire, appliqué via la rampe de vitesse
 (§6.2). Les surges ne se cumulent pas : un seul surge actif par personnage.
 
+**Intervalle entre deux débuts** *(clarification P007)*. `INTERVAL_MEAN_S = 9 s` est une **moyenne**,
+et la loi de tirage est désormais explicite : le temps écoulé entre deux **débuts** de surge d'un
+même personnage est **uniforme** sur `[INTERVAL_MIN_S, INTERVAL_MAX_S]`, avec
+
+```
+INTERVAL_MAX_S = 2 × INTERVAL_MEAN_S − INTERVAL_MIN_S = 2 × 9 − 4 = 14 s
+```
+
+Pour une loi uniforme, la moyenne vaut `(min + max) / 2` : cette borne haute est donc la **seule**
+valeur qui donne exactement `INTERVAL_MEAN_S` en moyenne. `14 s` n'est pas une constante de jeu
+indépendante — elle est **dérivée** dans le code de `INTERVAL_MEAN_S` et `INTERVAL_MIN_S`, si bien
+que modifier l'une des deux fait suivre la borne haute sans rien retoucher ailleurs.
+
+Le premier surge d'une course suit **la même loi** : l'attente initiale est tirée comme les
+suivantes, donc le nombre attendu de surges sur `180 s` vaut `180 / 9 = 20`.
+
+**Quantification en pas** *(clarification P007)*. Le noyau ne connaît que des pas fixes de
+`DT_S = 1/60 s` : les tirages sont donc faits en **numéros de pas entiers**, jamais par accumulation
+de secondes flottantes, faute de quoi le planning dépendrait des arrondis d'un moteur à l'autre.
+
+| Grandeur | Bornes en secondes | Bornes en pas (`DT_S`) |
+| --- | --- | --- |
+| Intervalle entre deux débuts | `4,0 – 14,0 s` | `240 – 840` pas |
+| Durée d'un surge | `1,5 – 4,0 s` | `90 – 240` pas |
+
+**Convention d'intervalle** *(clarification P007)*. Un surge de `N` pas est actif sur l'intervalle de
+pas **semi-ouvert** `[startStep, endStep)`, avec `endStep = startStep + N` : le pas de début **subit**
+le surge, le pas de fin ne le subit **plus**. Un surge de `N` pas influence donc exactement `N`
+intégrations de vitesse, ni une de plus ni une de moins.
+
+**Non-cumul** *(clarification P007)*. « Un seul surge actif par personnage » n'est pas une
+vérification faite après coup : la règle découle de `DURATION_MAX_S ≤ INTERVAL_MIN_S` (ici
+`4,0 ≤ 4,0`), c'est-à-dire qu'un surge est toujours terminé quand le suivant commence.
+`validateConfig()` refuse désormais une configuration qui romprait cette inégalité.
+
 ---
 
 ## 7. Événements rares

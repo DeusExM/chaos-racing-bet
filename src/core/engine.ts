@@ -8,6 +8,8 @@ import type { RngStream } from './rng';
 import { forkStream } from './rng';
 import { normalizeSeed } from './seed';
 import { computeTargetSpeed, integratePosition, integrateSpeed } from './speedModel';
+import type { SurgeParams, SurgeState } from './surges';
+import { createSurgeState, stepSurge, surgeParams } from './surges';
 import { segmentElapsedS, segmentIndexAt } from './track';
 import type {
   CharacterId,
@@ -32,13 +34,18 @@ import type {
  * celui, stable, de `CHARACTER_IDS`, et chaque personnage a son propre flux aléatoire nommé.
  *
  * **P004 est une course minimale** : vitesse de base, dérive d'Ornstein–Uhlenbeck indépendante,
- * rampe progressive, intégration de position. Pas encore de surge, pas d'événement, pas de
- * commentaire.
+ * rampe progressive, intégration de position.
  *
  * **P006 ajoute les checkpoints**, et rien d'autre : le moteur **signale** les instants `tSim = 45`,
  * `90` et `135 s` par un fait `CHECKPOINT_SPLIT`, puis **continue**. Il ne s'arrête pas, ne connaît
  * aucune durée de pause et ignore qu'une pause existe : ce qui se passe après le signal appartient
  * entièrement à `RaceSimulation`.
+ *
+ * **P007 ajoute les surges** : de petites accélérations et ralentissements temporaires, tirés par le
+ * planning de `surges.ts` sur un flux `surge:<charId>` distinct de `drift:<charId>`. Le moteur leur
+ * fournit une seule chose — le numéro du pas courant — et reçoit une magnitude relative qu'il publie
+ * dans `CharacterState.surge`. Aucun surge n'écrit jamais dans `x` : il module la vitesse **cible**,
+ * qui passe ensuite par la rampe et par l'écrêtage, comme n'importe quelle autre variation.
  */
 
 /** Numéros humains des segments, dans l'ordre. `RacePhase.segment` est en base 1 (contrat P003). */
@@ -57,6 +64,15 @@ const FINISHED_PHASE: RacePhase = frozenPhase({ kind: 'finished' });
 
 /** Préfixe des flux de dérive : `drift:c0`, `drift:c1`, … Un flux par personnage, jamais partagé. */
 const DRIFT_STREAM_PREFIX = 'drift:';
+
+/**
+ * Préfixe des flux de surge : `surge:c0`, `surge:c1`, …
+ *
+ * Strictement distinct de `drift:` : consommer le flux de surge d'un personnage ne décale donc ni sa
+ * dérive, ni les surges des autres. C'est ce qui permet d'ajouter les surges en P007 sans invalider
+ * une seule dérive de P004.
+ */
+const SURGE_STREAM_PREFIX = 'surge:';
 
 /**
  * Clé technique du texte du split.
@@ -91,6 +107,19 @@ export class RaceEngine {
   private driftStreams: readonly RngStream[];
 
   /**
+   * Un flux de surge par personnage, créé **une seule fois** par course, pour la même raison que les
+   * flux de dérive : le reconstruire à chaque pas ferait repartir chaque personnage du premier tirage
+   * de son flux, et les surges deviendraient un motif répétitif au lieu d'un hasard.
+   */
+  private surgeStreams: readonly RngStream[];
+
+  /** Planning de surge de chaque personnage, aligné sur l'ordre du roster. */
+  private surgeStates: readonly SurgeState[];
+
+  /** Bornes de tirage pré-calculées : aucune conversion secondes → pas dans la boucle. */
+  private readonly surgeConfig: SurgeParams;
+
+  /**
    * Faits produits depuis le dernier `drainFacts()`, dans l'ordre chronologique.
    *
    * P006 n'en produit qu'un seul type : `CHECKPOINT_SPLIT`. Le tampon est vidé par `drainFacts()` et
@@ -111,7 +140,10 @@ export class RaceEngine {
     });
 
     this.seedValue = normalizeSeed(seed);
+    this.surgeConfig = surgeParams(config);
     this.driftStreams = this.createDriftStreams();
+    this.surgeStreams = this.createSurgeStreams();
+    this.surgeStates = this.createSurgeStates();
     this.state = RaceEngine.createInitialState(seed, this.seedValue, config);
   }
 
@@ -129,12 +161,27 @@ export class RaceEngine {
 
     const { DT_S } = this.config.RACE;
 
+    // Numéro du pas en cours de calcul. `state.steps` n'est incrémenté qu'après la boucle : le pas
+    // courant est donc `steps + 1`, et les surges sont planifiés sur cette même base 1 que
+    // `RaceState.steps` une fois le pas terminé.
+    const stepNumber = this.state.steps + 1;
+
     // Ordre physique = ordre stable du roster, jamais celui d'un Map ou d'un Set.
     for (const [index, character] of this.state.characters.entries()) {
       const stream = this.driftStreams[index];
+      const surgeStream = this.surgeStreams[index];
+      const surgeState = this.surgeStates[index];
       if (stream === undefined) {
         throw new RangeError(`Aucun flux de dérive pour l'index ${index}.`);
       }
+      if (surgeStream === undefined || surgeState === undefined) {
+        throw new RangeError(`Aucun planning de surge pour l'index ${index}.`);
+      }
+
+      // Ordre imposé et testé (P007) : le surge du pas est décidé **avant** la dérive, donc avant la
+      // vitesse cible. Un surge qui démarre à ce pas en fait donc déjà partie, et un surge dont la
+      // fin tombe sur ce pas n'en fait déjà plus partie.
+      character.surge = stepSurge(surgeState, surgeStream, this.surgeConfig, stepNumber);
 
       const gaussian = gaussianFrom(stream);
       character.drift = stepOrnsteinUhlenbeck(character.drift, gaussian, this.driftParams);
@@ -207,10 +254,12 @@ export class RaceEngine {
     return Object.freeze(drained);
   }
 
-  /** Repart de zéro sur une nouvelle seed : distances, vitesses, dérives, pas, faits et flux. */
+  /** Repart de zéro sur une nouvelle seed : distances, vitesses, dérives, surges, pas, faits et flux. */
   reset(seed: string): void {
     this.seedValue = normalizeSeed(seed);
     this.driftStreams = this.createDriftStreams();
+    this.surgeStreams = this.createSurgeStreams();
+    this.surgeStates = this.createSurgeStates();
     this.facts = [];
     this.state = RaceEngine.createInitialState(seed, this.seedValue, this.config);
   }
@@ -279,6 +328,22 @@ export class RaceEngine {
   }
 
   /**
+   * Un flux de surge par personnage, nommé `surge:<charId>`.
+   *
+   * La séparation des noms est la seule chose qui garantit l'indépendance : `forkStream` dérive un
+   * état complet par couple `(seed, label)`, donc les six surges et les six dérives sont douze suites
+   * indépendantes, et l'ordre dans lequel on les consomme n'a aucune importance.
+   */
+  private createSurgeStreams(): readonly RngStream[] {
+    return CHARACTER_IDS.map((id) => forkStream(this.seedValue, `${SURGE_STREAM_PREFIX}${id}`));
+  }
+
+  /** Plannings de surge initiaux : le premier surge de chaque personnage est tiré comme les suivants. */
+  private createSurgeStates(): readonly SurgeState[] {
+    return this.surgeStreams.map((stream) => createSurgeState(stream, this.surgeConfig));
+  }
+
+  /**
    * Phase correspondant au temps simulé.
    *
    * La course se termine **exclusivement** par le temps : `finished` est atteint si et seulement si
@@ -323,7 +388,7 @@ export class RaceEngine {
     return Object.freeze({ tSim: this.state.tSim, ranking: Object.freeze(ranking), distances });
   }
 
-  /** État de départ : tout le monde à zéro, même vitesse de base, aucune dérive. */
+  /** État de départ : tout le monde à zéro, même vitesse de base, ni dérive ni surge. */
   private static createInitialState(
     seed: string,
     seedValue: number,

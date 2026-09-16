@@ -1,47 +1,57 @@
 {
-  "note": "Table dorée P004 : distances finales exactes de RaceEngine.runToCompletion(), une entrée par seed affichée. Ces valeurs sont mesurées, jamais choisies. Ne JAMAIS les modifier pour faire passer un test : si elles changent, c'est qu'une règle du noyau a changé.",
+  "note": "Table dorée : distances finales exactes de RaceEngine.runToCompletion(), une entrée par seed affichée. Ces valeurs sont mesurées, jamais choisies. Ne JAMAIS les modifier pour faire passer un test : si elles changent, c'est qu'une règle du noyau a changé.",
   "engine": "src/core/engine.ts",
   "config": "GAME_CONFIG (src/core/config.ts)",
   "totalSteps": 10800,
+  "history": [
+    {
+      "step": "P004",
+      "change": "Table créée, moteur sans surges (drift et rampe seuls)."
+    },
+    {
+      "step": "P007",
+      "change": "Surges activés : les six seeds affichées sont conservées, mais leurs distances sont remesurées. Toutes les valeurs augmentent en moyenne de +0,89 % (biais d'espérance positive des constantes de GAME_DESIGN §6.4), et les classements changent — c'est l'effet recherché par P007."
+    }
+  ],
   "goldenSeeds": [
     {
       "seed": "K7QM2X9A",
       "tSim": 180,
       "ranking": [
         "c2",
-        "c0",
-        "c1",
         "c5",
+        "c0",
         "c4",
-        "c3"
+        "c3",
+        "c1"
       ],
       "distances": [
-        2221.578090859166,
-        2187.605643911287,
-        2252.251456484209,
-        2085.2742518692457,
-        2121.7650196064833,
-        2171.6584927592667
+        2193.2220652505016,
+        2122.1129502492063,
+        2278.9752671849155,
+        2143.0069673211055,
+        2188.9035120771728,
+        2230.5742671446897
       ]
     },
     {
       "seed": "ZZZZZZZZ",
       "tSim": 180,
       "ranking": [
-        "c2",
         "c3",
+        "c2",
+        "c4",
         "c5",
         "c1",
-        "c4",
         "c0"
       ],
       "distances": [
-        2123.761535431612,
-        2167.882627290343,
-        2184.9361610632754,
-        2178.1607689329894,
-        2128.050853433351,
-        2168.937567491111
+        2115.3992625578144,
+        2139.2128217744084,
+        2207.300160836037,
+        2246.2694233819248,
+        2170.023974105963,
+        2167.5480926058017
       ]
     },
     {
@@ -50,18 +60,18 @@
       "ranking": [
         "c4",
         "c2",
+        "c1",
         "c5",
         "c3",
-        "c1",
         "c0"
       ],
       "distances": [
-        2108.500080979185,
-        2146.253928084775,
-        2178.9461636652286,
-        2154.6999465058852,
-        2191.7893362789105,
-        2176.7811819898957
+        2102.0682494754897,
+        2204.4474364548723,
+        2207.752886939549,
+        2158.022874185507,
+        2220.6596999216686,
+        2194.7984065940113
       ]
     },
     {
@@ -69,39 +79,39 @@
       "tSim": 180,
       "ranking": [
         "c1",
-        "c5",
-        "c3",
-        "c0",
         "c2",
+        "c3",
+        "c5",
+        "c0",
         "c4"
       ],
       "distances": [
-        2144.7271377741727,
-        2182.532332763057,
-        2134.9223421835804,
-        2167.676364306296,
-        2098.8734235348634,
-        2173.487359957191
+        2157.3960907617998,
+        2230.1373054844557,
+        2219.7386658394394,
+        2203.87277012793,
+        2119.7232585308275,
+        2194.2780684109484
       ]
     },
     {
       "seed": "BANAN4X2",
       "tSim": 180,
       "ranking": [
-        "c1",
-        "c5",
         "c0",
         "c3",
         "c4",
+        "c1",
+        "c5",
         "c2"
       ],
       "distances": [
-        2191.0478238982396,
-        2206.2170730422,
-        2169.7880477525223,
-        2184.299153224738,
-        2177.820270422058,
-        2200.6829406203815
+        2285.209106685175,
+        2207.475594538035,
+        2166.6302519254486,
+        2224.099066099328,
+        2218.195086215813,
+        2186.8788692406088
       ]
     },
     {
@@ -109,19 +119,19 @@
       "tSim": 180,
       "ranking": [
         "c0",
-        "c3",
-        "c5",
-        "c2",
+        "c4",
         "c1",
-        "c4"
+        "c5",
+        "c3",
+        "c2"
       ],
       "distances": [
-        2229.3936931765816,
-        2124.8701713099645,
-        2137.92974113552,
-        2161.8066849253596,
-        2103.3723446491877,
-        2148.1400043733092
+        2213.0642391809633,
+        2160.9647030151373,
+        2122.3077170396314,
+        2127.203974411136,
+        2163.6553432984942,
+        2157.0785677929007
       ]
     }
   ]

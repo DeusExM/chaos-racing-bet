@@ -361,23 +361,28 @@ describe('indépendance des flux aléatoires', () => {
 
     for (let step = 0; step < 4000; step += 1) {
       engine.step();
+      const character = engine.getState().characters[0];
+      if (character === undefined) {
+        throw new Error('c0 manquant : impossible de reconstruire la course.');
+      }
 
       // Reconstruction indépendante, avec le seul flux de c0.
       drift = stepOrnsteinUhlenbeck(drift, gaussianFrom(stream), params);
       const probe: CharacterState = {
         id: 'c0',
+        // Le surge appartient à P007 : il est relu sur l'état publié, qui est exactement la valeur
+        // utilisée pour ce pas. Le flux `surge:c0` n'a donc aucune influence sur ce test.
+        surge: character.surge,
         x,
         v,
         drift,
-        surge: 0,
         eventBonus: 0,
         activeEvent: null,
       };
       v = integrateSpeed(v, computeTargetSpeed(probe, GAME_CONFIG), GAME_CONFIG, DT);
       x = integratePosition(x, v, DT);
 
-      const character = engine.getState().characters[0];
-      if (character?.x !== x || character.v !== v || character.drift !== drift) {
+      if (character.x !== x || character.v !== v || character.drift !== drift) {
         violations += 1;
       }
     }
@@ -389,16 +394,13 @@ describe('indépendance des flux aléatoires', () => {
 
 describe('équivalence des 6 personnages', () => {
   /**
-   * Le DoD demande « sur 200 000 pas ». On en fait volontairement beaucoup plus.
-   *
    * La vitesse moyenne d'une course vaut exactement `x_final / tSim` : c'est la moyenne temporelle
-   * des 10 800 vitesses, donc une mesure gratuite et exacte. Mais l'écart-type de cette moyenne sur
-   * **une** course est de 2,1 %, ce qui laisse ±1,5 % à seulement 3 σ après 19 courses : un test
-   * fragile, et effectivement franchi par une seed sur le premier jeu essayé. Sur 96 courses
-   * (1 036 800 pas), l'écart-type tombe à 0,21 % et le seuil devient inatteignable par le hasard.
+   * des 10 800 vitesses, donc une mesure gratuite et exacte. L'écart-type de cette moyenne sur une
+   * seule course est de 2,1 % ; sur 384 courses (4 147 200 pas) il tombe à 0,11 %, ce qui rend les
+   * seuils ci-dessous inatteignables par le hasard.
    */
-  it('garde la vitesse moyenne de chaque personnage dans SPEED.BASE ± 1,5 %', () => {
-    const races = 96;
+  it('garde les six personnages indistinguables, avec un biais global hérité des surges', () => {
+    const races = 384;
     const totals = CHARACTER_IDS.map(() => 0);
 
     for (let race = 0; race < races; race += 1) {
@@ -414,6 +416,7 @@ describe('équivalence des 6 personnages', () => {
     const means = totals.map((total) => total / races);
     const grand = means.reduce((sum, mean) => sum + mean, 0) / means.length;
 
+    // 1. DoD : chaque personnage reste dans `SPEED.BASE ± 1,5 %`.
     for (const [index, mean] of means.entries()) {
       const relative = Math.abs(mean - SPEED.BASE) / SPEED.BASE;
       expect(relative, `${CHARACTER_IDS[index]} : ${(relative * 100).toFixed(3)} %`).toBeLessThan(
@@ -421,10 +424,24 @@ describe('équivalence des 6 personnages', () => {
       );
     }
 
-    // Moyenne globale : détecte un biais structurel, avec beaucoup plus de marge.
-    expect(Math.abs(grand - SPEED.BASE) / SPEED.BASE).toBeLessThan(0.005);
-    // Aucun id n'est favorisé : l'étendue entre personnages reste du niveau du bruit.
-    expect(Math.max(...means) - Math.min(...means)).toBeLessThan(SPEED.BASE * 0.01);
+    // 2. Équivalence (invariant §5.6) : aucun personnage n'est favorisé par rapport aux autres.
+    const spread = Math.max(...means) - Math.min(...means);
+    expect(spread / SPEED.BASE).toBeLessThan(0.005);
+    for (const [index, mean] of means.entries()) {
+      const relative = Math.abs(mean - grand) / SPEED.BASE;
+      expect(relative, `${CHARACTER_IDS[index]} vs moyenne : ${(relative * 100).toFixed(3)} %`)
+        .toBeLessThan(0.005);
+    }
+
+    // 3. Biais global partagé. Les constantes de `GAME_DESIGN.md` §6.4 ont une espérance de surge
+    //    **positive** : 55 % d'accélérations à +0,225 en moyenne contre 45 % de freinages à −0,20,
+    //    soit +0,03375 par surge actif, et un surge n'occupe qu'environ 30 % du temps simulé. Un
+    //    biais commun aux six personnages est donc attendu, d'environ +0,9 % : la borne basse est le
+    //    signe de ce biais, la borne haute le seuil du DoD. Ce point est signalé dans le compte
+    //    rendu P007 (voir aussi `surgeRace.test.ts`, qui mesure l'espérance algébrique exacte).
+    const relative = (grand - SPEED.BASE) / SPEED.BASE;
+    expect(relative, `biais global mesuré : ${(relative * 100).toFixed(3)} %`).toBeGreaterThan(0);
+    expect(relative).toBeLessThan(0.015);
   }, 120_000);
 });
 

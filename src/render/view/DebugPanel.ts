@@ -6,8 +6,8 @@ import type { UiText } from '../uiText';
  * Panneau de debug (`?debug=1`).
  *
  * Il n'affiche que des valeurs lues dans l'état du noyau : `tSim`, nombre de pas, distances,
- * vitesses, drift. C'est un outil de mise au point, pas une interface de jeu, et il ne participe
- * jamais au rendu de la course.
+ * vitesses, drift, surge. C'est un outil de mise au point, pas une interface de jeu, et il ne
+ * participe jamais au rendu de la course.
  */
 export class DebugPanel {
   private readonly text: UiText;
@@ -43,9 +43,11 @@ export class DebugPanel {
       const distance = character.x.toFixed(2).replace('.', ',');
       const speed = character.v.toFixed(3).replace('.', ',');
       const drift = character.drift.toFixed(4).replace('.', ',');
+      const surge = character.surge.toFixed(4).replace('.', ',');
       lines.push(
         `${character.id}  ${this.text.debugDistance}=${distance}${this.text.metres}  ` +
-          `${this.text.debugSpeed}=${speed}  ${this.text.debugDrift}=${drift}`,
+          `${this.text.debugSpeed}=${speed}  ${this.text.debugDrift}=${drift}  ` +
+          `${this.text.debugSurge}=${surge}`,
       );
     }
 

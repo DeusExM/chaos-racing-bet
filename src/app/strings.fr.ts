@@ -29,6 +29,7 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   debugDistance: 'x',
   debugSpeed: 'v',
   debugDrift: 'drift',
+  debugSurge: 'surge',
 
   nominalScale: 'échelle nominale',
 

@@ -574,7 +574,7 @@ vrais graphismes (P014), HUD soigné (P011).
 
 ---
 
-### P007 — Surges (variations occasionnelles)
+### P007 — Surges (variations occasionnelles) `[x]`
 
 **Objectif** : ajouter les petites accélérations / ralentissements ponctuels, en plus de la dérive
 permanente déjà présente (P004).

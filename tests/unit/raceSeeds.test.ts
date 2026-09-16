@@ -36,7 +36,7 @@ describe('seed retenue pour les tests de dépassement', () => {
     expect(measured.overtakes).toBeGreaterThanOrEqual(3);
   });
 
-  it('détecte les dépassements pas à pas, sans dépendre de la fréquence d’observation', () => {
+  it('détecte les dépassements à la granularité du noyau : un relevé par pas simulé', () => {
     // Avant le correctif, `overtakesBetween` exigeait de dépasser `OVERTAKE.MIN_MARGIN` **entre deux
     // relevés** : comme un pas ne vaut que `SPEED.BASE × DT_S = 0,2 m`, observer pas à pas ne
     // comptait aucun dépassement. L'écart d'un pas reste inférieur à la marge — c'est une propriété
@@ -47,12 +47,18 @@ describe('seed retenue pour les tests de dépassement', () => {
     const everyStep = measureOvertakes(OVERTAKE_SEED);
     expect(everyStep.overtakes).toBeGreaterThan(0);
 
-    // L'hystérésis mémorise le côté confirmé de chaque paire : tant qu'un relevé tombe dans la même
-    // seconde simulée, le nombre de dépassements est **le même**.
+    // La propriété garantie est celle-ci : **alimenté à chaque pas simulé**, le détecteur ne dépend
+    // ni du FPS, ni du rendu, ni du `timeScale` — c'est la granularité qu'utilise P009.
+    //
+    // Ce qui suit est une **mesure**, pas un invariant : sur cette seed précise, relever un pas sur 2,
+    // 5 ou 10 donne le même total, parce qu'aucun aller-retour n'a été plus rapide que ces
+    // intervalles-là. Un observateur sous-échantillonné peut toujours manquer un aller-retour rapide
+    // (le test suivant le documente) : il ne faut donc pas présenter 1/2/5/10 pas comme une loi
+    // générale.
     for (const granularity of [2, 5, 10]) {
       expect(
         measureSampledOvertakes(OVERTAKE_SEED, granularity).overtakes,
-        `un relevé tous les ${granularity} pas`,
+        `un relevé tous les ${granularity} pas (mesure pour cette seed)`,
       ).toBe(everyStep.overtakes);
     }
   });

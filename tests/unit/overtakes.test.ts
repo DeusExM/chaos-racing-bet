@@ -116,6 +116,43 @@ describe('OvertakeTracker : hystérésis de dépassement', () => {
     expect(observeGap(tracker, -0.6)).toBe(1);
   });
 
+  it('accepte le même ordre d’identifiants à chaque observation', () => {
+    const tracker = new OvertakeTracker();
+
+    for (let step = 0; step < 50; step += 1) {
+      expect(tracker.observe([100, 98, 96, 94, 92, 90], SIX)).toEqual([]);
+    }
+
+    // Une observation vide ne dit rien de l'ordre et ne l'engage pas.
+    expect(tracker.observe([], [])).toEqual([]);
+    expect(tracker.observe([100, 98, 96, 94, 92, 90], SIX)).toEqual([]);
+  });
+
+  it('refuse une permutation de deux identifiants, au lieu d’attribuer un dépassement au mauvais couple', () => {
+    const tracker = new OvertakeTracker();
+    const permuted = Object.freeze(['c1', 'c0', 'c2', 'c3', 'c4', 'c5'] as const);
+
+    expect(tracker.observe([100, 98, 96, 94, 92, 90], SIX)).toEqual([]);
+    expect(() => tracker.observe([100, 98, 96, 94, 92, 90], permuted)).toThrow(/ordre des identifiants/);
+
+    // Une liste plus courte est refusée pour la même raison : les index ne désignent plus les mêmes
+    // personnages.
+    expect(() => tracker.observe([100, 98, 96, 94, 92], SIX.slice(0, 5))).toThrow(RangeError);
+  });
+
+  it('adopte un nouvel ordre après reset, comme au départ d’une autre course', () => {
+    const tracker = new OvertakeTracker();
+    const swapped: readonly CharacterId[] = ['c1', 'c0'];
+
+    expect(tracker.observe([100, 90], ['c0', 'c1'])).toEqual([]);
+    tracker.reset();
+
+    // Après reset, l'ordre mémorisé est oublié : un autre roster repart proprement, sans dépassement
+    // fictif hérité d'un ancien côté confirmé (le premier relevé ne fait qu'initialiser la paire).
+    expect(tracker.observe([100, 90], swapped)).toEqual([]);
+    expect(tracker.observe([90, 100], swapped)).toEqual([{ overtaker: 'c0', overtaken: 'c1' }]);
+  });
+
   it('refuse des entrées inexploitables', () => {
     const tracker = new OvertakeTracker();
 

@@ -560,6 +560,31 @@ Un fait n'est **jamais** émis sans la variation d'état correspondante. Chaque 
 suit est décidée par `RaceSimulation` (§4.2). Le fait et la pause sont donc deux choses distinctes et
 indépendantes : le fait existe même si l'on décide de ne pas pauser (mode test, avance rapide).
 
+**Conventions d'implémentation (P009-A, `src/core/observer.ts`).** Elles ne modifient **aucune**
+constante du tableau ci-dessus : elles fixent seulement ce que contient chaque fait, et la façon dont
+il est détecté.
+
+* L'observateur est le **seul** producteur de faits, alimenté à **chaque pas simulé** (jamais à la
+  fréquence du rendu). Il ne lit que les distances et l'événement actif du pas, n'écrit jamais dans
+  `x`/`v`/le rang, ne tire aucun hasard et ne connaît ni le rendu, ni l'horloge réelle, ni `timeScale`.
+* `magnitudes` : `LEADER_CHANGE` = `[marge P1–P2, secondes de règne du précédent]` ;
+  `BIG_COMEBACK` = `[places gagnées, rang courant]` ; `OVERTAKE_STREAK` = `[dépassements dans la
+  fenêtre]` ; `BIG_BONUS` et `LEADER_MALUS` = `[magnitude de l'événement, durée, rang au moment du
+  tirage]` ; `CLOSE_RACE` = `[écart P1–P3, secondes écoulées]` ; `LAST_COMEBACK` = `[places gagnées,
+  rang courant]` ; `CHECKPOINT_SPLIT` = distances **dans l'ordre du classement** (P1 → P6) ;
+  `FINISH` et `PHOTO_FINISH` = `[écart P1–P2, distance du 1er, distance du 2e]`.
+* Les dépassements ne viennent **que** de `OvertakeTracker` (`src/core/overtakes.ts`), alimenté à
+  chaque pas : aucune comparaison occasionnelle de classement ne peut créer un `OVERTAKE_STREAK`.
+* Un fait « d'épisode » n'est émis qu'**une fois par épisode** (le verrou se lève quand la condition
+  redevient fausse) et **jamais au premier relevé**, qui ne sert qu'à établir la référence ; seule
+  `CLOSE_RACE` commence à compter dès le premier pas — elle est alors émise à 5 s pleines.
+* `LEADER_CHANGE` est daté au **pas de confirmation** (rang 1 tenu `0,75 s` **et** marge ≥ `1,0 m`).
+  Pour `CHECKPOINT_SPLIT`, « le leader a changé » signifie : au moins un `LEADER_CHANGE` confirmé a été
+  émis depuis le checkpoint précédent — depuis le départ de la course pour le premier.
+* Toutes les fenêtres (5 s, 10 s, 30 s) sont comptées en **pas entiers** ; la mémoire de l'observateur
+  est constante (aucune photographie de course n'est conservée). Les seuils et importances vivent dans
+  la section `FACT` de `src/core/config.ts`.
+
 ### 9.3 Discipline de parole
 
 | Constante | Valeur | Rôle |

@@ -96,15 +96,64 @@ export interface SpeakConfig {
 }
 
 /**
- * Importance de base des faits, de 0 à 100 (`GAME_DESIGN.md` §9.2).
+ * Importances de base des faits et seuils de détection (`GAME_DESIGN.md` §9.2).
  *
- * Sous `SPEAK.MIN_IMPORTANCE`, un fait n'est pas commenté. P006 n'émet qu'un seul type de fait : les
- * autres importances arrivent avec le planificateur d'événements (P008) et l'observateur (P009), et
- * cette section sera complétée **à ce moment-là**, pas avant.
+ * Sous `SPEAK.MIN_IMPORTANCE`, un fait n'est pas commenté. Chaque seuil et chaque importance de §9.2
+ * est nommé **ici et une seule fois** : l'observateur de faits (`observer.ts`) ne contient aucune
+ * valeur magique. Les modificateurs conditionnels de §9.2 (« +20 si le leader a changé », « +10 si
+ * l'écart P1–P2 < 20 m », « +15 si la cible est le leader ») sont aussi des constantes : ils sont
+ * appliqués par l'observateur, à partir de variations réellement mesurées.
+ *
+ * Les clés évitent volontairement le mot « finish » : `FINISH` et `PHOTO_FINISH` restent des **types
+ * de faits**, mais leurs constantes s'appellent `ARRIVAL`, pour ne pas ressembler à une distance
+ * d'arrivée — notion interdite dans le noyau, où la course se termine uniquement par le temps.
  */
 export interface FactConfig {
-  /** `CHECKPOINT_SPLIT` : instant de checkpoint atteint (`tSim` = 45, 90 ou 135 s). */
+  /** `LEADER_CHANGE` : base, `+ min(BONUS_MAX, secondes de règne du précédent)`. */
+  readonly LEADER_CHANGE_IMPORTANCE: number;
+  readonly LEADER_CHANGE_MAX_REIGN_BONUS: number;
+  /** `BIG_COMEBACK` : base, `+ BONUS_PAR_PLACE × (places − PLACES)`. */
+  readonly BIG_COMEBACK_IMPORTANCE: number;
+  readonly BIG_COMEBACK_BONUS_PER_PLACE: number;
+  /** `OVERTAKE_STREAK` : base, `+ BONUS_PAR_DEPASSEMENT × (n − MIN)`. */
+  readonly OVERTAKE_STREAK_IMPORTANCE: number;
+  readonly OVERTAKE_STREAK_BONUS_PER_OVERTAKE: number;
+  /** `BIG_BONUS` : base, `+ BONUS_LEADER` si la cible est leader, `+ BONUS_LAST` si elle est dernière. */
+  readonly BIG_BONUS_IMPORTANCE: number;
+  readonly BIG_BONUS_LEADER_BONUS: number;
+  readonly BIG_BONUS_LAST_BONUS: number;
+  /** `LEADER_MALUS` : base, `+ BONUS_SIESTE` pour `SIESTE`. */
+  readonly LEADER_MALUS_IMPORTANCE: number;
+  readonly LEADER_MALUS_SIESTE_BONUS: number;
+  /** `CLOSE_RACE` : importance fixe. */
+  readonly CLOSE_RACE_IMPORTANCE: number;
+  /** `LAST_COMEBACK` : importance fixe. */
+  readonly LAST_COMEBACK_IMPORTANCE: number;
+  /** `CHECKPOINT_SPLIT` : base, `+ BONUS_LEADER_CHANGE` et `+ BONUS_CLOSE`. */
   readonly CHECKPOINT_SPLIT_IMPORTANCE: number;
+  readonly CHECKPOINT_SPLIT_LEADER_CHANGE_BONUS: number;
+  readonly CHECKPOINT_SPLIT_CLOSE_BONUS: number;
+  /** `FINISH` : importance fixe. */
+  readonly ARRIVAL_IMPORTANCE: number;
+  /** `PHOTO_FINISH` : importance fixe ; ce fait **remplace** `FINISH`. */
+  readonly PHOTO_ARRIVAL_IMPORTANCE: number;
+  /** `BIG_COMEBACK` : gain minimal en places, et fenêtre maximale en secondes. */
+  readonly BIG_COMEBACK_PLACES: number;
+  readonly BIG_COMEBACK_WINDOW_S: number;
+  /** `OVERTAKE_STREAK` : nombre minimal de dépassements, et fenêtre maximale en secondes. */
+  readonly OVERTAKE_STREAK_MIN: number;
+  readonly OVERTAKE_STREAK_WINDOW_S: number;
+  /** `CLOSE_RACE` : écart P1–P3 maximal en mètres, et durée minimale consécutive en secondes. */
+  readonly CLOSE_RACE_MAX_GAP_M: number;
+  readonly CLOSE_RACE_MIN_DURATION_S: number;
+  /** `LAST_COMEBACK` : rang visé, gain minimal en places, fenêtre maximale en secondes. */
+  readonly LAST_COMEBACK_RANK: number;
+  readonly LAST_COMEBACK_PLACES: number;
+  readonly LAST_COMEBACK_WINDOW_S: number;
+  /** `PHOTO_FINISH` : écart P1–P2 strictement inférieur à cette valeur, en mètres. */
+  readonly PHOTO_ARRIVAL_MAX_GAP_M: number;
+  /** `CHECKPOINT_SPLIT` : écart P1–P2 strictement inférieur à cette valeur, en mètres. */
+  readonly CHECKPOINT_SPLIT_CLOSE_GAP_M: number;
 }
 
 /** Temps simulé de la course. Le noyau ignore tout du temps réel. */
@@ -255,7 +304,43 @@ export const SPEAK: SpeakConfig = Object.freeze({
  * le noyau, qui ne conserve aucun historique, et seront appliqués par l'observateur de faits (P009).
  */
 export const FACT: FactConfig = Object.freeze({
+  // §9.2 : `LEADER_CHANGE` = 45 + min(25, secondes de règne du précédent).
+  LEADER_CHANGE_IMPORTANCE: 45,
+  LEADER_CHANGE_MAX_REIGN_BONUS: 25,
+  // §9.2 : `BIG_COMEBACK` = 50 + 5 × (places − 3).
+  BIG_COMEBACK_IMPORTANCE: 50,
+  BIG_COMEBACK_BONUS_PER_PLACE: 5,
+  // §9.2 : `OVERTAKE_STREAK` = 45 + 5 × (n − 3).
+  OVERTAKE_STREAK_IMPORTANCE: 45,
+  OVERTAKE_STREAK_BONUS_PER_OVERTAKE: 5,
+  // §9.2 : `BIG_BONUS` = 40, +15 si la cible est le leader, +10 si elle est dernière.
+  BIG_BONUS_IMPORTANCE: 40,
+  BIG_BONUS_LEADER_BONUS: 15,
+  BIG_BONUS_LAST_BONUS: 10,
+  // §9.2 : `LEADER_MALUS` = 60, +15 si `SIESTE`.
+  LEADER_MALUS_IMPORTANCE: 60,
+  LEADER_MALUS_SIESTE_BONUS: 15,
+  CLOSE_RACE_IMPORTANCE: 40,
+  LAST_COMEBACK_IMPORTANCE: 55,
+  // §9.2 : `CHECKPOINT_SPLIT` = 38, +20 si le leader a changé, +10 si écart P1–P2 < 20 m.
   CHECKPOINT_SPLIT_IMPORTANCE: 38,
+  CHECKPOINT_SPLIT_LEADER_CHANGE_BONUS: 20,
+  CHECKPOINT_SPLIT_CLOSE_BONUS: 10,
+  // §9.2 : `FINISH` = 80, `PHOTO_FINISH` = 90 et remplace `FINISH`.
+  ARRIVAL_IMPORTANCE: 80,
+  PHOTO_ARRIVAL_IMPORTANCE: 90,
+  // Seuils de détection de §9.2.
+  BIG_COMEBACK_PLACES: 3,
+  BIG_COMEBACK_WINDOW_S: 10,
+  OVERTAKE_STREAK_MIN: 3,
+  OVERTAKE_STREAK_WINDOW_S: 5,
+  CLOSE_RACE_MAX_GAP_M: 15,
+  CLOSE_RACE_MIN_DURATION_S: 5,
+  LAST_COMEBACK_RANK: 3,
+  LAST_COMEBACK_PLACES: 4,
+  LAST_COMEBACK_WINDOW_S: 30,
+  PHOTO_ARRIVAL_MAX_GAP_M: 5,
+  CHECKPOINT_SPLIT_CLOSE_GAP_M: 20,
 });
 
 /** Vue agrégée de toutes les constantes, utilisée par `validateConfig()`. */
@@ -473,6 +558,48 @@ export function validateConfig(config: GameConfig = GAME_CONFIG): void {
   requireIntegerAtLeast(K.MAX_LINES_PER_SEGMENT, 1, 'SPEAK.MAX_LINES_PER_SEGMENT');
   requireNonNegative(K.MIN_WINDOW_AVG_S, 'SPEAK.MIN_WINDOW_AVG_S');
 
-  requireNonNegative(F.CHECKPOINT_SPLIT_IMPORTANCE, 'FACT.CHECKPOINT_SPLIT_IMPORTANCE');
-  requireAtMost(F.CHECKPOINT_SPLIT_IMPORTANCE, 100, 'FACT.CHECKPOINT_SPLIT_IMPORTANCE');
+  // Importances de faits : toutes dans [0 ; 100], y compris après le modificateur conditionnel le
+  // plus élevé possible. Un fait dont l'importance dépasserait 100 serait un contrat rompu (§9.2).
+  for (const [key, value] of Object.entries(F)) {
+    requireNonNegative(value, `FACT.${key}`);
+    if (key.endsWith('_IMPORTANCE') || key.endsWith('_BONUS')) {
+      requireAtMost(value, 100, `FACT.${key}`);
+    }
+  }
+  requireAtMost(
+    F.LEADER_CHANGE_IMPORTANCE + F.LEADER_CHANGE_MAX_REIGN_BONUS,
+    100,
+    'FACT : LEADER_CHANGE_IMPORTANCE + LEADER_CHANGE_MAX_REIGN_BONUS',
+  );
+  requireAtMost(
+    F.CHECKPOINT_SPLIT_IMPORTANCE + F.CHECKPOINT_SPLIT_LEADER_CHANGE_BONUS + F.CHECKPOINT_SPLIT_CLOSE_BONUS,
+    100,
+    'FACT : CHECKPOINT_SPLIT_IMPORTANCE + ses deux bonus',
+  );
+  requireAtMost(
+    F.BIG_BONUS_IMPORTANCE + Math.max(F.BIG_BONUS_LEADER_BONUS, F.BIG_BONUS_LAST_BONUS),
+    100,
+    'FACT : BIG_BONUS_IMPORTANCE + son bonus maximal',
+  );
+  requireAtMost(
+    F.LEADER_MALUS_IMPORTANCE + F.LEADER_MALUS_SIESTE_BONUS,
+    100,
+    'FACT : LEADER_MALUS_IMPORTANCE + LEADER_MALUS_SIESTE_BONUS',
+  );
+
+  // Seuils de détection : un seuil nul ou négatif rendrait un fait gratuit, donc non mesuré.
+  requirePositive(F.BIG_COMEBACK_PLACES, 'FACT.BIG_COMEBACK_PLACES');
+  requirePositive(F.BIG_COMEBACK_WINDOW_S, 'FACT.BIG_COMEBACK_WINDOW_S');
+  requirePositive(F.OVERTAKE_STREAK_MIN, 'FACT.OVERTAKE_STREAK_MIN');
+  requirePositive(F.OVERTAKE_STREAK_WINDOW_S, 'FACT.OVERTAKE_STREAK_WINDOW_S');
+  requirePositive(F.CLOSE_RACE_MAX_GAP_M, 'FACT.CLOSE_RACE_MAX_GAP_M');
+  requirePositive(F.CLOSE_RACE_MIN_DURATION_S, 'FACT.CLOSE_RACE_MIN_DURATION_S');
+  requirePositive(F.LAST_COMEBACK_RANK, 'FACT.LAST_COMEBACK_RANK');
+  requirePositive(F.LAST_COMEBACK_PLACES, 'FACT.LAST_COMEBACK_PLACES');
+  requirePositive(F.LAST_COMEBACK_WINDOW_S, 'FACT.LAST_COMEBACK_WINDOW_S');
+  requirePositive(F.PHOTO_ARRIVAL_MAX_GAP_M, 'FACT.PHOTO_ARRIVAL_MAX_GAP_M');
+  requirePositive(F.CHECKPOINT_SPLIT_CLOSE_GAP_M, 'FACT.CHECKPOINT_SPLIT_CLOSE_GAP_M');
+  // Le rang visé doit rester dans le roster : viser au-delà serait un fait impossible à atteindre.
+  requireAtMost(F.LAST_COMEBACK_RANK, 6, 'FACT.LAST_COMEBACK_RANK');
+  requireAtMost(F.LAST_COMEBACK_PLACES, 5, 'FACT.LAST_COMEBACK_PLACES');
 }

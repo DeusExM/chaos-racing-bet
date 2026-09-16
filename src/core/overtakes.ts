@@ -14,6 +14,22 @@ import type { CharacterId } from './types';
  * confirmé cède la place à l'autre côté confirmé. Franchir la marge est donc nécessaire, mais une
  * inversion de rang seule ne suffit jamais.
  *
+ * ## Propriété exacte vis-à-vis de l'échantillonnage
+ *
+ * La propriété garantie est : **lorsque `OvertakeTracker` est alimenté à CHAQUE PAS SIMULÉ**, les
+ * faits de dépassement sont indépendants du FPS, du rendu et du `timeScale`. Ce n'est **pas** un
+ * invariant général de fréquence d'échantillonnage : l'hystérésis mémorise un côté confirmé, donc un
+ * observateur qui ne relève qu'un pas sur `k` peut manquer un aller-retour plus rapide que son
+ * intervalle de relevé. Une mesure « tous les 2, 5 ou 10 pas » ne vaut que pour la seed mesurée.
+ *
+ * ## Ordre des identifiants : un contrat explicite
+ *
+ * Les paires sont mémorisées **par index** : l'ordre de `ids` fait donc partie du contrat. Il est
+ * mémorisé à la première observation non vide, puis vérifié à chaque appel. Un ordre différent —
+ * liste plus courte, identifiant remplacé ou permuté — lève une `RangeError` au lieu de produire
+ * silencieusement des dépassements faux. `reset()` oublie à la fois les côtés confirmés et cet ordre
+ * mémorisé, afin qu'une nouvelle course puisse repartir proprement sur son propre roster.
+ *
  * ## Ce que ce module ne fait jamais
  *
  * * Il n'écrit **jamais** dans `x`/`v` : sa seule mémoire est observationnelle.
@@ -28,15 +44,17 @@ export interface Overtake {
   readonly overtaken: CharacterId;
 }
 
-interface Observation {
-  readonly x: number;
-  readonly id: CharacterId;
-}
-
 /** Côté confirmé d'une paire : aucun des deux, le premier observé, ou le second. */
 const NEUTRAL = 0;
 const FIRST_CONFIRMED = 1;
 const SECOND_CONFIRMED = 2;
+
+/**
+ * Résultat vide partagé : la très grande majorité des pas ne confirme aucun dépassement, et allouer
+ * un tableau à chaque pas coûterait cher pour rien. Il est figé, donc un appelant ne peut pas le
+ * corrompre.
+ */
+const NO_OVERTAKES: readonly Overtake[] = Object.freeze([]);
 
 function requireObservable(xs: readonly number[], ids: readonly CharacterId[]): void {
   if (xs.length !== ids.length) {
@@ -76,51 +94,59 @@ function pairIndex(i: number, j: number, n: number): number {
  */
 export class OvertakeTracker {
   private sides: Int8Array = new Int8Array(0);
-  private size = 0;
+
+  /**
+   * Ordre exact des identifiants, mémorisé à la première observation non vide.
+   *
+   * Les paires étant indexées par position, réutiliser l'état d'une course pour un roster différent
+   * produirait des dépassements attribués aux mauvais personnages. L'ordre est donc un contrat, pas
+   * une convention : il est vérifié, et une divergence lève une `RangeError`.
+   */
+  private ids: readonly CharacterId[] | null = null;
 
   /**
    * Observe un pas et renvoie les dépassements confirmés par cette observation.
    *
-   * L'ordre des tableaux définit l'index de chaque personnage : il doit rester stable d'un pas à
-   * l'autre. Un changement de longueur (nouvelle course) réinitialise l'état des paires.
+   * La première observation non vide fixe l'ordre des identifiants ; les suivantes doivent présenter
+   * exactement la même liste, dans le même ordre. Une liste vide ne dit rien de l'ordre et ne
+   * l'engage donc pas.
    */
   observe(xs: readonly number[], ids: readonly CharacterId[]): readonly Overtake[] {
     requireObservable(xs, ids);
 
+    if (xs.length === 0) {
+      return NO_OVERTAKES;
+    }
+
+    this.requireSameRoster(ids);
+
     const n = xs.length;
-    if (n !== this.size) {
-      this.sides = new Int8Array((n * (n - 1)) / 2);
-      this.size = n;
-    }
+    let overtakes: Overtake[] | null = null;
 
-    const observations: Observation[] = [];
-    for (const [index, x] of xs.entries()) {
-      const id = ids[index];
-      if (id === undefined) {
-        throw new RangeError(`ids[${index}] est manquant.`);
-      }
-      observations.push({ x, id });
-    }
-
-    const overtakes: Overtake[] = [];
     for (let i = 0; i < n; i += 1) {
+      const firstX = xs[i];
+      const firstId = ids[i];
+      if (firstX === undefined || firstId === undefined) {
+        throw new RangeError(`Observation incomplète à l'index ${i}.`);
+      }
+
       for (let j = i + 1; j < n; j += 1) {
-        const first = observations[i];
-        const second = observations[j];
-        if (first === undefined || second === undefined) {
-          throw new RangeError(`paire (${i}, ${j}) hors bornes.`);
+        const secondX = xs[j];
+        const secondId = ids[j];
+        if (secondX === undefined || secondId === undefined) {
+          throw new RangeError(`Observation incomplète à l'index ${j}.`);
         }
 
         const pair = pairIndex(i, j, n);
         const side = this.sides[pair] ?? NEUTRAL;
-        if (first.x - second.x > OVERTAKE.MIN_MARGIN) {
+        if (firstX - secondX > OVERTAKE.MIN_MARGIN) {
           if (side === SECOND_CONFIRMED) {
-            overtakes.push({ overtaker: first.id, overtaken: second.id });
+            (overtakes ??= []).push({ overtaker: firstId, overtaken: secondId });
           }
           this.sides[pair] = FIRST_CONFIRMED;
-        } else if (second.x - first.x > OVERTAKE.MIN_MARGIN) {
+        } else if (secondX - firstX > OVERTAKE.MIN_MARGIN) {
           if (side === FIRST_CONFIRMED) {
-            overtakes.push({ overtaker: second.id, overtaken: first.id });
+            (overtakes ??= []).push({ overtaker: secondId, overtaken: firstId });
           }
           this.sides[pair] = SECOND_CONFIRMED;
         }
@@ -128,11 +154,44 @@ export class OvertakeTracker {
       }
     }
 
-    return overtakes;
+    // Aucun dépassement est le cas courant : renvoyer une valeur partagée évite une allocation par pas.
+    return overtakes === null ? NO_OVERTAKES : overtakes;
   }
 
-  /** Remet toutes les paires au repos, comme au départ d'une course. */
+  /**
+   * Fixe l'ordre à la première observation non vide, puis exige qu'il ne change plus jamais.
+   *
+   * Comparer les identifiants un à un (et non seulement la longueur) est indispensable : deux
+   * rosters de même taille mais d'ordre différent réutiliseraient les mêmes index pour des
+   * personnages différents, et l'hystérésis attribuerait alors un dépassement au mauvais couple.
+   */
+  private requireSameRoster(ids: readonly CharacterId[]): void {
+    const memorized = this.ids;
+
+    if (memorized === null) {
+      this.ids = Object.freeze([...ids]);
+      this.sides = new Int8Array((ids.length * (ids.length - 1)) / 2);
+      return;
+    }
+
+    if (memorized.length !== ids.length) {
+      throw new RangeError(
+        `OvertakeTracker : l'observateur fournit ${ids.length} identifiants alors que l'ordre mémorisé en compte ${memorized.length}. Appeler reset() pour changer de roster.`,
+      );
+    }
+
+    for (const [index, id] of ids.entries()) {
+      if (memorized[index] !== id) {
+        throw new RangeError(
+          `OvertakeTracker : l'ordre des identifiants a changé en position ${index} (« ${memorized[index]} » attendu, « ${id} » reçu). Appeler reset() pour changer de roster.`,
+        );
+      }
+    }
+  }
+
+  /** Remet toutes les paires au repos **et** oublie l'ordre mémorisé, comme au départ d'une course. */
   reset(): void {
-    this.sides.fill(NEUTRAL);
+    this.sides = new Int8Array(0);
+    this.ids = null;
   }
 }

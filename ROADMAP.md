@@ -289,7 +289,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P006 | Structure 4 × 45 s + checkpoints (segments au noyau, pauses réelles dans `sim/`) | P005 | 4 segments, 3 pauses automatiques |
 | P007 | Variations occasionnelles (surges) | P006 | accélérations/ralentissements ponctuels |
 | P008 | Événements rares + planificateur | P007 | turbos, chutes, raccourcis |
-| P009 | Observateur de faits + speaker | P008 | commentaires à cooldowns |
+| P009 | Observateur de faits + speaker *(P009-A ✅ observateur, P009-B/C ⏳)* | P008 | commentaires à cooldowns |
 | P010 | Équilibrage statistique + verrouillage des constantes | P009 | `tools/balance.ts` + seuils testés |
 | P011 | HUD complet + panneau debug | P010 | mini-carte, classement détaillé, chrono |
 | P012 | Affichage du speaker + réglages | P011 | bannières de commentaires |
@@ -646,38 +646,52 @@ permanente déjà présente (P004).
 
 ---
 
-### P009 — Observateur de faits et speaker
+### P009 — Observateur de faits et speaker `[~]`
+
+**Statut : découpée en trois sous-parties, sans renumérotation.**
+* **P009-A ✅ — observateur de faits (terminé)** : `src/core/observer.ts`, l'extension de la section
+  `FACT` de `src/core/config.ts`, le micro-correctif d'ordre du `OvertakeTracker`, l'intégration à
+  `RaceEngine.step()` / `drainFacts()`, `tests/unit/observer.test.ts` et
+  `tests/unit/observerSeeds.test.ts`. Le noyau publie des faits **mesurés**, et rien d'autre : aucun
+  texte, aucun cooldown, aucun rendu.
+* **P009-B ⏳ — speaker** : `src/speaker/importance.ts`, `src/speaker/cooldowns.ts`,
+  `src/speaker/Speaker.ts` (score, cooldowns global et par type, déduplication, quotas, file de 3,
+  préemption).
+* **P009-C ⏳ — textes et affichage** : `src/app/strings.fr.ts` (3 à 6 variantes par type) et
+  `src/render/view/SubtitleBanner.ts`.
 
 **Objectif** : un speaker qui ne dit que des choses vraies et importantes, avec importance + cooldowns.
 
 **Livrables**
-* `src/core/observer.ts` : buffer d'historique borné (≈ 6 s de pas) et détection de **tous** les faits
-  du §9.2, avec marges et debounces (§8.3) : `LEADER_CHANGE`, `BIG_COMEBACK`, `OVERTAKE_STREAK`,
-  `BIG_BONUS`, `LEADER_MALUS`, `CLOSE_RACE`, `LAST_COMEBACK`, `CHECKPOINT_SPLIT`, `FINISH`,
-  `PHOTO_FINISH`. Chaque fait porte les valeurs mesurées (`characterIds`, `magnitudes`, `tSim`).
-* `src/core/engine.ts` : `drainFacts()` renvoie les faits accumulés depuis le dernier drain.
-* `src/speaker/importance.ts`, `src/speaker/cooldowns.ts`, `src/speaker/Speaker.ts` : score, cooldown
-  global + par type, déduplication, quotas, file de 3, préemption (`INTERRUPT_DELTA`).
-* `src/app/strings.fr.ts` : 3 à 6 variantes par type de fait, placeholders, flux `speaker:lines`.
-* `src/render/view/SubtitleBanner.ts` : **affichage minimal** des répliques (le soin visuel vient en
+* ✅ `src/core/observer.ts` : historique borné (mémoire constante, toutes les fenêtres en pas entiers)
+  et détection de **tous** les faits du §9.2, avec marges et debounces (§8.3) : `LEADER_CHANGE`,
+  `BIG_COMEBACK`, `OVERTAKE_STREAK`, `BIG_BONUS`, `LEADER_MALUS`, `CLOSE_RACE`, `LAST_COMEBACK`,
+  `CHECKPOINT_SPLIT`, `FINISH`, `PHOTO_FINISH`. Chaque fait porte les valeurs mesurées
+  (`characterIds`, `magnitudes`, `tSim`).
+* ✅ `src/core/engine.ts` : `drainFacts()` renvoie les faits accumulés depuis le dernier drain.
+* ⏳ `src/speaker/importance.ts`, `src/speaker/cooldowns.ts`, `src/speaker/Speaker.ts` : score,
+  cooldown global + par type, déduplication, quotas, file de 3, préemption (`INTERRUPT_DELTA`).
+* ⏳ `src/app/strings.fr.ts` : 3 à 6 variantes par type de fait, placeholders, flux `speaker:lines`.
+* ⏳ `src/render/view/SubtitleBanner.ts` : **affichage minimal** des répliques (le soin visuel vient en
   P012) — mais suffisant pour voir le speaker fonctionner.
 
 **Tests (DoD)**
-* Observateur : séquences d'état fabriquées à la main ⇒ faits exactement attendus (un test par type).
-* **Véracité** : pour chaque fait émis sur 200 seeds réelles, recalculer la variation depuis
+* ✅ (P009-A) Observateur : séquences d'état fabriquées à la main ⇒ faits exactement attendus (un test
+  par type).
+* ✅ (P009-A) **Véracité** : pour chaque fait émis sur 200 seeds réelles, recalculer la variation depuis
   l'historique et vérifier qu'elle correspond (aucun fait sans cause mesurable).
-* Anti-bruit : 3 000 pas où deux personnages s'échangent leur rang avec < 0,5 m de marge ⇒ **zéro**
-  `LEADER_CHANGE` et **zéro** `OVERTAKE_STREAK`.
-* `drainFacts()` vide bien la file ; aucun fait dupliqué pour un même instant ; buffer borné (mémoire
-  constante).
-* Speaker : `MIN_IMPORTANCE`, cooldown global, cooldowns par type et quota par segment jamais violés
+* ✅ (P009-A) Anti-bruit : 3 000 pas où deux personnages s'échangent leur rang avec < 0,5 m de marge ⇒
+  **zéro** `LEADER_CHANGE` et **zéro** `OVERTAKE_STREAK`.
+* ✅ (P009-A) `drainFacts()` vide bien la file ; aucun fait dupliqué pour un même instant ; buffer
+  borné (mémoire constante) ; course identique bit à bit quelle que soit la cadence de drain.
+* ⏳ Speaker : `MIN_IMPORTANCE`, cooldown global, cooldowns par type et quota par segment jamais violés
   (200 seeds) ; 12 à 30 répliques par course, jamais 0, jamais > 12 par segment.
-* **Véracité des textes** : les valeurs interpolées correspondent exactement aux champs du fait.
-* **Indépendance textes / gameplay** : remplacer tous les textes par des variantes différentes ne
+* ⏳ **Véracité des textes** : les valeurs interpolées correspondent exactement aux champs du fait.
+* ⏳ **Indépendance textes / gameplay** : remplacer tous les textes par des variantes différentes ne
   change **aucune** distance finale (test paramétré). Invariant clé.
-* Préemption : une réplique d'importance 90 remplace une réplique d'importance 60 en cours ; une
+* ⏳ Préemption : une réplique d'importance 90 remplace une réplique d'importance 60 en cours ; une
   réplique de 70 ne la remplace pas. Aucune réplique sans fait, jamais.
-* Le module `speaker/` n'importe que `core/types` (test de frontière).
+* ⏳ Le module `speaker/` n'importe que `core/types` (test de frontière).
 
 ---
 

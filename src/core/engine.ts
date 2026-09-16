@@ -5,6 +5,7 @@ import type { EventParams, EventPlanState } from './events';
 import { activeEventAt, createEventPlan, eventParams, stepEvents } from './events';
 import { gaussianFrom, stepOrnsteinUhlenbeck } from './math';
 import type { OrnsteinUhlenbeckParams } from './math';
+import { RaceObserver } from './observer';
 import { sortByRank } from './ranking';
 import type { RngStream } from './rng';
 import { forkStream } from './rng';
@@ -54,6 +55,12 @@ import type {
  * magnitude. Le moteur publie le résultat dans `CharacterState.eventBonus` / `activeEvent` et
  * l'ajoute à la vitesse cible — jamais à `x`. Les événements du pas sont décidés **avant** la boucle
  * des personnages, si bien que le personnage ciblé subit déjà l'événement au pas de son déclenchement.
+ *
+ * **P009-A ajoute l'observateur de faits** (`observer.ts`) : après chaque pas, le moteur lui transmet
+ * une photographie — `tSim`, numéro de pas, personnages — et verse dans son tampon les faits qu'elle
+ * rend. L'observateur est **purement passif** : il ne consomme aucun flux aléatoire, n'écrit ni `x`
+ * ni `v`, et ne décide jamais de la course. C'est cet observateur, et lui seul, qui produit les
+ * `CHECKPOINT_SPLIT` depuis P009-A : il n'existe pas deux sources de faits concurrentes.
  */
 
 /** Numéros humains des segments, dans l'ordre. `RacePhase.segment` est en base 1 (contrat P003). */
@@ -92,15 +99,8 @@ const SURGE_STREAM_PREFIX = 'surge:';
 const EVENT_STREAM_LABEL = 'events:global';
 
 /**
- * Clé technique du texte du split.
- *
- * Le noyau ne contient **aucun** texte visible : il désigne, l'application résout. C'est
- * `src/app/strings.fr.ts` qui fournira la formulation française, plus tard, et modifier ce texte ne
- * pourra donc jamais changer le déroulement d'une course.
+ * Tampon de faits vide, partagé : un `drainFacts()` sans fait ne doit rien allouer.
  */
-const CHECKPOINT_SPLIT_TEXT_KEY = 'fact.checkpointSplit';
-
-/** Tampon de faits vide, partagé : un `drainFacts()` sans fait ne doit rien allouer. */
 const NO_FACTS: readonly RaceFact[] = Object.freeze([]);
 
 export class RaceEngine {
@@ -148,10 +148,20 @@ export class RaceEngine {
   /**
    * Faits produits depuis le dernier `drainFacts()`, dans l'ordre chronologique.
    *
-   * P006 n'en produit qu'un seul type : `CHECKPOINT_SPLIT`. Le tampon est vidé par `drainFacts()` et
-   * par `reset()` — **jamais** par `getState()`, qui n'est qu'une photographie en lecture seule.
+   * Depuis P009-A, tous les faits — `CHECKPOINT_SPLIT` compris — viennent de l'observateur, alimenté
+   * après chaque pas. Le tampon est vidé par `drainFacts()` et par `reset()` — **jamais** par
+   * `getState()`, qui n'est qu'une photographie en lecture seule.
    */
   private facts: RaceFact[] = [];
+
+  /**
+   * Observateur de faits, créé **une seule fois** par course.
+   *
+   * Il est reconstruit par `reset()` : sa mémoire est une fenêtre glissante, elle n'a aucun sens
+   * d'une course à l'autre. Il ne consomme aucun flux aléatoire et ne peut donc pas décaler la
+   * simulation, quelle que soit la façon dont `drainFacts()` est appelé.
+   */
+  private observer: RaceObserver;
 
   constructor(seed: string, config: GameConfig = GAME_CONFIG) {
     validateConfig(config);
@@ -173,6 +183,7 @@ export class RaceEngine {
     this.surgeStates = this.createSurgeStates();
     this.eventStream = forkStream(this.seedValue, EVENT_STREAM_LABEL);
     this.eventPlan = createEventPlan(CHARACTER_IDS.length);
+    this.observer = new RaceObserver(config);
     this.state = RaceEngine.createInitialState(seed, this.seedValue, config);
   }
 
@@ -240,7 +251,15 @@ export class RaceEngine {
 
     // Le fait est produit **après** l'intégration du pas qui atteint la borne : les distances
     // publiées sont donc exactement celles de `tSim` = 45, 90 ou 135 s, sans décalage d'un pas.
-    this.recordCheckpointSplit();
+    // L'observateur voit le noyau à CHAQUE pas simulé, jamais à la fréquence du rendu.
+    const produced = this.observer.observe({
+      tSim: this.state.tSim,
+      steps: this.state.steps,
+      characters: this.state.characters,
+    });
+    for (const fact of produced) {
+      this.facts.push(fact);
+    }
   }
 
   /**
@@ -302,66 +321,9 @@ export class RaceEngine {
     this.surgeStates = this.createSurgeStates();
     this.eventStream = forkStream(this.seedValue, EVENT_STREAM_LABEL);
     this.eventPlan = createEventPlan(CHARACTER_IDS.length);
+    this.observer = new RaceObserver(this.config);
     this.facts = [];
     this.state = RaceEngine.createInitialState(seed, this.seedValue, this.config);
-  }
-
-  /**
-   * Émet le fait `CHECKPOINT_SPLIT` si le pas qui vient d'être joué atteint une borne de segment.
-   *
-   * Une seule règle, écrite avec les constantes du noyau : un pas multiple de `STEPS_PER_SEGMENT`,
-   * strictement à l'intérieur de la course. Les bornes **internes** uniquement : jamais au départ
-   * (pas 0), jamais à l'arrivée (pas `TOTAL_STEPS`, où c'est `finished` qui parle). Une course
-   * complète en produit donc exactement `SEGMENT_COUNT − 1` = 3.
-   */
-  private recordCheckpointSplit(): void {
-    const { STEPS_PER_SEGMENT, SEGMENT_COUNT } = this.config.RACE;
-    const { steps } = this.state;
-
-    if (steps <= 0 || steps % STEPS_PER_SEGMENT !== 0) {
-      return;
-    }
-
-    const checkpoint = steps / STEPS_PER_SEGMENT;
-    if (checkpoint >= SEGMENT_COUNT) {
-      return;
-    }
-
-    this.facts.push(this.buildSplitFact());
-  }
-
-  /**
-   * Split figé à une borne : classement et distances **tels qu'ils sont à cet instant exact**.
-   *
-   * `characterIds` porte le classement du moment, du 1er au dernier, et `magnitudes` les distances
-   * correspondantes : les écarts s'en déduisent par soustraction. Un split **constate** — aucun
-   * point, aucun bonus, aucune pénalité, et aucune influence sur le résultat de la course.
-   */
-  private buildSplitFact(): RaceFact {
-    const order = sortByRank(
-      this.state.characters.map((character) => character.x),
-      this.state.characters.map((character) => character.id),
-    );
-
-    const characterIds: CharacterId[] = [];
-    const distances: number[] = [];
-    for (const index of order) {
-      const character = this.state.characters[index];
-      if (character === undefined) {
-        throw new RangeError(`Index de classement hors bornes : ${index}.`);
-      }
-      characterIds.push(character.id);
-      distances.push(character.x);
-    }
-
-    return Object.freeze({
-      type: 'CHECKPOINT_SPLIT',
-      tSim: this.state.tSim,
-      characterIds: Object.freeze(characterIds),
-      magnitudes: Object.freeze(distances),
-      importance: this.config.FACT.CHECKPOINT_SPLIT_IMPORTANCE,
-      textKey: CHECKPOINT_SPLIT_TEXT_KEY,
-    });
   }
 
   /** Un flux nommé par personnage, dérivé de la seed : consommer `c0` ne touche jamais `c1`. */

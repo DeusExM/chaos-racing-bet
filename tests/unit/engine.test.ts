@@ -70,14 +70,15 @@ describe('construction et état initial', () => {
 
     expect(engine.drainFacts()).toEqual([]);
 
-    // P006 : une course complète produit exactement les trois splits de checkpoint, et rien d'autre.
+    // P009-A : une course complète produit les trois splits de checkpoint, puis exactement un fait
+    // d'arrivée. Le reste du flux dépend de la seed et de la course : il n'est donc pas figé ici.
     engine.runToCompletion();
     const facts = engine.drainFacts();
-    expect(facts.map((fact) => fact.type)).toEqual([
-      'CHECKPOINT_SPLIT',
-      'CHECKPOINT_SPLIT',
-      'CHECKPOINT_SPLIT',
-    ]);
+    const splits = facts.filter((fact) => fact.type === 'CHECKPOINT_SPLIT');
+    expect(splits.map((fact) => fact.tSim)).toEqual([45, 90, 135]);
+    expect(
+      facts.filter((fact) => fact.type === 'FINISH' || fact.type === 'PHOTO_FINISH'),
+    ).toHaveLength(1);
   });
 
   it('refuse une configuration incohérente', () => {

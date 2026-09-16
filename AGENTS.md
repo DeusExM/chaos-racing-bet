@@ -253,9 +253,9 @@ d'implémenter** et proposer une variante compatible (ou demander une modificati
 
 ## 9. Environnement de travail (constats à connaître)
 
-* Le dépôt vit dans `D:\Code\chaos-race`. Depuis P001 c'est un dépôt git dont le code vit dans
-  `src/` (`core/`, `sim/`, `speaker/`, `render/`, `app/`), les tests dans `tests/`, les outils dans
-  `tools/`. Les trois documents de référence restent à la racine.
+* Depuis P001 c'est un dépôt git dont le code vit dans `src/` (`core/`, `sim/`, `speaker/`,
+  `render/`, `app/`), les tests dans `tests/`, les outils dans `tools/`. Les trois documents de
+  référence restent à la racine du repository.
 * Node `v26.5.0`, npm `11.17.0`, pnpm `11.23.0` sont installés.
 * **La politique d'exécution PowerShell de ce poste bloque `npm.ps1` et `pnpm.ps1`.** Utiliser les
   shims `.cmd` : `npm.cmd`, `pnpm.cmd`, `npx.cmd`. Ne pas modifier la politique d'exécution de la
@@ -301,6 +301,34 @@ d'implémenter** et proposer une variante compatible (ou demander une modificati
   Chromium est le seul navigateur nécessaire ; ne pas installer Firefox ni WebKit par anticipation.
 * `$env:TEMP` / `$env:TMP` peuvent être redirigés ponctuellement vers `$PWD\.tmp` pour une commande
   (Chromium y écrit alors son profil). **Ne jamais modifier les variables globales de Windows.**
+
+### 9.1 Périmètre d'exécution et garde-fous
+
+Ces règles s'appliquent **même lorsque les droits techniques permettent davantage**. Le dépôt est
+public : elles sont formulées sans aucun chemin ni identifiant propre à une machine.
+
+1. **Périmètre autorisé : la racine du repository courant.** Ne jamais lire, modifier, déplacer ni
+   supprimer un fichier situé hors de cette racine sans autorisation explicite de l'utilisateur.
+2. **Aucune lecture de secrets ni de données personnelles** : clés SSH, identifiants et
+   *credentials*, gestionnaires de mots de passe, fichiers `.env` autres que ceux du projet, autres
+   dépôts, autres projets, documents personnels. Le fait qu'un chemin soit accessible ne le rend pas
+   lisible pour autant.
+3. **Aucune installation globale** (`npm install -g`, paquet système, outil global) sans autorisation
+   explicite : préférer systématiquement les dépendances locales du projet.
+4. **Aucune modification de la configuration de la machine** : configuration Windows, registre,
+   pare-feu, règles réseau, politiques PowerShell, variables d'environnement système ou utilisateur,
+   configuration **git globale**. Une variable d'environnement ajustée pour une commande l'est
+   **dans le processus de cette commande uniquement**, jamais de façon persistante.
+5. **Commandes destructives strictement limitées au repository.** Aucune suppression récursive hors
+   de la racine du repository.
+6. **Git** : travailler uniquement sur ce repository, ne modifier aucun autre dépôt, ne pousser que
+   vers le *remote* déjà configuré pour ce projet, ne jamais toucher aux identifiants ni à un
+   *credential helper* sans autorisation explicite.
+7. **Réseau** : limiter les accès aux besoins du projet (gestionnaire de paquets, git/GitHub,
+   navigateurs de test). Ne pas télécharger ni exécuter d'outil tiers non nécessaire sans le demander.
+8. **Si une opération hors périmètre est réellement nécessaire : STOP.** Demander l'autorisation
+   avant de l'effectuer, en décrivant le programme concerné, le chemin visé, la raison, et le
+   caractère ponctuel ou récurrent de l'opération.
 
 ---
 

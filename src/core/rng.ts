@@ -16,8 +16,13 @@ const UINT32_RANGE = 0x1_0000_0000;
  */
 const GAUSSIAN_DRAWS = 12;
 
-/** Espérance de la somme : `6 × 2^32`. Multiple exact, donc représentation flottante exacte. */
-const GAUSSIAN_OFFSET = (GAUSSIAN_DRAWS / 2) * UINT32_RANGE;
+/**
+ * Espérance exacte de la somme : `6 × (2^32 − 1)`.
+ *
+ * Chaque tirage uniforme sur `[0, 2^32)` a pour espérance `(2^32 − 1) / 2`, et non `2^31`. Centrer
+ * sur cette valeur — et non sur `6 × 2^32` — est ce qui annule exactement la moyenne.
+ */
+const GAUSSIAN_OFFSET = (GAUSSIAN_DRAWS / 2) * (UINT32_RANGE - 1);
 
 /**
  * Hachage FNV-1a 32 bits, calculé sur les unités de code UTF-16 de `text`.
@@ -126,13 +131,13 @@ export class RngStream {
   /**
    * Loi normale approchée, centrée réduite, **sans aucune fonction transcendante**.
    *
-   * La somme de 12 tirages uniformes sur `[0, 2^32)` a pour espérance `6 × 2^32` et pour variance
-   * `(2^32)^2`. Après centrage puis division par `2^32` — une mise à l'échelle binaire exacte — la
-   * moyenne est exactement 0 et la variance exactement 1.
+   * La somme de 12 tirages uniformes sur `[0, 2^32)` a pour espérance `6 × (2^32 − 1)` et pour
+   * variance `2^64 − 1`. Après centrage exact sur cette espérance, puis division par `2^32` — une
+   * mise à l'échelle binaire exacte —, la moyenne vaut exactement 0 et la variance `1 − 2^-64`.
    *
-   * Chaque résultat est un multiple exact de `2^-32`, donc identique d'un moteur JavaScript à
-   * l'autre. C'est la raison de ce choix : `Math.log`, `Math.cos` et `Math.sqrt` ne garantissent pas
-   * le même bit près selon le moteur, ce qui interdirait la reproductibilité inter-moteurs.
+   * Chaque résultat est un multiple exact de `2^-32`. C'est la propriété structurelle attendue d'un
+   * calcul purement entier, et elle est vérifiée par les tests ; l'interdiction effective des
+   * fonctions transcendantes, elle, est garantie par le test de frontière.
    *
    * La somme maximale vaut `12 × (2^32 − 1) ≈ 5,15 × 10^10`, très en dessous de
    * `Number.MAX_SAFE_INTEGER` : tous les entiers intermédiaires sont exacts.

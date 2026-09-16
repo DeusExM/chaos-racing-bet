@@ -161,16 +161,26 @@ describe('distributions', () => {
     expect(withinTwo).toBeLessThan(0.98);
   });
 
-  it('produit un bruit identique d\'un moteur à l\'autre : multiples exacts de 2⁻³², borné', () => {
+  it('centre exactement le bruit sur son espérance', () => {
+    // Tous les tirages forcés à 0, puis tous à 2^32 - 1 : ce sont les deux bornes exactes du bruit.
+    // L'espérance d'un tirage uniforme sur [0, 2^32) vaut (2^32 - 1) / 2, donc celle de la somme
+    // 6 x (2^32 - 1). Avec un centrage sur 6 x 2^32, ces bornes seraient exactement -6 et +6 :
+    // ce test verrouille donc la constante de centrage au dernier bit.
+    expect(new RngStream(() => 0).nextGaussian()).toBe(-5.999_999_998_603_016);
+    expect(new RngStream(() => 0xffff_ffff).nextGaussian()).toBe(5.999_999_998_603_016);
+  });
+
+  it('produit un bruit multiple exact de 2⁻³² et borné', () => {
     const values = collect(
       forkStream(SEED, 'test:gaussian-exact'),
       DRAWS,
       (source) => source.nextGaussian(),
     );
 
-    // Un résultat obtenu via une fonction transcendante ne serait, en général, pas un multiple
-    // exact de 2⁻³². Ce test verrouille donc l'absence de Math.log / Math.cos / Math.sqrt dans la
-    // génération du bruit, c'est-à-dire la reproductibilité inter-moteurs.
+    // Propriété structurelle attendue d'un calcul purement entier. Ce n'est pas, à elle seule, une
+    // preuve d'absence de fonction transcendante : cette interdiction est garantie par
+    // tests/unit/boundaries.test.ts. C'est en revanche le signe visible d'un calcul exact, donc
+    // reproduit à l'identique d'un moteur JavaScript à l'autre.
     for (const value of values) {
       expect(Number.isInteger(value * 0x1_0000_0000)).toBe(true);
       expect(Math.abs(value)).toBeLessThan(6);
@@ -262,7 +272,7 @@ describe("verrouillage de l'algorithme", () => {
   it('conserve les mêmes bruits gaussiens pour une seed et un label donnés', () => {
     const stream = forkStream(0, 'lock-gaussian');
     expect([stream.nextGaussian(), stream.nextGaussian(), stream.nextGaussian()]).toEqual([
-      -0.489_674_853_626_638_65, -0.851_710_828_719_660_6, -1.303_965_093_800_798,
+      -0.489_674_852_229_654_8, -0.851_710_827_322_676_8, -1.303_965_092_403_814_2,
     ]);
   });
 });

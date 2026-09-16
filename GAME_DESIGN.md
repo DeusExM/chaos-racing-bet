@@ -507,12 +507,22 @@ plus de 12 par segment.
 ### 10.3 Bruit du drift
 
 Le bruit gaussien du drift (§6.3) **n'est pas produit par Box-Muller**. Il utilise l'approximation
-déterministe classique : **somme de 12 tirages uniformes** sur `[0, 2^32)`, centrée sur l'espérance
-`6 × 2^32`, puis divisée par `2^32` (mise à l'échelle binaire exacte). La moyenne vaut alors
-exactement 0 et la variance exactement 1, le bruit est borné à `±6`, et chaque résultat est un
-multiple exact de `2^-32` — donc **identique d'un moteur à l'autre**. Cette approximation (Irwin-Hall
-à 12 termes) est suffisamment proche d'une gaussienne pour un drift d'ambiance, et elle est la seule
-des deux méthodes à être bit à bit reproductible.
+déterministe classique : **somme de 12 tirages uniformes** sur `[0, 2^32)`, centrée sur son espérance
+exacte `6 × (2^32 − 1)`, puis divisée par `2^32` (mise à l'échelle binaire exacte). La moyenne vaut
+alors exactement 0, le bruit est borné à `±(6 − 6/2^32)`, et chaque résultat est un multiple exact de
+`2^-32`.
+
+La variance théorique de ce bruit vaut `1 − 2^-64`, et **non** exactement 1. L'écart (≈ 5,4 × 10^-20)
+est très inférieur à la précision d'un flottant double, donc sans effet mesurable — mais il est réel
+et il ne faut pas l'arrondir par confort dans la documentation.
+
+Le fait que chaque résultat soit un multiple exact de `2^-32` est la **propriété structurelle
+attendue** d'un calcul purement entier. Ce n'est **pas**, à lui seul, une preuve de l'absence de
+fonction transcendante : l'interdiction effective de `Math.log`, `Math.cos`, `Math.sqrt`, … dans le
+noyau est garantie par `tests/unit/boundaries.test.ts` (voir §10.2).
+
+Cette approximation (Irwin-Hall à 12 termes) est suffisamment proche d'une gaussienne pour un drift
+d'ambiance, et elle est la seule des deux méthodes à être bit à bit reproductible.
 
 ### 10.4 Affichage et paramètres
 

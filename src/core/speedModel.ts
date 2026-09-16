@@ -3,31 +3,27 @@ import { approach, clamp } from './math';
 import type { CharacterState } from './types';
 
 /**
- * Modèle de vitesse — **vitesse de base + dérive permanente (P004) + surges (P007).**
+ * Modèle de vitesse — **base + dérive permanente (P004) + surges (P007) + événements rares (P008).**
  *
  * Ces trois fonctions sont pures et sans état : elles reçoivent une valeur et un pas, elles
  * retournent la valeur suivante. Le seul état de la course vit dans `RaceEngine`.
- *
- * `CharacterState.eventBonus` et `CharacterState.activeEvent` restent **délibérément inutilisés** :
- * les événements rares arrivent avec P008. La formule cible est donc, pour l'instant,
- * `SPEED.BASE × (1 + drift + surge)`.
  */
 
 /**
- * Vitesse visée par un personnage à cet instant : `SPEED.BASE × (1 + drift + surge)`.
+ * Vitesse visée par un personnage à cet instant : `SPEED.BASE × (1 + drift + surge + eventBonus)`.
  *
- * Les deux modulations sont **relatives** et multiplicatives, donc cumulables telles quelles :
- * `+0,1` signifie « 10 % plus vite que la base », qu'il vienne de la dérive ou d'un surge. La dérive
- * est bornée à ±20 % par `DRIFT.CLAMP`, les surges à leurs bornes propres, et leur somme est
- * volontairement **non écrêtée** : chaque source garde son échelle, et l'écrêtage final reste celui
- * de `SPEED.MIN`/`SPEED.MAX`, appliqué après la rampe.
+ * Les trois modulations sont **relatives** et additives dans la même parenthèse, donc cumulables
+ * telles quelles : `+0,1` signifie « 10 % plus vite que la base », qu'il vienne de la dérive, d'un
+ * surge ou d'un événement. Chaque source est bornée par ses propres constantes (§6.3, §6.4, §7.1) et
+ * leur somme est volontairement **non écrêtée** : chaque source garde son échelle, et l'écrêtage
+ * final reste celui de `SPEED.MIN`/`SPEED.MAX`, appliqué après la rampe.
  *
  * Le facteur est symétrique : un personnage lent peut devenir rapide et inversement, aucun n'est
- * structurellement avantagé. Les surges ne dépendent ni du rang, ni de la distance, ni de la
- * position dans le peloton — sinon ils seraient un rubber-banding déguisé.
+ * structurellement avantagé. Aucune source (surge, événement) ne dépend du rang, de la distance, ni
+ * de la position dans le peloton — sinon elle serait un rubber-banding déguisé.
  */
 export function computeTargetSpeed(character: CharacterState, config: GameConfig): number {
-  return config.SPEED.BASE * (1 + character.drift + character.surge);
+  return config.SPEED.BASE * (1 + character.drift + character.surge + character.eventBonus);
 }
 
 /**

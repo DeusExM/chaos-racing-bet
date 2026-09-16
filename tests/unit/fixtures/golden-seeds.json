@@ -11,6 +11,10 @@
     {
       "step": "P007",
       "change": "Surges activés : les six seeds affichées sont conservées, mais leurs distances sont remesurées. Toutes les valeurs augmentent en moyenne de +0,89 % (biais d'espérance positive des constantes de GAME_DESIGN §6.4), et les classements changent — c'est l'effet recherché par P007."
+    },
+    {
+      "step": "P008",
+      "change": "Événements rares activés : les six seeds affichées sont conservées, mais leurs distances sont remesurées. Les 7 événements de GAME_DESIGN §7.1 modulent la vitesse cible pendant 2 à 7 s ; les distances finales augmentent en moyenne de +1,42 % (36 valeurs sur 36, +1,4 % en moyenne par course, positif sur les 6 seeds — les bonus du catalogue pèsent un peu plus lourd que les malus), et les classements changent. Aucune valeur n'a été corrigée à la main : toutes sont mesurées par runToCompletion()."
     }
   ],
   "goldenSeeds": [
@@ -18,19 +22,19 @@
       "seed": "K7QM2X9A",
       "tSim": 180,
       "ranking": [
+        "c4",
         "c2",
         "c5",
+        "c1",
         "c0",
-        "c4",
-        "c3",
-        "c1"
+        "c3"
       ],
       "distances": [
         2193.2220652505016,
-        2122.1129502492063,
-        2278.9752671849155,
-        2143.0069673211055,
-        2188.9035120771728,
+        2215.853290422612,
+        2256.4654438575576,
+        2121.2416719090616,
+        2289.242223543304,
         2230.5742671446897
       ]
     },
@@ -38,100 +42,100 @@
       "seed": "ZZZZZZZZ",
       "tSim": 180,
       "ranking": [
-        "c3",
-        "c2",
         "c4",
+        "c2",
+        "c3",
         "c5",
-        "c1",
-        "c0"
+        "c0",
+        "c1"
       ],
       "distances": [
-        2115.3992625578144,
-        2139.2128217744084,
-        2207.300160836037,
+        2140.786711380426,
+        2086.50114202926,
+        2256.9238548440567,
         2246.2694233819248,
-        2170.023974105963,
-        2167.5480926058017
+        2310.3285576472076,
+        2175.462639812938
       ]
     },
     {
       "seed": "00000000",
       "tSim": 180,
       "ranking": [
-        "c4",
-        "c2",
         "c1",
         "c5",
+        "c2",
+        "c4",
         "c3",
         "c0"
       ],
       "distances": [
-        2102.0682494754897,
-        2204.4474364548723,
+        2071.516548425141,
+        2323.815926987739,
         2207.752886939549,
-        2158.022874185507,
-        2220.6596999216686,
-        2194.7984065940113
+        2150.59441736493,
+        2196.9715298413826,
+        2244.975597168213
       ]
     },
     {
       "seed": "RACEWAY1",
       "tSim": 180,
       "ranking": [
+        "c3",
         "c1",
         "c2",
-        "c3",
-        "c5",
         "c0",
+        "c5",
         "c4"
       ],
       "distances": [
-        2157.3960907617998,
-        2230.1373054844557,
-        2219.7386658394394,
-        2203.87277012793,
-        2119.7232585308275,
-        2194.2780684109484
+        2178.4728834840216,
+        2327.3417867262906,
+        2199.852974226406,
+        2407.136032377764,
+        2145.970548170897,
+        2156.765854657521
       ]
     },
     {
       "seed": "BANAN4X2",
       "tSim": 180,
       "ranking": [
-        "c0",
-        "c3",
         "c4",
+        "c2",
+        "c3",
+        "c0",
         "c1",
-        "c5",
-        "c2"
+        "c5"
       ],
       "distances": [
-        2285.209106685175,
-        2207.475594538035,
-        2166.6302519254486,
-        2224.099066099328,
-        2218.195086215813,
-        2186.8788692406088
+        2250.8444437379712,
+        2215.6448053816202,
+        2282.708832214959,
+        2251.453148499232,
+        2428.706452234518,
+        2159.3028297419387
       ]
     },
     {
       "seed": "PZZA1234",
       "tSim": 180,
       "ranking": [
-        "c0",
         "c4",
+        "c0",
+        "c3",
         "c1",
         "c5",
-        "c3",
         "c2"
       ],
       "distances": [
-        2213.0642391809633,
+        2239.368297545085,
         2160.9647030151373,
-        2122.3077170396314,
-        2127.203974411136,
-        2163.6553432984942,
-        2157.0785677929007
+        2073.189283086688,
+        2169.0548526813664,
+        2254.0687198708843,
+        2146.5900834501313
       ]
     }
   ]

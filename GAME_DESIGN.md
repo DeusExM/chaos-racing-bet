@@ -412,6 +412,12 @@ Toutes les durées du §7.1 sont choisies pour que `t_rampe <= D` (la rampe s'ac
 un offset temporaire. La rampe de descente qui suit ne fait que ramener la vitesse vers la normale —
 elle ne retire aucune distance. Un gros bonus vaut donc typiquement **2 à 5 places**.
 
+Ces bornes supposent `drift = surge = 0`. En course, la dérive et les surges s'y ajoutent : un malus
+combiné à des modulations négatives voit sa cible passer sous `SPEED.MIN` et retire alors **moins** de
+distance que la table ne l'annonce (mesuré sur 40 courses : jusqu'à `−29 m` pour une `SIESTE`), tandis
+qu'un bonus combiné à des modulations positives peut buter sur `SPEED.MAX`. La **moyenne** et la
+**médiane**, elles, restent dans les bornes du tableau — c'est ce que vérifie le test de P008.
+
 ### 7.3 Planificateur
 
 | Constante | Valeur | Rôle |
@@ -426,6 +432,16 @@ Règles d'application :
 
 * Un événement ne s'applique que si la cible n'a **aucun** événement actif.
   Exception unique : `CHUTE` remplace un `TURBO` actif (annulation dramatisante).
+* Un candidat tiré pendant le `GLOBAL_COOLDOWN` n'est **pas** perdu : il reste en attente et déclenche
+  le premier pas autorisé. Sans cela, chaque cooldown consommerait tout le délai d'attente suivant (le
+  processus de Poisson est sans mémoire) et la course ne compterait plus que `180 / (4 + 14) ≈ 10`
+  événements au lieu des `≈ 13` annoncés ci-dessus. La mesure donne `≈ 12,4` événements par course.
+* Avec les constantes de la V1, l'exception `CHUTE` sur `TURBO` **ne peut pas se produire en course** :
+  un `TURBO` dure au plus `4,0 s`, alors que le cooldown global vaut `4,0 s` et le cooldown individuel
+  `8,0 s`. La règle reste implémentée comme une garde structurelle — elle s'appliquerait sans
+  modification de code si l'un de ces réglages changeait — et elle est vérifiée par un test à
+  cooldowns nuls. La rendre atteignable suppose de modifier un réglage de §7.1 ou §7.3 : c'est une
+  décision de game design, pas une conséquence du planificateur.
 * La durée d'un événement se compte en **temps simulé**.
 * Les événements sont tirés **dans `step()`**, donc jamais pendant une pause : `RaceSimulation` ne
   faisant aucun pas, rien n'est tiré, rien n'avance, et un événement en cours reste simplement
@@ -677,10 +693,22 @@ Sur **1000 seeds**, 6 personnages, course complète :
 | Répliques du speaker par course | 12 – 30 |
 | Reproductibilité | 100/100 seeds identiques bit à bit |
 | Nombre de pas par course | exactement `10800`, avec ou sans pauses |
-| Vitesse moyenne finale par personnage | `SPEED.BASE ± 1,5 %` (équivalence) |
+| Écart de vitesse moyenne entre personnages | ≤ 0,5 % autour de la moyenne des six (équivalence) |
 
 Ces seuils sont **implémentés comme tests** (P010). Si un réglage change, le document et les seuils
 changent ensemble.
+
+> **Biais partagé, et pourquoi la ligne ci-dessus a changé en P008.** La dérive, les surges et les
+> événements ont chacun une espérance **nette positive** : les constantes de surge de §6.4 valent
+> ≈ +0,9 %, et le catalogue d'événements de §7.1 ajoute ≈ +1,1 point de plus, parce qu'à poids et
+> durées égaux les bonus rapportent plus de distance que les malus n'en retirent — l'écrêtage à
+> `SPEED.MIN` rabote encore les malus. Mesuré sur 384 courses en P008 : **+2,03 %** de `SPEED.BASE`
+> en moyenne, identique pour les six personnages (écart maximal entre personnages : 0,38 %).
+> Le seuil historique `SPEED.BASE ± 1,5 %`, écrit avant les événements, ne pouvait donc plus servir
+> de borne **absolue** ; il est remplacé par l'**écart à la moyenne des six**, qui est la vraie
+> formulation de l'invariant d'équivalence §5.6 et ne dépend pas de l'amplitude du biais partagé.
+> Rendre le catalogue net neutre en distance (malus plus longs ou plus forts) est un réglage de §7.1,
+> donc une décision de game design — signalée au compte rendu P008, à trancher avant P010.
 
 ---
 

@@ -40,15 +40,17 @@ describe('computeTargetSpeed', () => {
     expect(fast - SPEED.BASE).toBeCloseTo(SPEED.BASE - slow, 12);
   });
 
-  it('applique le surge, mais ignore encore eventBonus : les événements sont en P008', () => {
+  it('applique le surge et l’événement dans la même parenthèse', () => {
     const plain = computeTargetSpeed(character(), GAME_CONFIG);
     const withSurge = computeTargetSpeed(character({ surge: 0.35 }), GAME_CONFIG);
+    const withEvent = computeTargetSpeed(character({ eventBonus: 0.75 }), GAME_CONFIG);
     const withBoth = computeTargetSpeed(character({ surge: 0.35, eventBonus: 0.75 }), GAME_CONFIG);
 
     expect(withSurge).toBe(SPEED.BASE * (1 + 0.35));
+    expect(withEvent).toBe(SPEED.BASE * (1 + 0.75));
     expect(withSurge).toBeGreaterThan(plain);
-    // Brancher `eventBonus` ici introduirait une règle de jeu que personne n'a calibrée : P008.
-    expect(withBoth).toBe(withSurge);
+    // Depuis P008, `eventBonus` est branché : un `TURBO` accélère réellement la cible.
+    expect(withBoth).toBe(SPEED.BASE * (1 + 0.35 + 0.75));
   });
 
   it('additionne dérive et surge dans la même parenthèse, sans écrêtage intermédiaire', () => {

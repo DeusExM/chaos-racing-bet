@@ -22,18 +22,18 @@ import { computeRanks, isLeaderChange, overtakesBetween } from '../../src/core/r
 export const OVERTAKE_SEED = 'POULET42';
 
 /**
- * Valeurs **remesurées** pour `OVERTAKE_SEED` après l'activation des surges (P007).
+ * Valeurs **remesurées** pour `OVERTAKE_SEED` après l'activation des événements rares (P008).
  *
- * L'activation des surges change la course de cette seed, donc ces deux chiffres : ils passent de
- * 18 changements de leader / 22 dépassements à 12 / 30. La seed est conservée — elle reste très
- * largement au-dessus des minima exigés par les tests E2E (1 changement de leader, 3 dépassements),
- * et la remplacer romprait la continuité des captures E2E sans rien apporter.
+ * L'activation des événements change encore la course de cette seed : les deux chiffres passent de
+ * 12 changements de leader / 30 dépassements (P007) à 16 / 38. La seed est conservée — elle reste
+ * très largement au-dessus des minima exigés par les tests E2E (1 changement de leader, 3
+ * dépassements), et la remplacer romprait la continuité des captures E2E sans rien apporter.
  */
 export const OVERTAKE_SEED_EVIDENCE = Object.freeze({
   /** 20 pas par frame = `timeScale 20` observé à 60 images par seconde. */
   granularitySteps: 20,
-  leaderChanges: 12,
-  overtakes: 30,
+  leaderChanges: 16,
+  overtakes: 38,
 });
 
 export interface OvertakeMeasurement {

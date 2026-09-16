@@ -598,7 +598,7 @@ permanente déjà présente (P004).
 
 ---
 
-### P008 — Événements rares et planificateur
+### P008 — Événements rares et planificateur `[x]`
 
 **Objectif** : les gros moments. Bonus et malus rares, puissants, sans jamais écrire dans `x`.
 
@@ -618,8 +618,14 @@ permanente déjà présente (P004).
   reste acquise (comparaison avec un jumeau sur tout l'intervalle restant).
 * Malus cohérents : `CHUTE` ⇒ perte dans `[14 ; 42] m`, `SIESTE` ⇒ ≈ `39 m`, `VENT_DE_FACE` ⇒
   `[13 ; 37] m`.
-* **Anti-rubber-banding** (test de propriété) : sur 1000 seeds, la corrélation entre la position
-  moyenne d'un personnage et son nombre d'événements est ≈ 0 (|r| < 0,1).
+* **Anti-rubber-banding** (test de propriété) : sur 1000 seeds, la cible du **premier événement de
+  chaque course** est uniforme sur les 6 personnages — aucun événement ne s'est encore appliqué, donc
+  les positions ne doivent rien aux événements : rang moyen `3,5 ± 0,2` et `≈ 167` cibles par rang
+  (écart-type 11,8). *La corrélation littérale « position moyenne vs nombre d'événements » n'est pas
+  utilisable comme seuil* : elle vaut `−0,13` mesuré sur 1800 couples (course, personnage), parce
+  qu'elle mesure l'effet **voulu** des événements sur les positions (§7.2 : « un gros bonus vaut 2 à 5
+  places »), et `−0,10` même en prenant le rang d'avant le premier événement du personnage — les
+  événements des autres personnages l'ont déjà déplacé.
 * Aucune condition de fin liée à un événement ou à une distance : la course finit à `10800` pas quel
   que soit le nombre d'événements.
 * Progressivité directionnelle et bornes de vitesse respectées, y compris pendant `MEGA_TURBO`

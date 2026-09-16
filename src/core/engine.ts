@@ -1,6 +1,8 @@
 import { CHARACTER_IDS } from './characters';
 import type { GameConfig } from './config';
 import { GAME_CONFIG, SQRT_DT, validateConfig } from './config';
+import type { EventParams, EventPlanState } from './events';
+import { activeEventAt, createEventPlan, eventParams, stepEvents } from './events';
 import { gaussianFrom, stepOrnsteinUhlenbeck } from './math';
 import type { OrnsteinUhlenbeckParams } from './math';
 import { sortByRank } from './ranking';
@@ -46,6 +48,12 @@ import type {
  * fournit une seule chose — le numéro du pas courant — et reçoit une magnitude relative qu'il publie
  * dans `CharacterState.surge`. Aucun surge n'écrit jamais dans `x` : il module la vitesse **cible**,
  * qui passe ensuite par la rampe et par l'écrêtage, comme n'importe quelle autre variation.
+ *
+ * **P008 ajoute les événements rares** : le planificateur de `events.ts` décide, sur le flux
+ * `events:global`, qui subit quel événement du catalogue §7.1, pendant combien de pas, et avec quelle
+ * magnitude. Le moteur publie le résultat dans `CharacterState.eventBonus` / `activeEvent` et
+ * l'ajoute à la vitesse cible — jamais à `x`. Les événements du pas sont décidés **avant** la boucle
+ * des personnages, si bien que le personnage ciblé subit déjà l'événement au pas de son déclenchement.
  */
 
 /** Numéros humains des segments, dans l'ordre. `RacePhase.segment` est en base 1 (contrat P003). */
@@ -73,6 +81,15 @@ const DRIFT_STREAM_PREFIX = 'drift:';
  * une seule dérive de P004.
  */
 const SURGE_STREAM_PREFIX = 'surge:';
+
+/**
+ * Libellé du flux du planificateur d'événements.
+ *
+ * Un seul flux pour toute la course : la sélection de l'événement, de sa cible, de sa durée et de sa
+ * magnitude sont quatre décisions **solidaires** (la cible dépend de l'événement tiré), elles ne
+ * peuvent donc pas vivre dans des flux séparés sans devenir impossibles à rejouer.
+ */
+const EVENT_STREAM_LABEL = 'events:global';
 
 /**
  * Clé technique du texte du split.
@@ -119,6 +136,15 @@ export class RaceEngine {
   /** Bornes de tirage pré-calculées : aucune conversion secondes → pas dans la boucle. */
   private readonly surgeConfig: SurgeParams;
 
+  /** Flux unique du planificateur d'événements, créé une seule fois par course. */
+  private eventStream: RngStream;
+
+  /** Planning d'événements de la course : cibles, cooldowns, plafonds et emplacements actifs. */
+  private eventPlan: EventPlanState;
+
+  /** Constantes du planificateur pré-calculées, catalogue compris. */
+  private readonly eventConfig: EventParams;
+
   /**
    * Faits produits depuis le dernier `drainFacts()`, dans l'ordre chronologique.
    *
@@ -141,9 +167,12 @@ export class RaceEngine {
 
     this.seedValue = normalizeSeed(seed);
     this.surgeConfig = surgeParams(config);
+    this.eventConfig = eventParams(config);
     this.driftStreams = this.createDriftStreams();
     this.surgeStreams = this.createSurgeStreams();
     this.surgeStates = this.createSurgeStates();
+    this.eventStream = forkStream(this.seedValue, EVENT_STREAM_LABEL);
+    this.eventPlan = createEventPlan(CHARACTER_IDS.length);
     this.state = RaceEngine.createInitialState(seed, this.seedValue, config);
   }
 
@@ -166,6 +195,11 @@ export class RaceEngine {
     // `RaceState.steps` une fois le pas terminé.
     const stepNumber = this.state.steps + 1;
 
+    // Les événements du pas sont décidés **avant** la boucle des personnages (P008) : l'événement qui
+    // démarre à ce pas en fait donc déjà partie, et celui qui s'achève à ce pas n'en fait déjà plus
+    // partie. Aucun événement n'est tiré pendant une pause, puisque `step()` n'est alors pas appelé.
+    stepEvents(this.eventPlan, this.eventStream, this.eventConfig, CHARACTER_IDS, stepNumber);
+
     // Ordre physique = ordre stable du roster, jamais celui d'un Map ou d'un Set.
     for (const [index, character] of this.state.characters.entries()) {
       const stream = this.driftStreams[index];
@@ -177,6 +211,12 @@ export class RaceEngine {
       if (surgeStream === undefined || surgeState === undefined) {
         throw new RangeError(`Aucun planning de surge pour l'index ${index}.`);
       }
+
+      // L'événement actif est republié à chaque pas : `eventBonus` et `activeEvent` décrivent donc
+      // toujours le pas courant, et retombent à zéro d'eux-mêmes à l'expiration.
+      const activeEvent = activeEventAt(this.eventPlan, index);
+      character.activeEvent = activeEvent;
+      character.eventBonus = activeEvent === null ? 0 : activeEvent.magnitude;
 
       // Ordre imposé et testé (P007) : le surge du pas est décidé **avant** la dérive, donc avant la
       // vitesse cible. Un surge qui démarre à ce pas en fait donc déjà partie, et un surge dont la
@@ -254,12 +294,14 @@ export class RaceEngine {
     return Object.freeze(drained);
   }
 
-  /** Repart de zéro sur une nouvelle seed : distances, vitesses, dérives, surges, pas, faits et flux. */
+  /** Repart de zéro sur une nouvelle seed : distances, vitesses, dérives, surges, événements, faits et flux. */
   reset(seed: string): void {
     this.seedValue = normalizeSeed(seed);
     this.driftStreams = this.createDriftStreams();
     this.surgeStreams = this.createSurgeStreams();
     this.surgeStates = this.createSurgeStates();
+    this.eventStream = forkStream(this.seedValue, EVENT_STREAM_LABEL);
+    this.eventPlan = createEventPlan(CHARACTER_IDS.length);
     this.facts = [];
     this.state = RaceEngine.createInitialState(seed, this.seedValue, this.config);
   }

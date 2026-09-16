@@ -90,13 +90,26 @@ export interface RaceState {
   characters: readonly CharacterState[];
 }
 
+/**
+ * Les 7 événements rares du catalogue V1 (`GAME_DESIGN.md` §7.1).
+ *
+ * Seule la **liste fermée** des identifiants vit ici, avec le vocabulaire : le catalogue normatif
+ * (poids, magnitudes, durées) est livré par le planificateur, dans `src/core/events.ts`, et un test
+ * vérifie que les deux listes coïncident exactement.
+ */
+export type EventId =
+  | 'TURBO'
+  | 'CHUTE'
+  | 'VENT_DE_FACE'
+  | 'RACCOURCI'
+  | 'POULET'
+  | 'SIESTE'
+  | 'MEGA_TURBO';
+
 /** Un événement rare en cours d'application. */
 export interface ActiveEvent {
-  /**
-   * Type d'événement. Le catalogue normatif — et donc la liste fermée des valeurs possibles — est
-   * livré avec le planificateur, dans `src/core/events.ts` ; le noyau ne peut pas encore le citer.
-   */
-  readonly id: string;
+  /** Type d'événement, dans la liste fermée du catalogue. */
+  readonly id: EventId;
   /** Personnage qui subit l'événement. */
   readonly target: CharacterId;
   /** Instant simulé du déclenchement, en secondes. */

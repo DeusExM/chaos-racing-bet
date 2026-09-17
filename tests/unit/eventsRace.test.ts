@@ -475,7 +475,9 @@ describe('gain réellement produit par chaque événement', () => {
 });
 
 describe('ciblage : aucun rubber-banding', () => {
-  it('ne choisit jamais sa cible selon la position, et répartit les événements également', () => {
+  // Le test rejoue volontairement 1000 courses : sous charge parallèle il dépasse le délai par
+  // défaut de Vitest. Le délai est donc déclaré localement, sans toucher à RACES ni à la logique.
+  it('ne choisit jamais sa cible selon la position, et répartit les événements également', { timeout: 30_000 }, () => {
     // Test de propriété **non confondu**. La mesure littérale « corrélation entre position moyenne et
     // nombre d'événements » ne peut pas valoir zéro : elle mesure l'effet des événements, que §7.2
     // revendique (« un gros bonus vaut typiquement 2 à 5 places »). Mesuré sur 1800 couples

@@ -1,8 +1,8 @@
 import { CHARACTER_IDS } from './characters';
 import type { GameConfig } from './config';
 import { GAME_CONFIG, SQRT_DT, validateConfig } from './config';
-import type { EventParams, EventPlanState } from './events';
-import { activeEventAt, createEventPlan, eventParams, stepEvents } from './events';
+import type { EventDefinition, EventParams, EventPlanState } from './events';
+import { EVENT_CATALOG, activeEventAt, createEventPlan, eventParams, stepEvents } from './events';
 import { gaussianFrom, stepOrnsteinUhlenbeck } from './math';
 import type { OrnsteinUhlenbeckParams } from './math';
 import { RaceObserver } from './observer';
@@ -146,6 +146,15 @@ export class RaceEngine {
   private readonly eventConfig: EventParams;
 
   /**
+   * Catalogue en vigueur pour cette instance.
+   *
+   * Conservé pour que `reset()` reconstruise un planning **identique en règles** : sans ce champ, une
+   * instance construite avec un catalogue de diagnostic repartirait silencieusement sur
+   * `EVENT_CATALOG`, et deux moitiés de campagne ne mesureraient plus la même chose.
+   */
+  private readonly catalog: readonly EventDefinition[];
+
+  /**
    * Faits produits depuis le dernier `drainFacts()`, dans l'ordre chronologique.
    *
    * Depuis P009-A, tous les faits — `CHECKPOINT_SPLIT` compris — viennent de l'observateur, alimenté
@@ -163,7 +172,19 @@ export class RaceEngine {
    */
   private observer: RaceObserver;
 
-  constructor(seed: string, config: GameConfig = GAME_CONFIG) {
+  /**
+   * Construit un moteur pour une course.
+   *
+   * `options.catalog` n'existe que pour la **mesure** : le harnais d'équilibrage doit pouvoir évaluer
+   * une variante du catalogue §7.1 sans muter un export partagé — un diagnostic qui réécrit l'état
+   * global n'est ni reproductible ni parallélisable. En production, l'argument est absent et le
+   * catalogue est celui du noyau (`EVENT_CATALOG`, valeur par défaut de `eventParams`).
+   */
+  constructor(
+    seed: string,
+    config: GameConfig = GAME_CONFIG,
+    options: { readonly catalog?: readonly EventDefinition[] } = {},
+  ) {
     validateConfig(config);
 
     this.config = config;
@@ -177,7 +198,8 @@ export class RaceEngine {
 
     this.seedValue = normalizeSeed(seed);
     this.surgeConfig = surgeParams(config);
-    this.eventConfig = eventParams(config);
+    this.catalog = options.catalog ?? EVENT_CATALOG;
+    this.eventConfig = eventParams(config, this.catalog);
     this.driftStreams = this.createDriftStreams();
     this.surgeStreams = this.createSurgeStreams();
     this.surgeStates = this.createSurgeStates();

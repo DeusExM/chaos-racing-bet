@@ -191,9 +191,10 @@ const MEASURED = measureGains(seeds(40, 'EVENTR'));
 /** Gain attendu par événement : bornes du DoD de P008, elles-mêmes dérivées de la table §7.2. */
 const EXPECTED_GAIN: Readonly<Record<EventId, { readonly min: number; readonly max: number }>> =
   Object.freeze({
-    TURBO: { min: 25, max: 64 },
-    RACCOURCI: { min: 29, max: 56 },
-    MEGA_TURBO: { min: 90, max: 110 },
+    // P010 : magnitudes de bonus réduites de 35 % (§7.1), donc gains revus à la baisse.
+    TURBO: { min: 16, max: 44 },
+    RACCOURCI: { min: 22, max: 45 },
+    MEGA_TURBO: { min: 72, max: 82 },
     CHUTE: { min: -42, max: -14 },
     SIESTE: { min: -42, max: -36 },
     VENT_DE_FACE: { min: -37, max: -13 },
@@ -361,7 +362,7 @@ describe('gain réellement produit par chaque événement', () => {
   });
 
   it('respecte la progressivité directionnelle et les bornes, événements compris', () => {
-    // Aucun pas hors des rampes de §6.2 sur 40 courses, y compris pendant `MEGA_TURBO` (cible 42 m/s,
+    // Aucun pas hors des rampes de §6.2 sur 40 courses, y compris pendant `MEGA_TURBO` (cible 31,6 m/s,
     // le plus gros écart de vitesse du jeu) : c'est la vérification explicite du DoD.
     expect(MEASURED.rampViolations).toBe(0);
     expect(MEASURED.boundViolations).toBe(0);

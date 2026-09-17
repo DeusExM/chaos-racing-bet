@@ -1,13 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
+import { PREVIEW_URL } from './dev-ports';
+
 // Les navigateurs sont installes dans `.playwright-browsers`, localement au projet.
 // La variable PLAYWRIGHT_BROWSERS_PATH ne peut PAS etre posee ici : playwright-core
 // l'evalue une seule fois au chargement de son module, avant la lecture de ce fichier.
 // Elle est fournie par les scripts npm via `node --env-file=.playwright.env`
 // (voir package.json, README.md et .playwright.env).
 
-const PORT = 4173;
-const BASE_URL = `http://127.0.0.1:${PORT}`;
+// URL servie par `vite preview` (voir `vite.config.ts`) : meme source unique, `dev-ports.ts`.
+const BASE_URL = PREVIEW_URL;
 
 export default defineConfig({
   testDir: './tests/e2e',

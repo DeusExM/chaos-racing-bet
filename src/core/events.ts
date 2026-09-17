@@ -18,13 +18,18 @@ import type { ActiveEvent, CharacterId, EventId } from './types';
  *    exponentielle par inversion demanderait `Math.log`, interdit par §10.2 — et tout reste
  *    reproductible. Un candidat qui tombe pendant un cooldown est **rejeté**, pas reporté : les
  *    cooldowns éclaircissent (thinning) le processus, qui garde donc son absence de mémoire, et la
- *    course compte `≈ 10` événements (§13).
+ *    course compte `≈ 10,2` événements (§13). P010 a testé `1 / 10` puis est **revenu à `1 / 14`** :
+ *    le compte restait dans la fourchette `[10 ; 16]`, et « proche d'une borne » n'est pas un motif
+ *    de réglage. Le catalogue a été rendu net neutre en distance par la même étape — voir les
+ *    magnitudes de bonus ci-dessous.
  * 2. **Tout est compté en pas entiers.** Durées, cooldowns et frontières de fin sont des nombres de
  *    pas : seule l'arithmétique entière est exactement spécifiée par ECMAScript, donc le planning ne
  *    peut pas dériver d'un moteur JavaScript à l'autre.
  * 3. **Un emplacement par personnage** (`MAX_ACTIVE_PER_CHARACTER = 1`) : le non-cumul est
- *    structurel, pas une vérification après coup. La seule exception est `CHUTE`, qui **remplace** un
- *    `TURBO` actif (§7.3) — c'est le seul cas où un événement en interrompt un autre.
+ *    structurel, et il est **absolu** — un personnage qui subit déjà un événement n'est plus
+ *    éligible, sans exception. P010 a supprimé la seule dérogation qui existait (`CHUTE` remplaçant
+ *    un `TURBO` actif, §7.3) : elle était inatteignable avec les constantes de la V1, et une règle
+ *    normative qui ne peut pas se déclencher est un piège pour le prochain réglage.
  *
  * ## Convention d'intervalle : `[startStep, endStep)`
  *
@@ -36,6 +41,15 @@ import type { ActiveEvent, CharacterId, EventId } from './types';
  * La cible est tirée **uniformément** parmi les personnages éligibles (cooldowns, plafond, emplacement
  * libre). Aucun tirage ne consulte le rang, la distance, l'écart, le leader ou le dernier : les
  * remontées spectaculaires émergent de la variance, elles ne sont jamais organisées.
+ *
+ * ## Neutralité en distance (P010)
+ *
+ * À poids et durées égaux, un bonus rapporte **plus** de distance qu'un malus n'en retire : le gain
+ * n'est pas proportionnel à la magnitude mais à `BASE × (1 + m)`, donc la famille positive est
+ * convexe. Mesuré sur 100 seeds, le catalogue d'origine ajoutait `+0,90 %` de distance moyenne à lui
+ * seul. Les magnitudes de **bonus** ont donc été réduites de 35 % (`× 0,65`), ce qui ramène
+ * l'ensemble du catalogue à la neutralité ; les **malus** sont inchangés, faute de raison mesurée de
+ * les aggraver.
  */
 
 /** Fiche normative d'un événement du catalogue. */
@@ -49,8 +63,6 @@ export interface EventDefinition {
   readonly magnitudeMax: number;
   readonly durationMinS: number;
   readonly durationMaxS: number;
-  /** `true` uniquement pour `CHUTE` : elle annule un `TURBO` actif au lieu d'être refusée. */
-  readonly cancelsTurbo: boolean;
 }
 
 /** Catalogue V1, copie exacte de `GAME_DESIGN.md` §7.1. */
@@ -58,11 +70,10 @@ export const EVENT_CATALOG: readonly EventDefinition[] = Object.freeze([
   Object.freeze({
     id: 'TURBO',
     weight: 22,
-    magnitudeMin: 1.2,
-    magnitudeMax: 1.8,
+    magnitudeMin: 0.78,
+    magnitudeMax: 1.17,
     durationMinS: 2.5,
     durationMaxS: 4.0,
-    cancelsTurbo: false,
   }),
   Object.freeze({
     id: 'CHUTE',
@@ -71,7 +82,6 @@ export const EVENT_CATALOG: readonly EventDefinition[] = Object.freeze([
     magnitudeMax: -0.55,
     durationMinS: 2.5,
     durationMaxS: 5.0,
-    cancelsTurbo: true,
   }),
   Object.freeze({
     id: 'VENT_DE_FACE',
@@ -80,16 +90,14 @@ export const EVENT_CATALOG: readonly EventDefinition[] = Object.freeze([
     magnitudeMax: -0.3,
     durationMinS: 4.0,
     durationMaxS: 7.0,
-    cancelsTurbo: false,
   }),
   Object.freeze({
     id: 'RACCOURCI',
     weight: 12,
-    magnitudeMin: 1.6,
-    magnitudeMax: 2.0,
+    magnitudeMin: 1.04,
+    magnitudeMax: 1.3,
     durationMinS: 2.5,
     durationMaxS: 3.5,
-    cancelsTurbo: false,
   }),
   Object.freeze({
     id: 'POULET',
@@ -98,7 +106,6 @@ export const EVENT_CATALOG: readonly EventDefinition[] = Object.freeze([
     magnitudeMax: -0.2,
     durationMinS: 2.0,
     durationMaxS: 4.0,
-    cancelsTurbo: false,
   }),
   Object.freeze({
     id: 'SIESTE',
@@ -107,16 +114,14 @@ export const EVENT_CATALOG: readonly EventDefinition[] = Object.freeze([
     magnitudeMax: -0.7,
     durationMinS: 5.0,
     durationMaxS: 5.0,
-    cancelsTurbo: false,
   }),
   Object.freeze({
     id: 'MEGA_TURBO',
     weight: 4,
-    magnitudeMin: 2.5,
-    magnitudeMax: 2.5,
+    magnitudeMin: 1.63,
+    magnitudeMax: 1.63,
     durationMinS: 5.0,
     durationMaxS: 5.0,
-    cancelsTurbo: false,
   }),
 ]);
 
@@ -191,7 +196,6 @@ export function validateEventCatalog(catalog: readonly EventDefinition[]): void 
   }
 
   const seen = new Set<string>();
-  let cancelling = 0;
 
   for (const definition of catalog) {
     if (seen.has(definition.id)) {
@@ -216,15 +220,6 @@ export function validateEventCatalog(catalog: readonly EventDefinition[]): void 
     if (definition.durationMinS <= 0 || definition.durationMinS > definition.durationMaxS) {
       throw new RangeError(`EVENT ${definition.id} : bornes de durée invalides.`);
     }
-    if (definition.cancelsTurbo) {
-      cancelling += 1;
-    }
-  }
-
-  // Le remplacement d'un `TURBO` n'a de sens que pour un seul événement (`CHUTE`, §7.3) : deux
-  // annulateurs rendraient la règle ambiguë.
-  if (cancelling > 1) {
-    throw new RangeError(`EVENT : ${cancelling} événements annulent un TURBO, un seul est autorisé.`);
   }
 }
 
@@ -354,16 +349,12 @@ export function stepEvents(
 
   const spec = stream.weightedPick(params.specs, params.weights);
 
-  // 4. Éligibilité : plafond, cooldown individuel, puis emplacement libre. `CHUTE` est la seule à
-  // pouvoir écraser un `TURBO` actif, et seulement un `TURBO`.
-  //
-  // Les deux cooldowns s'appliquent **sans exception**, exactement comme §7.3 les énonce. Conséquence
-  // arithmétique à connaître : un `TURBO` dure au plus 4 s, alors que le cooldown global vaut 4 s et
-  // le cooldown individuel 8 s ; avec les constantes de la V1, l'annulation `CHUTE` sur `TURBO` ne
-  // peut donc jamais se produire en course. La règle reste implémentée comme une garde structurelle
-  // (le jour où l'un des réglages change, elle s'applique sans code à modifier) et elle est vérifiée
-  // par un test à cooldowns nuls. La rendre atteignable supposerait de changer un réglage de §7.1 ou
-  // §7.3 : c'est une décision de game design, pas une conséquence de ce module.
+  // 4. Éligibilité : plafond, cooldown individuel, puis emplacement libre. Un personnage qui subit
+  // déjà un événement n'est **jamais** éligible, quel que soit l'événement tiré : la V1 n'a aucune
+  // règle de remplacement. (Jusqu'à P010, `CHUTE` pouvait écraser un `TURBO` actif ; la règle a été
+  // **supprimée**, pas désactivée — `CHAR_COOLDOWN_S = 8 s` dépassant la durée maximale d'un `TURBO`
+  // (4 s), elle ne pouvait de toute façon jamais se déclencher en course, et une règle normative
+  // inatteignable n'a pas sa place dans §7.3.)
   const eligible: number[] = [];
   for (let index = 0; index < count; index += 1) {
     if ((plan.counts[index] ?? 0) >= params.maxPerCharacter) {
@@ -374,8 +365,7 @@ export function stepEvents(
       continue;
     }
 
-    const slot = plan.slots[index] ?? null;
-    if (slot === null || (spec.definition.cancelsTurbo && slot.event.id === 'TURBO')) {
+    if ((plan.slots[index] ?? null) === null) {
       eligible.push(index);
     }
   }

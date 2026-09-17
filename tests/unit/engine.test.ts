@@ -400,7 +400,7 @@ describe('équivalence des 6 personnages', () => {
    * seule course est de 2,1 % ; sur 384 courses (4 147 200 pas) il tombe à 0,11 %, ce qui rend les
    * seuils ci-dessous inatteignables par le hasard.
    */
-  it('mesure le biais partagé, qui dépasse le seuil §13 ± 1,5 % (écart connu, P010)', () => {
+  it('mesure un biais partagé strictement sous le seuil §13 ± 1,5 %', () => {
     const races = 384;
     const totals = CHARACTER_IDS.map(() => 0);
 
@@ -429,27 +429,24 @@ describe('équivalence des 6 personnages', () => {
     const spread = Math.max(...means) - Math.min(...means);
     expect(spread / SPEED.BASE).toBeLessThan(0.005);
 
-    // 2. Critère §13 : `SPEED.BASE ± 1,5 %` par personnage. Depuis P008, ce critère est **dépassé**,
-    //    et le test l'affirme au lieu de le masquer : le biais est *partagé* par les six personnages,
-    //    il ne vient pas d'un déséquilibre. Sa cause est documentée dans `GAME_DESIGN.md` §13 :
-    //    surges à espérance positive (≈ +0,9 %) et catalogue d'événements de §7.1 net positif en
-    //    distance (≈ +1,1 point), l'écrêtage à `SPEED.MIN` rabotant les malus. Mesuré : +2,03 %.
-    //    Arbitrage attendu en P010 (rendre §7.1 net neutre) : si le biais repasse sous 1,5 %, ces
-    //    deux assertions échouent et forcent la mise à jour explicite du seuil et de son commentaire.
+    // 2. Critère §13 : `SPEED.BASE ± 1,5 %` par personnage. P008 l'avait mesuré **dépassé** (+2,03 %),
+    //    et `GAME_DESIGN.md` §13 indiquait la correction à faire : rendre le catalogue §7.1 net neutre
+    //    en distance plutôt qu'élargir le seuil. P010 l'a fait — magnitudes de bonus réduites de 35 %
+    //    — et ce test mesure désormais le **respect** du seuil. Il échoue si le biais remonte : c'est
+    //    volontaire, l'écart de game design ne peut pas revenir en silence.
     for (const [index, mean] of means.entries()) {
       const relative = (mean - SPEED.BASE) / SPEED.BASE;
-      expect(relative, `${CHARACTER_IDS[index]} : ${(relative * 100).toFixed(3)} %`).toBeGreaterThan(
-        0.015,
-      );
+      expect(relative, `${CHARACTER_IDS[index]} : ${(relative * 100).toFixed(3)} %`).toBeGreaterThan(0);
       expect(relative, `${CHARACTER_IDS[index]} : ${(relative * 100).toFixed(3)} %`).toBeLessThan(
-        0.025,
+        0.015,
       );
     }
 
-    // 3. Le biais est bien *commun* : mesuré à ±0,2 point autour de sa moyenne, jamais nul ni négatif.
+    // 3. Le biais est bien *commun*, et il est positif : c'est l'écrêtage à `SPEED.MIN` et la
+    //    convexité du gain de distance qui le veulent, pas un personnage avantagé.
     const relative = (grand - SPEED.BASE) / SPEED.BASE;
-    expect(relative, `biais global mesuré : ${(relative * 100).toFixed(3)} %`).toBeGreaterThan(0.015);
-    expect(relative).toBeLessThan(0.025);
+    expect(relative, `biais global mesuré : ${(relative * 100).toFixed(3)} %`).toBeGreaterThan(0);
+    expect(relative).toBeLessThan(0.015);
   }, 120_000);
 });
 

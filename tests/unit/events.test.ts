@@ -58,13 +58,13 @@ const DOCUMENTED: Readonly<
     }
   >
 > = Object.freeze({
-  TURBO: { weight: 22, magnitudeMin: 1.2, magnitudeMax: 1.8, durationMinS: 2.5, durationMaxS: 4.0 },
+  TURBO: { weight: 22, magnitudeMin: 0.78, magnitudeMax: 1.17, durationMinS: 2.5, durationMaxS: 4.0 },
   CHUTE: { weight: 20, magnitudeMin: -0.75, magnitudeMax: -0.55, durationMinS: 2.5, durationMaxS: 5.0 },
   VENT_DE_FACE: { weight: 18, magnitudeMin: -0.45, magnitudeMax: -0.3, durationMinS: 4.0, durationMaxS: 7.0 },
-  RACCOURCI: { weight: 12, magnitudeMin: 1.6, magnitudeMax: 2.0, durationMinS: 2.5, durationMaxS: 3.5 },
+  RACCOURCI: { weight: 12, magnitudeMin: 1.04, magnitudeMax: 1.3, durationMinS: 2.5, durationMaxS: 3.5 },
   POULET: { weight: 10, magnitudeMin: -0.35, magnitudeMax: -0.2, durationMinS: 2.0, durationMaxS: 4.0 },
   SIESTE: { weight: 6, magnitudeMin: -0.7, magnitudeMax: -0.7, durationMinS: 5.0, durationMaxS: 5.0 },
-  MEGA_TURBO: { weight: 4, magnitudeMin: 2.5, magnitudeMax: 2.5, durationMinS: 5.0, durationMaxS: 5.0 },
+  MEGA_TURBO: { weight: 4, magnitudeMin: 1.63, magnitudeMax: 1.63, durationMinS: 5.0, durationMaxS: 5.0 },
 });
 
 /**
@@ -240,11 +240,6 @@ describe('catalogue d’événements', () => {
       expect(definition.durationMinS, definition.id).toBe(expected.durationMinS);
       expect(definition.durationMaxS, definition.id).toBe(expected.durationMaxS);
     }
-
-    // Un seul annulateur : `CHUTE`.
-    expect(EVENT_CATALOG.filter((definition) => definition.cancelsTurbo).map((d) => d.id)).toEqual([
-      'CHUTE',
-    ]);
   });
 
   it('garde chaque vitesse cible nominale entre SPEED.MIN et SPEED.MAX', () => {
@@ -278,12 +273,6 @@ describe('catalogue d’événements', () => {
     expect(() => validateEventCatalog(catalog({ durationMaxS: 1 }))).toThrow(RangeError);
     expect(() =>
       validateEventCatalog([first, { ...(EVENT_CATALOG[1] as EventDefinition), id: 'TURBO' }]),
-    ).toThrow(RangeError);
-    expect(() =>
-      validateEventCatalog([
-        { ...first, cancelsTurbo: true },
-        EVENT_CATALOG[1] as EventDefinition,
-      ]),
     ).toThrow(RangeError);
   });
 
@@ -324,7 +313,7 @@ describe('planificateur : tirage forcé', () => {
   it('déclenche l’événement tiré sur la cible tirée, à la durée tirée', () => {
     const plan = createEventPlan(CHARACTER_IDS.length);
     // Candidat, identifiant (RACCOURCI), cible (index 3), durée (borne haute = 210 pas = 3,5 s),
-    // magnitude (milieu de [1,6 ; 2,0] = 1,8).
+    // magnitude (milieu de [1,04 ; 1,30] = 1,17).
     const stream = scripted([0, floatValue(fractionFor('RACCOURCI')), 3, 210 - 150, floatValue(0.5)]);
 
     stepEvents(plan, stream, PARAMS, CHARACTER_IDS, 1);
@@ -335,7 +324,7 @@ describe('planificateur : tirage forcé', () => {
     expect(event?.target).toBe('c3');
     expect(event?.startSimS).toBe(0);
     expect(event?.durationS).toBe(210 * DT);
-    expect(event?.magnitude).toBeCloseTo(1.8, 12);
+    expect(event?.magnitude).toBeCloseTo(1.17, 12);
 
     const slot = plan.slots[3];
     expect(slot?.endStep).toBe(211);
@@ -481,11 +470,13 @@ describe('planificateur : tirage forcé', () => {
     expect(plan.counts[0]).toBe(1);
   });
 
-  it('laisse CHUTE remplacer un TURBO encore actif (cooldowns nuls)', () => {
-    // Les deux cooldowns de §7.3 sont neutralisés **pour ce test seulement** : avec les constantes de
-    // la V1, un `TURBO` (≤ 4 s) est toujours terminé avant que le cooldown global (4 s) puis le
-    // cooldown individuel (8 s) laissent passer un nouveau candidat. La règle est donc une garde
-    // structurelle ; ici, on vérifie qu'elle fonctionne le jour où un réglage la rend atteignable.
+  it('ne remplace jamais un événement en cours, même à cooldowns nuls', () => {
+    // La V1 n'a **aucune** règle de remplacement : un personnage qui subit déjà un événement n'est
+    // pas éligible, quel que soit l'événement tiré. Jusqu'à P010, `CHUTE` pouvait écraser un `TURBO`
+    // actif ; la dérogation a été supprimée parce qu'elle était inatteignable avec les constantes de
+    // §7.3 (`CHAR_COOLDOWN_S = 8 s` > durée maximale d'un `TURBO`, 4 s). Ce test neutralise donc les
+    // deux cooldowns **exprès** : il vérifie que la règle tient par structure, et non par un concours
+    // de constantes qui pourrait se défaire au prochain réglage.
     const permissive = eventParams({
       ...GAME_CONFIG,
       EVENT: { ...GAME_CONFIG.EVENT, GLOBAL_COOLDOWN_S: 0, CHAR_COOLDOWN_S: 0 },
@@ -502,7 +493,7 @@ describe('planificateur : tirage forcé', () => {
     const turbo = activeEventAt(plan, 0);
     expect(turbo?.id).toBe('TURBO');
 
-    // 3 s plus tard, le flux désigne CHUTE puis c0 : le TURBO est écrasé.
+    // 3 s plus tard, le flux désigne CHUTE puis c0 : c0 est occupé, donc écarté du tirage.
     stepEvents(
       plan,
       scripted([0, floatValue(fractionFor('CHUTE')), 0, 0, floatValue(0.5)]),
@@ -511,20 +502,26 @@ describe('planificateur : tirage forcé', () => {
       181,
     );
 
-    const after = activeEventAt(plan, 0);
-    expect(after?.id).toBe('CHUTE');
-    expect(after).not.toBe(turbo);
-    expect(plan.counts[0]).toBe(2);
-    // Le plafond reste absolu : l'annulation consomme bien un événement du quota.
-    expect(plan.lastCharacterStep[0]).toBe(181);
+    expect(activeEventAt(plan, 0)).toBe(turbo);
+    expect(plan.counts[0]).toBe(1);
+    // La `CHUTE` n'est pas perdue pour autant : elle part sur un autre personnage éligible.
+    expect(plan.counts.reduce((sum, count) => sum + count, 0)).toBe(2);
   });
 
-  it('ne peut pas annuler un TURBO avec les constantes de la V1', () => {
-    // Documentation chiffrée de l'impossibilité : après un `TURBO` déclenché au pas 1, le premier
-    // candidat que le cooldown global laisse passer arrive au pas 241 — exactement le pas où
-    // l'emplacement d'un `TURBO` de durée maximale se vide (`endStep` exclu). Le cooldown individuel
-    // (480 pas) court alors encore : le personnage n'est donc jamais rééligible tant que son `TURBO`
-    // est actif.
+  it('garde le cooldown individuel plus long que le TURBO maximal', () => {
+    // Cette inégalité de constantes est la raison pour laquelle la règle « `CHUTE` annule un `TURBO` »
+    // a été **supprimée** en P010 plutôt que conservée comme garde : elle était inatteignable, et
+    // aucune course ne l'exerçait. Le test l'épingle pour que le raisonnement reste vérifiable.
+    expect(GAME_CONFIG.EVENT.CHAR_COOLDOWN_S).toBeGreaterThan(
+      EVENT_CATALOG.reduce((longest, definition) => Math.max(longest, definition.durationMaxS), 0),
+    );
+  });
+
+  it('ne peut pas replacer un événement sur un personnage encore sous cooldown', () => {
+    // Documentation chiffrée : après un `TURBO` déclenché au pas 1, le premier candidat que le
+    // cooldown global laisse passer arrive au pas 241 — exactement le pas où l'emplacement d'un
+    // `TURBO` de durée maximale se vide (`endStep` exclu). Le cooldown individuel (480 pas) court
+    // alors encore : le personnage n'est donc pas rééligible.
     const plan = createEventPlan(CHARACTER_IDS.length);
     stepEvents(
       plan,

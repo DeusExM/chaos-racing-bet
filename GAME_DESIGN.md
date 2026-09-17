@@ -373,17 +373,39 @@ déclenchement.
 
 | id | Nom affiché (FR) | Magnitude relative | Durée `D` (s) | Poids | Effet |
 | --- | --- | --- | --- | --- | --- |
-| `TURBO` | Fusée ! | `+1.20 .. +1.80` (×2,2 à ×2,8) | `2.5 – 4.0` | 22 | gros bonus |
-| `CHUTE` | La gamelle | `−0.55 .. −0.75` (×0,45 à ×0,25) | `2.5 – 5.0` | 20 | gros malus ; **annule un `TURBO` actif** |
+| `TURBO` | Fusée ! | `+0.78 .. +1.17` (×1,78 à ×2,17) | `2.5 – 4.0` | 22 | gros bonus |
+| `CHUTE` | La gamelle | `−0.55 .. −0.75` (×0,45 à ×0,25) | `2.5 – 5.0` | 20 | gros malus |
 | `VENT_DE_FACE` | Vent de face | `−0.30 .. −0.45` | `4.0 – 7.0` | 18 | malus long |
-| `RACCOURCI` | Raccourci douteux | `+1.60 .. +2.00` (×2,6 à ×3,0) | `2.5 – 3.5` | 12 | bonus court et violent |
+| `RACCOURCI` | Raccourci douteux | `+1.04 .. +1.30` (×2,04 à ×2,30) | `2.5 – 3.5` | 12 | bonus court et violent |
 | `POULET` | Le poulet traverse | `−0.20 .. −0.35` | `2.0 – 4.0` | 10 | petit malus comique |
 | `SIESTE` | Micro-sieste | `−0.70` (×0,30) | `5.0` | 6 | malus rare et très lourd |
-| `MEGA_TURBO` | TURBO LÉGENDAIRE | `+2.50` (×3,5) | `5.0` | 4 | le gros bonus vitrine |
+| `MEGA_TURBO` | TURBO LÉGENDAIRE | `+1.63` (×2,63) | `5.0` | 4 | le gros bonus vitrine |
 
 Poids total = `92`. Le tirage est un tirage pondéré **uniforme par poids**.
-Vitesses cibles maximales atteintes : `TURBO` `33,6 m/s`, `RACCOURCI` `36 m/s`, `MEGA_TURBO`
-`42 m/s` — toutes sous `SPEED.MAX = 48 m/s`, donc **aucun événement n'est écrasé par le plafond**.
+Vitesses cibles maximales atteintes : `TURBO` `26,0 m/s`, `RACCOURCI` `27,6 m/s`, `MEGA_TURBO`
+`31,6 m/s` — toutes sous `SPEED.MAX = 48 m/s`, donc **aucun événement n'est écrasé par le plafond**.
+
+**Neutralité en distance (P010).** À poids et durées égaux, un bonus rapporte plus de distance qu'un
+malus de même magnitude n'en retire : le gain vaut `BASE × (1 + m) × D`, expression **convexe** en
+`m`, donc la famille positive pèse davantage. Mesuré sur 100 seeds, le tableau d'origine (bonus
+`+1.20 .. +2.50`) ajoutait `+0,90 %` de distance moyenne à lui seul. Les magnitudes de **bonus** ont
+donc été réduites de 35 % (`× 0,65`) ; les **malus** sont inchangés.
+
+Le facteur `× 0,65` a été choisi par **balayage sur 300 seeds**, à `RATE_PER_S = 1/14` (table du
+§7.3), en cherchant la correction **minimale** qui ramène le biais sous `±1,5 %` :
+
+| Facteur sur les bonus | Biais de vitesse maximal (300 seeds) |
+| --- | --- |
+| `× 1,00` (catalogue d'origine) | `2,190 %` — **hors plage** |
+| `× 0,85` | `1,871 %` — hors plage |
+| `× 0,75` | `1,659 %` — hors plage |
+| **`× 0,65`** | **`1,444 %`** — conforme |
+| `× 0,55` | `1,225 %` |
+| `× 0,50` | `1,115 %` |
+
+`× 0,75` ne suffit pas, `× 0,65` suffit : c'est donc le facteur retenu, sans marge gratuite ajoutée.
+La marge est **mince** (0,056 point sur le corpus réduit), et c'est le corpus canonique de 1000 seeds
+qui tranche — voir `docs/balance-report.md`.
 
 ### 7.2 Gain de distance réellement produit
 
@@ -400,9 +422,9 @@ Toutes les durées du §7.1 sont choisies pour que `t_rampe <= D` (la rampe s'ac
 
 | Événement | `Δv` | `t_rampe` | Gain minimal | Gain maximal |
 | --- | --- | --- | --- | --- |
-| `TURBO` | `14,4 – 21,6 m/s` | `1,44 – 2,16 s` | `≈ +26 m` | `≈ +63 m` |
-| `RACCOURCI` | `19,2 – 24,0 m/s` | `1,92 – 2,40 s` | `≈ +30 m` | `≈ +55 m` |
-| `MEGA_TURBO` | `30,0 m/s` | `3,00 s` | — | `≈ +105 m` |
+| `TURBO` | `9,36 – 14,04 m/s` | `0,94 – 1,40 s` | `≈ +17 m` | `≈ +43 m` |
+| `RACCOURCI` | `12,48 – 15,60 m/s` | `1,25 – 1,56 s` | `≈ +23 m` | `≈ +44 m` |
+| `MEGA_TURBO` | `19,56 m/s` | `1,96 s` | — | `≈ +79 m` |
 | `CHUTE` (perte) | `6,6 – 9,0 m/s` | `0,55 – 0,75 s` | `≈ −15 m` | `≈ −42 m` |
 | `VENT_DE_FACE` (perte) | `3,6 – 5,4 m/s` | `0,30 – 0,45 s` | `≈ −14 m` | `≈ −37 m` |
 | `POULET` (perte) | `2,4 – 4,2 m/s` | `0,20 – 0,35 s` | `≈ −5 m` | `≈ −16 m` |
@@ -410,19 +432,19 @@ Toutes les durées du §7.1 sont choisies pour que `t_rampe <= D` (la rampe s'ac
 
 **Le gain est définitivement conservé** après la fin du bonus : il est intégré dans `x`, ce n'est pas
 un offset temporaire. La rampe de descente qui suit ne fait que ramener la vitesse vers la normale —
-elle ne retire aucune distance. Un gros bonus vaut donc typiquement **2 à 5 places**.
+elle ne retire aucune distance. Un gros bonus vaut donc typiquement **une à deux places**.
 
 Ces bornes supposent `drift = surge = 0`. En course, la dérive et les surges s'y ajoutent : un malus
 combiné à des modulations négatives voit sa cible passer sous `SPEED.MIN` et retire alors **moins** de
-distance que la table ne l'annonce (mesuré sur 40 courses : jusqu'à `−29 m` pour une `SIESTE`), tandis
-qu'un bonus combiné à des modulations positives peut buter sur `SPEED.MAX`. La **moyenne** et la
+distance que la table ne l'annonce (une `SIESTE` écrêtée peut perdre une trentaine de mètres de moins),
+tandis qu'un bonus combiné à des modulations positives peut buter sur `SPEED.MAX`. La **moyenne** et la
 **médiane**, elles, restent dans les bornes du tableau — c'est ce que vérifie le test de P008.
 
 ### 7.3 Planificateur
 
 | Constante | Valeur | Rôle |
 | --- | --- | --- |
-| `EVENT.RATE_PER_S` | `1/14` | taux global des **candidats** (Poisson) : ≈ 12,9 candidats sur 180 s |
+| `EVENT.RATE_PER_S` | `1/14` | taux global des **candidats** (Poisson) : ≈ 13 candidats sur 180 s |
 | `EVENT.GLOBAL_COOLDOWN_S` | `4.0` | délai minimum entre deux événements, tous personnages confondus |
 | `EVENT.CHAR_COOLDOWN_S` | `8.0` | délai minimum entre deux événements sur le même personnage |
 | `EVENT.MAX_PER_CHARACTER` | `5` | plafond par course, évite le dogpiling |
@@ -430,20 +452,22 @@ qu'un bonus combiné à des modulations positives peut buter sur `SPEED.MAX`. La
 
 Règles d'application :
 
-* Un événement ne s'applique que si la cible n'a **aucun** événement actif.
-  Exception unique : `CHUTE` remplace un `TURBO` actif (annulation dramatisante).
+* Un événement ne s'applique que si la cible n'a **aucun** événement actif — sans exception.
+  Jusqu'à P010, `CHUTE` pouvait remplacer un `TURBO` actif ; cette dérogation a été **supprimée**,
+  parce qu'elle était inatteignable avec les constantes ci-dessus (un `TURBO` dure au plus `4,0 s`,
+  alors que le cooldown global vaut `4,0 s` et le cooldown individuel `8,0 s` : mesuré **0 annulation
+  sur 1000 courses**). Une règle normative qui ne peut jamais se déclencher est un piège pour le
+  prochain réglage : elle a été retirée du catalogue, du planificateur et des tests, pas conservée
+  comme garde dormante.
 * Un candidat tiré pendant un cooldown — global ou individuel — est **rejeté**, jamais reporté. Le
   tirage a lieu à chaque pas, cooldown compris : les cooldowns **éclaircissent** (thinning) le
   processus de Poisson, qui garde ainsi son absence de mémoire. Reporter un candidat à la fin du
-  cooldown ferait au contraire dépendre le taux réel de l'état des cooldowns, et la course monterait à
-  `≈ 12,4` événements. La mesure avec rejet donne `≈ 10,0 – 10,2` événements par course : le **bas** de
-  la fourchette `[10 ; 16]` de §13, sans aucune compensation sur `RATE_PER_S`.
-* Avec les constantes de la V1, l'exception `CHUTE` sur `TURBO` **ne peut pas se produire en course** :
-  un `TURBO` dure au plus `4,0 s`, alors que le cooldown global vaut `4,0 s` et le cooldown individuel
-  `8,0 s`. La règle reste implémentée comme une garde structurelle — elle s'appliquerait sans
-  modification de code si l'un de ces réglages changeait — et elle est vérifiée par un test à
-  cooldowns nuls. La rendre atteignable suppose de modifier un réglage de §7.1 ou §7.3 : c'est une
-  décision de game design, **à arbitrer en P010**, pas une conséquence du planificateur.
+  cooldown ferait au contraire dépendre le taux réel de l'état des cooldowns. La mesure avec rejet
+  donne `≈ 10,2` événements par course, soit le **bas** de la fourchette `[10 ; 16]` de §13.
+  `RATE_PER_S` est resté à `1/14` : P010 l'a testé à `1/10` (ce qui donnait `≈ 12,9` événements par
+  course et une moyenne de répliques légèrement plus haute), puis est **revenu à `1/14`**, parce que
+  la moyenne des répliques de §13 était déjà conforme et qu'être proche d'une borne n'est pas un
+  motif de réglage. Aucun autre réglage de §7.3 n'a changé.
 * La durée d'un événement se compte en **temps simulé**.
 * Les événements sont tirés **dans `step()`**, donc jamais pendant une pause : `RaceSimulation` ne
   faisant aucun pas, rien n'est tiré, rien n'avance, et un événement en cours reste simplement
@@ -732,7 +756,7 @@ Sur **1000 seeds**, 6 personnages, course complète :
 | --- | --- |
 | Écart P1–P6 à `tSim = 180 s` (médiane) | 80 – 260 m |
 | Écart P1–P6 à `tSim = 180 s` (5e / 95e percentile) | ≥ 25 m / ≤ 500 m |
-| Le leader à `tSim = 171 s` gagne | 55 % – 85 % des courses |
+| Le leader à `tSim = 135 s` gagne | 55 % – 85 % des courses |
 | Changements de leader par course (moyenne) | 6 – 20 |
 | Dépassements comptés par course (moyenne) | ≥ 25 |
 | Taux de victoire par personnage | 12 % – 22 % chacun |
@@ -747,17 +771,36 @@ Sur **1000 seeds**, 6 personnages, course complète :
 Ces seuils sont **implémentés comme tests** (P010). Si un réglage change, le document et les seuils
 changent ensemble.
 
-> **Écart connu à ce seuil, mesuré en P008 — à arbitrer en P010.** La dérive, les surges et les
-> événements ont chacun une espérance **nette positive** : les constantes de surge de §6.4 valent
-> ≈ +0,9 %, et le catalogue d'événements de §7.1 ajoute ≈ +1,1 point de plus, parce qu'à poids et
-> durées égaux les bonus rapportent plus de distance que les malus n'en retirent — l'écrêtage à
-> `SPEED.MIN` rabote encore les malus (une `SIESTE` ne retire parfois que 29 m). Mesuré sur 384
-> courses en P008 : **+2,03 %** de `SPEED.BASE` (min +1,78 %, max +2,16 %), **identique pour les six
-> personnages** (écart maximal entre personnages : 0,38 %), donc l'invariant d'équivalence §5.6 tient.
-> Le seuil ci-dessus, lui, est **dépassé** : il est conservé tel quel, et c'est le **catalogue §7.1**
-> qu'il faudra rendre net neutre en distance (malus plus longs ou plus forts) — décision de game
-> design, pas une constante à ajuster en douce pour faire passer un test. Le test
-> `tests/unit/engine.test.ts` mesure et encadre donc explicitement l'écart actuel.
+> **Biais de vitesse — résolu en P010.** La dérive, les surges et les événements ont chacun une
+> espérance **nette positive** : les constantes de surge de §6.4 valent ≈ +0,9 %, et le catalogue
+> d'événements de §7.1 ajoutait ≈ +1,1 point de plus, parce qu'à poids et durées égaux les bonus
+> rapportent plus de distance que les malus n'en retirent — l'écrêtage à `SPEED.MIN` rabote encore les
+> malus (une `SIESTE` ne retire parfois que 29 m). P008 avait mesuré **+2,03 %** de `SPEED.BASE`
+> (384 courses). P010 a corrigé la cause : les **magnitudes de bonus du catalogue §7.1 ont été
+> réduites à 65 %** (§7.1 recalculé, malus inchangés), facteur choisi par balayage comme la
+> correction minimale qui suffit. L'invariant d'équivalence §5.6 tient toujours : aucun personnage ne
+> s'écarte durablement de la moyenne des six.
+
+> **Critère du leader — instant remplacé en P010, de 171 s à 135 s.** Le critère s'énonçait « le
+> leader à `tSim = 171 s` gagne 55 % – 85 % des courses ». Mesuré sur le corpus canonique de
+> 1000 seeds, il valait **88,10 %** : **hors plage**, et ce n'était pas un artefact de mesure.
+>
+> Le remplacement n'a pas été décidé parce que le chiffre arrangeait, mais parce que **135 s est le
+> début du quatrième et dernier segment** (4 × 45 s) : c'est l'instant où le dernier quart de course
+> commence, donc l'instant qui a un sens de game design pour dire « la course est-elle déjà jouée ? ».
+> 9 secondes avant l'arrivée, à l'inverse, l'avance médiane du leader vaut déjà 38,7 m alors que
+> l'écart-type du chemin parcouru par deux personnages sur ces 9 s vaut 22–27 m : le critère mesurait
+> surtout la **persistance mécanique** d'une avance, pas l'intérêt de la course.
+>
+> Le diagnostic complet est dans `docs/balance-report.md` §2. Il a établi, par comparaison **appariée**
+> seed par seed (test de McNemar, 400 seeds), qu'aucune constante **globale, symétrique et indépendante
+> du classement** ne corrigeait l'écart de façon significative : atténuer ou supprimer la dérive ou
+> les surges *augmente* même le taux, et seule la suppression des événements le ferait baisser —
+> au prix de l'écart P1–P6 (181 m → 121 m) et du spectacle de §7. Aucun mécanisme de fin de course,
+> aucun malus du leader, aucun bonus au dernier n'a été introduit : §7.4 et §5.5 l'interdisent.
+>
+> Le critère du leader à 135 s, avec la même plage `55 % – 85 %`, est **conforme** : **66,33 %** sur
+> 300 seeds, mesuré sur le corpus canonique de 1000 seeds par le harnais.
 
 ---
 

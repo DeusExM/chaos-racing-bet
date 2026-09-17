@@ -301,6 +301,14 @@ d'implémenter** et proposer une variante compatible (ou demander une modificati
   Chromium est le seul navigateur nécessaire ; ne pas installer Firefox ni WebKit par anticipation.
 * `$env:TEMP` / `$env:TMP` peuvent être redirigés ponctuellement vers `$PWD\.tmp` pour une commande
   (Chromium y écrit alors son profil). **Ne jamais modifier les variables globales de Windows.**
+* **Ports d'outillage : convention `18000–18999`, source unique `dev-ports.ts`.** Le serveur de
+  prévisualisation (`vite preview`) et la `baseURL` des tests E2E (`playwright.config.ts`) lisent le
+  même port (`18173`) dans ce module. Motif : Windows réserve **dynamiquement** des plages autour de
+  `4000` (WinNAT/Hyper-V — constaté : `4108–4207`), et `bind()` sur un port réservé échoue en
+  `EACCES`. L'ancien port `4173` a dû être abandonné pour cette raison : `npm run verify` échouait à
+  l'étape E2E (`vite preview` ne démarrait plus) alors qu'aucun test n'était en cause. Ne pas
+  « réparer » cela en modifiant la configuration réseau de la machine : changer de port suffit, et la
+  convention évite d'y revenir. Le serveur de développement reste sur `5173` (`vite.config.ts`).
 
 ### 9.1 Périmètre d'exécution et garde-fous
 

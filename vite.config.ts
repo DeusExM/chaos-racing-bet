@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
 
+import { PREVIEW_HOST, PREVIEW_PORT } from './dev-ports';
+
 // P001 : configuration minimale. Le plugin PWA (vite-plugin-pwa) est deja installe
 // mais n'est volontairement PAS active ici : son branchement appartient a P016.
 export default defineConfig({
@@ -18,8 +20,10 @@ export default defineConfig({
     strictPort: true,
   },
   preview: {
-    host: '127.0.0.1',
-    port: 4173,
+    // Port partage avec `playwright.config.ts` via `dev-ports.ts` : les tests E2E interrogent
+    // exactement l'URL servie ici. Voir `dev-ports.ts` pour le choix de la plage 18000-18999.
+    host: PREVIEW_HOST,
+    port: PREVIEW_PORT,
     strictPort: true,
   },
 });

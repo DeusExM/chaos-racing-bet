@@ -235,7 +235,17 @@ export const SURGE: SurgeConfig = Object.freeze({
  * cooldowns.
  */
 export const EVENT: EventConfig = Object.freeze({
-  /** Taux global, en événements par seconde simulée. */
+  /**
+   * Taux global, en événements par seconde simulée.
+   *
+   * `1 / 14` (intervalle moyen de 14 s) : c'est la valeur d'origine de §7.3, **rétablie par P010**
+   * après un aller-retour. Elle produit ≈ 10,2 événements par course, donc le **bas** de la
+   * fourchette `[10 ; 16]` de §13 — mais à l'intérieur, et « proche d'une borne » n'est pas un motif
+   * de réglage. Le passage temporaire à `1 / 10` ne visait que la densité de répliques du speaker
+   * (16,4 → 17,5 en moyenne) ; il a été annulé parce que la ligne §13 du speaker se lit sur la
+   * **moyenne**, déjà conforme à `1 / 14`, et parce que la traîne des courses pauvres vient des
+   * cooldowns de type, pas du nombre de faits (`docs/balance-report.md` §4.2).
+   */
   RATE_PER_S: 1 / 14,
   /** Délai minimal entre deux événements, tous personnages confondus. */
   GLOBAL_COOLDOWN_S: 4.0,

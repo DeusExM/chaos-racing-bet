@@ -23,17 +23,18 @@ import { computeRanks, isLeaderChange } from '../../src/core/ranking';
 export const OVERTAKE_SEED = 'POULET42';
 
 /**
- * Valeurs **remesurées** pour `OVERTAKE_SEED` après le correctif d'hystérésis (avant P009).
+ * Valeurs **remesurées** pour `OVERTAKE_SEED`, dernière fois en P010.
  *
- * Le comptage n'utilise plus `overtakesBetween`, qui dépendait de la fréquence d'observation : il
- * alimente un `OvertakeTracker` **à chaque pas simulé**, ce qui est la source de vérité de P009. Les
- * chiffres de P008 (14 changements de leader / 32 dépassements pour un relevé tous les 20 pas, et
- * 0 dépassement pas à pas) sont donc remplacés : ils mesuraient l'ancien couplage, pas la course.
- * La seed est conservée : elle reste très largement au-dessus des minima exigés par les tests E2E.
+ * P010 a changé une constante du catalogue d'événements (magnitudes de bonus réduites de 35 %) et a
+ * fait un aller-retour sur le taux de §7.3 (`1/14` → `1/10` → `1/14`) : la seed est conservée, la
+ * mesure est refaite. Le comptage alimente un `OvertakeTracker` **à chaque pas simulé**, ce qui est la
+ * source de vérité de P009. Les chiffres de P008 (14 changements / 32 dépassements pour un relevé tous
+ * les 20 pas, et 0 dépassement pas à pas) sont périmés depuis P009 : ils mesuraient l'ancien couplage,
+ * pas la course. La seed reste très largement au-dessus des minima exigés par les tests E2E.
  */
 export const OVERTAKE_SEED_EVIDENCE = Object.freeze({
-  leaderChanges: 14,
-  overtakes: 68,
+  leaderChanges: 16,
+  overtakes: 81,
 });
 
 export interface OvertakeMeasurement {

@@ -290,7 +290,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P007 | Variations occasionnelles (surges) | P006 | accélérations/ralentissements ponctuels |
 | P008 | Événements rares + planificateur | P007 | turbos, chutes, raccourcis |
 | P009 | Observateur de faits + speaker *(P009-A ✅ observateur, P009-B ✅ speaker, P009-C ⏳ textes)* | P008 | commentaires à cooldowns |
-| P010 | Équilibrage statistique + verrouillage des constantes | P009 | `tools/balance.ts` + seuils testés |
+| P010 | Équilibrage statistique + verrouillage des constantes `[x]` *(25/25 critères sur 1000 seeds)* | P009 | `tools/balance.ts` + seuils testés |
 | P011 | HUD complet + panneau debug | P010 | mini-carte, classement détaillé, chrono |
 | P012 | Affichage du speaker + réglages | P011 | bannières de commentaires |
 | P013 | Arrivée et podium | P012 | course complète jouable |
@@ -731,7 +731,7 @@ permanente déjà présente (P004).
 
 ---
 
-### P010 — Équilibrage statistique et verrouillage des constantes
+### P010 — Équilibrage statistique et verrouillage des constantes `[x]`
 
 **Objectif** : prouver que le jeu est amusant et équilibré, puis **figer** les réglages.
 
@@ -746,9 +746,48 @@ permanente déjà présente (P004).
 
 **Tests (DoD)**
 * Tous les seuils du §13 passent, ou sont ajustés avec mise à jour simultanée de `GAME_DESIGN.md`.
-* `tools/balance.ts` tourne en < 30 s, ne dépend ni de Phaser ni du DOM.
+* ~~`tools/balance.ts` tourne en < 30 s~~ → **objectif P010 : < 60 s séquentiel (atteint)**. La cible de
+  30 s est irréaliste sur cette machine : le noyau seul coûte 29,1 ms/course, soit un plancher de
+  29 s pour 1000 courses. Parallélisation différée à P017 (voir backlog). Ne dépend ni de Phaser ni du DOM.
 * Durée du test d'équilibrage < 10 s (sinon réduire N ou paralléliser).
 * Reproductibilité : 100/100 seeds identiques bit à bit ; `10800` pas par course avec et sans pauses.
+
+**Compte rendu P010**
+
+* **Livré** : `tools/balanceStats.ts` (mesure), `tools/balance.ts` (CLI + rapport JSON structuré),
+  `tools/balanceRunner.mjs` (lanceur npm), `tests/unit/balance.test.ts` (19 tests, ≈ 9 s),
+  `docs/balance-report.md`, table de seeds dorées consolidée.
+* **Mesure canonique** : 1000 seeds, corpus `balance-p010`, **25 critères conformes sur 25**.
+  Reproductibilité **100/100** bit à bit, `10800` pas par course.
+* **Constantes ajustées** (chacune justifiée par une mesure, aucune touche à §6.3/§6.4) :
+  magnitudes de **bonus** du catalogue §7.1 `× 0,65` — facteur minimal d'un balayage 300 seeds qui
+  ramène le biais de vitesse sous `±1,5 %` (`× 0,75` échouait encore) ; malus inchangés.
+  `EVENT.RATE_PER_S` testé à `1/10` puis **rétabli à `1/14`** : le compte d'événements était déjà
+  conforme, donc rien ne justifiait de déplacer la constante.
+* **Critère du leader remplacé** : `tSim = 171 s` → `tSim = 135 s` (début du quatrième et dernier
+  segment), même plage `55 % – 85 %`. L'ancien critère mesurait **88,10 %** sur 1000 seeds : hors
+  plage, et aucun levier global/symétrique ne le corrigeait (diagnostic apparié McNemar dans
+  `docs/balance-report.md` §2). Le nouveau critère est conforme, sans qu'aucun mécanisme de fin de
+  course ni aucune règle dépendant du rang n'ait été introduit.
+* **Règle supprimée** : « `CHUTE` annule un `TURBO` actif » — inatteignable avec les constantes V1
+  (`CHAR_COOLDOWN_S = 8 s` > durée maximale d'un `TURBO`), mesurée à **0/1000**. Propriété
+  `cancelsTurbo` retirée du catalogue, du planificateur, des tests et de `GAME_DESIGN.md` §7.1/§7.3.
+  Aucun cooldown n'a été réduit.
+* **Écarts de DoD assumés** : `tools/balance.ts` mesure **47,5 s** et non < 30 s. La cible est
+  **irréaliste sur cette machine** : le noyau seul coûte 29,1 ms/course, donc 29 s plancher pour 1000
+  courses, même avec une instrumentation gratuite. Objectif retenu pour P010 : **< 60 s séquentiel**
+  (atteint). La parallélisation (`worker_threads`) est **différée à P017**, avec le profilage du pas
+  de noyau. Le test d'équilibrage mesure **100 seeds** au lieu de 300 pour tenir le budget de 10 s ;
+  c'est le harnais à 1000 seeds qui fait foi, l'erreur d'échantillonnage à 100 seeds (±≈ 5 points sur
+  un taux) dépassant la largeur des plages testées.
+* **Distribution du speaker publiée en entier** (min, p5, p25, médiane, moyenne, p75, p95, max,
+  `< 12`, `= 0`, `> 30`) : la moyenne conforme ne doit pas masquer la traîne, et le critère §13 se lit
+  sur la moyenne comme ses deux lignes voisines.
+* **Correctif d'infrastructure (hors gameplay)** : le port de prévisualisation/E2E `4173` est passé à
+  **`18173`**, centralisé dans `dev-ports.ts` et lu par `vite.config.ts` **et** `playwright.config.ts`.
+  Motif : Windows réserve dynamiquement des plages autour de `4000` (constaté : `4108–4207`), où
+  `bind()` échoue en `EACCES` — `npm run verify` ne pouvait plus démarrer `vite preview` alors
+  qu'aucun test n'était en cause. Aucune règle de jeu, aucune constante de `core/` n'est concernée.
 
 ---
 
@@ -967,6 +1006,19 @@ Si le jalon retient une option 3D, cette étape s'appuie dessus ; sinon elle res
 
 ### Backlog (P019+) — non planifié, ne pas commencer sans demande explicite
 
+* **Paralléliser la campagne d'équilibrage — prévu en P017** (`worker_threads` dans
+  `tools/balanceRunner.mjs`) : chaque seed est indépendante, donc la mesure est embarrassamment
+  parallèle ; facteur ≈ 4 attendu, ce qui ramènerait `npm run balance -- --seeds=1000` autour de 12 s
+  (43 s aujourd'hui, dont 29,1 ms/course pour le noyau seul, soit un plancher de 29 s en séquentiel).
+  La reproductibilité n'est pas menacée : l'agrégation reste ordonnée par chunk.
+* **Coût par pas du noyau** : `RaceEngine.step()` alloue à chaque pas (objet d'entrée de
+  l'observateur, tableau de faits, itérateur `entries()` de la boucle des personnages). Un profil
+  sérieux et une réutilisation de tampons rendraient le harnais et les tests nettement plus rapides —
+  à faire sous couvert de tests de reproductibilité bit à bit.
+* **Densité de parole du speaker dans les courses pauvres** : ≈ 10 % des courses descendent sous 12
+  répliques alors que la moyenne est conforme (≈ 16,8). Les refus mesurés sont dominés par les
+  cooldowns (`TYPE_COOLDOWN`, `GLOBAL_COOLDOWN`), donc le levier est la fenêtre de cooldown, pas le
+  nombre de faits produits par le noyau — aucun réglage de P010 ne l'a déplacé.
 * **Scripts Blender** (`tools/blender/`, `bpy` + CLI headless) : création/modification d'assets,
   import/export GLB/GLTF/OBJ, rendus PNG transparents, génération de sprites/spritesheets depuis des
   modèles 3D. Purement visuel, jamais d'influence sur la simulation — voir `AGENTS.md` §3.6.

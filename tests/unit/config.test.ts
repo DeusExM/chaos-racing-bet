@@ -124,6 +124,9 @@ describe('constantes de jeu', () => {
     expect(SURGE.MAGNITUDE_BRAKE_MIN).toBe(0.1);
     expect(SURGE.MAGNITUDE_BRAKE_MAX).toBe(0.3);
 
+    // `1/14` : valeur d'origine, **rétablie par P010** après un passage temporaire à `1/10` motivé
+    // par la densité du speaker. Le compte d'événements reste dans `[10 ; 16]` (≈ 10,2), et la
+    // moyenne des répliques reste conforme : ce n'était donc pas une constante à bouger.
     expect(EVENT.RATE_PER_S).toBe(1 / 14);
     expect(EVENT.GLOBAL_COOLDOWN_S).toBe(4.0);
     expect(EVENT.CHAR_COOLDOWN_S).toBe(8.0);

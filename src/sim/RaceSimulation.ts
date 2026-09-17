@@ -2,6 +2,7 @@ import { RACE_CONFIG } from '../core/config';
 import { RaceEngine } from '../core/engine';
 import type { RaceFact, RaceResult, RaceState } from '../core/types';
 import { SIM_CONFIG } from './config';
+import { ReplayHistory } from './ReplayHistory';
 import type { SimConfig, SimPhase } from './types';
 
 /**
@@ -86,11 +87,23 @@ export class RaceSimulation {
    */
   private factsListener: ((facts: readonly RaceFact[]) => void) | null = null;
 
+  /**
+   * Historique compact des instants déjà joués, pour la **relecture** pendant une pause manuelle.
+   *
+   * Il est rempli ici, pas par le rendu : seul le propriétaire des pas peut dire ce qui a réellement
+   * été calculé. Il ne participe à aucune décision — le vider, le remplir ou ne jamais le lire donne
+   * exactement la même course.
+   */
+  readonly history = new ReplayHistory();
+
   constructor(seed: string, config: SimConfig = SIM_CONFIG) {
     requireUsableConfig(config);
 
     this.config = config;
     this.engine = new RaceEngine(seed);
+    // Le pas `0` est un instant comme un autre : c'est l'état de départ, et la relecture doit pouvoir
+    // y revenir (la borne basse du curseur vaut exactement `0 s`).
+    this.history.record(this.engine.getState());
   }
 
   /** Phase temps réel : `idle` tant que `start()` n'a pas été appelé. */
@@ -250,6 +263,10 @@ export class RaceSimulation {
     this.checkpointNumber = null;
     this.phaseBeforeUserPause = 'idle';
     this.simPhase = 'idle';
+    // L'historique appartient à **une** course : le garder d'une course à l'autre ferait croire à une
+    // relecture possible d'instants qui n'existent plus.
+    this.history.reset();
+    this.history.record(this.engine.getState());
   }
 
   /**
@@ -272,6 +289,10 @@ export class RaceSimulation {
     this.checkpointNumber = null;
     this.phaseBeforeUserPause = 'idle';
     this.simPhase = 'finished';
+    // La course a été jouée d'un bloc par le noyau, sans passer par la boucle : aucun instant
+    // intermédiaire n'a été observé, donc aucun n'est enregistré. Un historique vide est honnête —
+    // il vaut mieux qu'un historique qui prétendrait couvrir des instants jamais vus.
+    this.history.reset();
     return result;
   }
 
@@ -287,6 +308,10 @@ export class RaceSimulation {
     for (let index = 0; index < stepsToRun; index += 1) {
       this.engine.step();
       this.executedSteps += 1;
+
+      // L'instant qui vient d'être calculé entre dans l'historique **avant** toute autre lecture : la
+      // relecture voit donc exactement ce que le noyau a produit, jamais une frame en retard.
+      this.history.record(this.engine.getState());
 
       // Après **chaque** pas, jamais en fin de frame : en mode accéléré une seule frame demande
       // des centaines de pas et peut donc traverser une borne. Tout ce qui suit la borne
@@ -304,13 +329,18 @@ export class RaceSimulation {
         this.enterCheckpointPause(checkpoint);
         return;
       }
+
+      // La course se termine **par le temps simulé** : dès que le noyau est `finished`, aucun pas de
+      // plus n'est exécuté dans cette frame. Sans cette sortie, une frame qui demandait plus de pas
+      // qu'il n'en restait ferait tourner la boucle « après la course » : les pas seraient des
+      // non-actions du noyau, mais l'historique enregistrerait deux fois le même instant.
+      if (this.engine.getState().phase.kind === 'finished') {
+        this.simPhase = 'finished';
+        return;
+      }
     }
     // Si le plafond a été atteint ici, `stepsWanted - executedSteps` reste positif : le temps en
     // attente n'est ni perdu ni écrasé, il sera simplement exécuté au prochain `update()`.
-
-    if (this.engine.getState().phase.kind === 'finished') {
-      this.simPhase = 'finished';
-    }
   }
 
   /**

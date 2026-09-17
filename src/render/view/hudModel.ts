@@ -4,7 +4,7 @@ import type { RacePhase, RaceState } from '../../core/types';
 import { leaderboardOf } from '../../sim/leaderboard';
 import type { SimPhase } from '../../sim/types';
 import { VIEW } from '../viewConfig';
-import type { HudModel } from './Hud';
+import type { HudModel, HudSegment } from './Hud';
 import { minimapMarkers } from './minimap';
 
 /**
@@ -22,12 +22,33 @@ import { minimapMarkers } from './minimap';
  */
 
 /**
- * Numéro de segment courant, `0` quand la course n'est pas en cours.
+ * Numéro de segment courant, ou `null` quand **aucun segment n'est en cours**.
  *
  * Il est lu tel quel dans la phase du noyau : le rendu ne recalcule aucune frontière de segment.
+ *
+ * `null` — et non `0` — parce qu'un segment est un numéro humain de `1` à `SEGMENT_COUNT` : il
+ * n'existe ni segment `0`, ni segment `4`. La passe corrective 2 a corrigé ce point : à `60,0 s`, la
+ * phase du noyau devient `finished`, et l'ancien `0` s'affichait tel quel en `segment 0/3` — un
+ * segment qui n'existe pas. Un HUD ne doit jamais pouvoir afficher une valeur de segment invalide,
+ * donc l'absence de segment est représentée comme une absence, pas comme un zéro.
  */
-export function segmentNumberFor(phase: RacePhase): number {
-  return phase.kind === 'running' ? phase.segment : 0;
+export function segmentNumberFor(phase: RacePhase): number | null {
+  return phase.kind === 'running' ? phase.segment : null;
+}
+
+/**
+ * Segment affichable à partir de la phase du noyau : numéro, temps écoulé, ou `null`.
+ *
+ * Le `switch` est exhaustif : ajouter une phase au noyau oblige à décider ce que le HUD affiche.
+ */
+export function buildSegment(phase: RacePhase): HudSegment | null {
+  switch (phase.kind) {
+    case 'running':
+      return { number: phase.segment, elapsedS: phase.segmentElapsedS };
+    case 'idle':
+    case 'finished':
+      return null;
+  }
 }
 
 /**
@@ -58,10 +79,8 @@ export function buildHudModel(
     phase,
     tSim: state.tSim,
     steps: state.steps,
-    segment: {
-      number: segmentNumberFor(state.phase),
-      elapsedS: state.phase.kind === 'running' ? state.phase.segmentElapsedS : 0,
-    },
+    // `null` hors segment en cours : le HUD affiche alors « Terminé » ou un tiret, jamais `0/3`.
+    segment: buildSegment(state.phase),
     rows,
     markers: minimapMarkers(
       CHARACTERS.map((character, index) => ({

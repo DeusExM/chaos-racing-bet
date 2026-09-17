@@ -45,6 +45,26 @@ export interface ViewConfig {
   /** Marge, en pixels, avant qu'un personnage soit signalé comme hors fenêtre. */
   readonly EDGE_MARGIN_PX: number;
   /**
+   * Largeur de la **piste**, en fraction de la largeur de l'arène (passe corrective 2).
+   *
+   * La bande restante (`1 − TRACK_WIDTH_RATIO`) est **réservée au classement permanent** : les
+   * sprites, la caméra, le décor et les badges d'événement n'y entrent jamais. Le classement ne
+   * recouvre donc plus les personnages — ce n'est pas une question de chance ou de résolution, c'est
+   * une séparation de zones.
+   *
+   * La même fraction vit côté CSS (`--hud-sidebar-width`), puisque le classement est du HTML posé
+   * sur l'arène : les deux valeurs doivent rester cohérentes, et c'est le test E2E de géométrie
+   * (`tests/e2e/hud.spec.ts`) qui le vérifie aux trois résolutions de référence.
+   */
+  readonly TRACK_WIDTH_RATIO: number;
+  /**
+   * Hauteur de fenêtre, en pixels CSS, sous laquelle l'interface passe en mode **téléphone paysage**.
+   *
+   * Elle sert à deux décisions du rendu : masquer le classement permanent pendant la course et rendre
+   * toute la largeur à la piste. La même valeur vit dans la requête média de `styles.css`.
+   */
+  readonly COMPACT_VIEWPORT_MAX_HEIGHT_PX: number;
+  /**
    * Taille de la police du commentaire, en pixels de la scène (le canvas est mis à l'échelle).
    *
    * Le bandeau est **dessiné dans le canvas**, donc solidaire de l'arène : il ne peut pas se
@@ -119,6 +139,8 @@ export const VIEW: ViewConfig = Object.freeze({
   TRACK_LABEL_STEP_M: 250,
   TRACK_LABEL_POOL: 4,
   EDGE_MARGIN_PX: 22,
+  TRACK_WIDTH_RATIO: 0.78,
+  COMPACT_VIEWPORT_MAX_HEIGHT_PX: 560,
   SUBTITLE_FONT_PX: 24,
   SUBTITLE_NAME_FONT_PX: 22,
   SUBTITLE_QUEUE_FONT_PX: 15,

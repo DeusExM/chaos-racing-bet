@@ -48,6 +48,8 @@ export interface UiText {
   readonly timeTitle: string;
   /** Libellé du numéro de segment courant. */
   readonly segmentLabel: string;
+  /** Remplace le numéro de segment une fois la course terminée : `Terminé`. */
+  readonly segmentDone: string;
   /** Libellé de la seed affichée dans le HUD. */
   readonly seedLabel: string;
   /** Libellé du bouton qui copie la seed. */
@@ -66,6 +68,12 @@ export interface UiText {
   readonly startButton: string;
   /** Libellé du bouton qui rejoue la même course. */
   readonly replayButton: string;
+  /** Titre de la barre de relecture, affichée uniquement pendant une pause manuelle. */
+  readonly replayTitle: string;
+  /** Bouton qui recule de 2 secondes dans la course déjà jouée. */
+  readonly replayBack: string;
+  /** Bouton qui avance de 2 secondes, sans jamais dépasser l'instant réel de la pause. */
+  readonly replayForward: string;
   /** Libellé du bouton qui suspend la course. */
   readonly pauseButton: string;
   /** Libellé du même bouton quand la course est suspendue. */

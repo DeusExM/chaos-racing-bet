@@ -58,6 +58,22 @@ function withoutTypeCooldowns(overrides: Partial<SpeakerPolicy> = {}): SpeakerPo
   });
 }
 
+/**
+ * Politique ou la **peremption** est desactivee : utile pour isoler une autre regle.
+ *
+ * La peremption est une porte a part entiere (`claims.ts`) : un test qui verifie un cooldown, un
+ * ordre de file ou l'admission groupee d'un lot doit pouvoir faire attendre un fait aussi longtemps
+ * que necessaire sans que la peremption s'en mele. Les regles de peremption elles-memes sont
+ * verifiees par leurs propres tests, et par le test de non-regression `KR7Z8NAR`.
+ */
+function withoutExpiry(overrides: Partial<SpeakerPolicy> = {}): SpeakerPolicy {
+  return withPolicy({
+    factMaxAgeS: Number.POSITIVE_INFINITY,
+    rankFactMaxAgeS: Number.POSITIVE_INFINITY,
+    ...overrides,
+  });
+}
+
 describe('P009-B : conformite des constantes au design', () => {
   it('reprend exactement SPEAK de GAME_DESIGN 9.3', () => {
     expect(SPEAKER_POLICY.minImportance).toBe(SPEAK.MIN_IMPORTANCE);
@@ -67,6 +83,8 @@ describe('P009-B : conformite des constantes au design', () => {
     expect(SPEAKER_POLICY.queueMax).toBe(SPEAK.QUEUE_MAX);
     expect(SPEAKER_POLICY.maxLinesPerSegment).toBe(SPEAK.MAX_LINES_PER_SEGMENT);
     expect(SPEAKER_POLICY.minWindowAvgS).toBe(SPEAK.MIN_WINDOW_AVG_S);
+    expect(SPEAKER_POLICY.factMaxAgeS).toBe(SPEAK.FACT_MAX_AGE_S);
+    expect(SPEAKER_POLICY.rankFactMaxAgeS).toBe(SPEAK.RANK_FACT_MAX_AGE_S);
     expect(SPEAKER_POLICY.minImportance).toBe(45);
     expect(SPEAKER_POLICY.globalCooldownS).toBe(6.0);
     expect(SPEAKER_POLICY.preemptImportance).toBe(85);
@@ -74,6 +92,8 @@ describe('P009-B : conformite des constantes au design', () => {
     expect(SPEAKER_POLICY.queueMax).toBe(3);
     expect(SPEAKER_POLICY.maxLinesPerSegment).toBe(12);
     expect(SPEAKER_POLICY.minWindowAvgS).toBe(5.0);
+    expect(SPEAKER_POLICY.factMaxAgeS).toBe(12.0);
+    expect(SPEAKER_POLICY.rankFactMaxAgeS).toBe(0.0);
   });
 
   it('decoupe ses segments exactement comme la course, sans copie divergente', () => {
@@ -223,7 +243,10 @@ describe('P009-B : cooldown par type', () => {
     it(`respecte les ${cooldownS} s de ${type}`, () => {
       // Densite neutralisee : le cooldown de type est, avec le global, la seule porte qui juge ce
       // fait. Le fait arrive **avant** la fin de son cooldown de type, donc il attend en file.
-      const speaker = new Speaker(withPolicy({ minWindowAvgS: 0 }));
+      // La peremption est neutralisee aussi : sur un type qui revendique une position, attendre le
+      // cooldown (jusqu'a 20 s) depasserait forcement la borne de position, et c'est le cooldown de
+      // type — pas la peremption — que ce test mesure.
+      const speaker = new Speaker(withoutExpiry({ minWindowAvgS: 0 }));
       const characters: readonly CharacterId[] = type === 'CLOSE_RACE' ? [] : ['c0'];
 
       // Premier fait : il demarre immediatement (aucun historique).
@@ -262,7 +285,7 @@ describe('P009-B : cooldown par type', () => {
   });
 
   it('n est jamais contourne, meme par un fait de PREEMPT_IMPORTANCE ou plus', () => {
-    const speaker = new Speaker();
+    const speaker = new Speaker(withoutExpiry());
     expect(speaker.feed(fact('LEADER_CHANGE', 0, 50, [1], ['c0']))).not.toBeNull();
     speaker.finish();
 
@@ -313,8 +336,9 @@ describe('P009-B : cooldown par type', () => {
     expect(speaker.typeCooldownReady('LEADER_CHANGE', 13)).toBe(true);
     expect(speaker.stats().linesStarted).toBe(1);
 
-    // Jete de la file : le cooldown de son type reste intact.
-    const queue = new Speaker();
+    // Jete de la file : le cooldown de son type reste intact. La peremption est neutralisee, sinon
+    // le fait de position serait jete avant meme que la file ne deborde.
+    const queue = new Speaker(withoutExpiry());
     queue.feed(fact('CLOSE_RACE', 0, 100, [1], []));
     queue.feed(fact('BIG_BONUS', 6, 60, [1], ['c0']));
     queue.feed(fact('BIG_COMEBACK', 6.5, 62, [1], ['c1']));
@@ -401,8 +425,8 @@ describe('P009-B : file d attente', () => {
    * leur tour. Le fait de tete reste en cours : c'est ce qui distingue une file d'une simple
    * observation.
    */
-  function filledQueue(): Speaker {
-    const speaker = new Speaker();
+  function filledQueue(policy: SpeakerPolicy = SPEAKER_POLICY): Speaker {
+    const speaker = new Speaker(policy);
     speaker.feed(fact('LEADER_CHANGE', 0, 100));
     speaker.feed(fact('BIG_BONUS', 6, 60, [1], ['c0']));
     speaker.feed(fact('BIG_COMEBACK', 6.5, 62, [1], ['c1']));
@@ -410,8 +434,19 @@ describe('P009-B : file d attente', () => {
     return speaker;
   }
 
+  /**
+   * Politique a cadence serree, pour les tests d'**ordre de la file** uniquement.
+   *
+   * Ces tests verifient quelle replique sort en premier, pas l'espacement des prises de parole : avec
+   * le cooldown global du design (6 s) et sa densite minimale, trois candidats arrives dans la meme
+   * seconde ne pourraient pas tous etre dits dans la fenetre de fraicheur (`FACT_MAX_AGE_S`), et les
+   * derniers seraient — a raison — perimes. Les deux regles de cadence sont donc desserrees ici pour
+   * que la file soit reellement videe ; ces regles, elles, sont verifiees par les tests dedies.
+   */
+  const TIGHT = withoutExpiry({ globalCooldownS: 1, minWindowAvgS: 0 });
+
   it('ne depasse jamais 3 candidats et jette le moins important', () => {
-    const speaker = filledQueue();
+    const speaker = filledQueue(TIGHT);
     expect(speaker.queuedCount()).toBe(3);
 
     // Quatrieme candidat, moins important que le plus faible (60) : rejete, file inchangee.
@@ -426,14 +461,13 @@ describe('P009-B : file d attente', () => {
     expect(speaker.stats().queuedDropped).toBe(1);
 
     // La file sort strictement par ordre de priorite : 65, 64, 62. Aucune duree arbitraire
-    // n'intervient : c'est la priorite seule qui decide. Un depart toutes les 6 s respecte le
-    // cooldown global, donc rien d'autre ne filtre.
+    // n'intervient : c'est la priorite seule qui decide.
     speaker.finish();
-    expect(speaker.poll(20)?.importance).toBe(65);
+    expect(speaker.poll(12)?.importance).toBe(65);
     speaker.finish();
-    expect(speaker.poll(26)?.importance).toBe(64);
+    expect(speaker.poll(13)?.importance).toBe(64);
     speaker.finish();
-    expect(speaker.poll(32)?.importance).toBe(62);
+    expect(speaker.poll(14)?.importance).toBe(62);
 
     // File vide : un fait frais, meme faible, demarre immediatement.
     speaker.finish();
@@ -442,7 +476,7 @@ describe('P009-B : file d attente', () => {
   });
 
   it('departage les egalites par ordre d arrivee, sans dependre d un Map ou d un Set', () => {
-    const speaker = new Speaker();
+    const speaker = new Speaker(TIGHT);
     speaker.feed(fact('LEADER_CHANGE', 0, 100));
     speaker.feed(fact('BIG_BONUS', 6, 60, [1], ['c0']));
     speaker.feed(fact('BIG_COMEBACK', 6.5, 62, [1], ['c1']));
@@ -458,15 +492,15 @@ describe('P009-B : file d attente', () => {
 
     // La file reste strictement ordonnee, a importance egale par ordre d'arrivee.
     speaker.finish();
-    expect(speaker.poll(20)?.importance).toBe(64);
+    expect(speaker.poll(12)?.importance).toBe(64);
     speaker.finish();
-    expect(speaker.poll(26)?.importance).toBe(62);
+    expect(speaker.poll(13)?.importance).toBe(62);
     speaker.finish();
-    expect(speaker.poll(32)?.importance).toBe(60);
+    expect(speaker.poll(14)?.importance).toBe(60);
   });
 
   it('ne prononce jamais un fait jete de la file et ne consomme pas son cooldown', () => {
-    const speaker = filledQueue();
+    const speaker = filledQueue(withoutExpiry());
     expect(speaker.feed(fact('LEADER_MALUS', 9, 65, [1], ['c4']))).toBeNull();
     expect(speaker.stats().queuedDropped).toBe(1);
     // Le type BIG_BONUS n'a jamais parle : son cooldown est intact a 8 s.
@@ -486,7 +520,7 @@ describe('P009-B : file d attente', () => {
   });
 
   it('ne bloque pas la file sur un candidat de tete retenu par son cooldown de type', () => {
-    const speaker = new Speaker();
+    const speaker = new Speaker(withoutExpiry());
     // Le type de A a deja parle a 0 s : son cooldown de 12 s court jusqu'a 12 s, donc A sera retenu
     // alors que B, sans cooldown de type, sera eligible des la fin de la replique en cours.
     speaker.feed(fact('LEADER_CHANGE', 0, 60, [1], ['c0']));
@@ -539,7 +573,7 @@ describe('P009-B : lots de faits d un meme pas', () => {
 
   /** Amorce une replique au pas 0 pour que le lot du pas 6 trouve l'horloge globale ouverte. */
   function seeded(): Speaker {
-    const speaker = new Speaker();
+    const speaker = new Speaker(withoutExpiry());
     expect(speaker.feed(fact('CLOSE_RACE', 0, 60))).not.toBeNull();
     speaker.finish();
     return speaker;
@@ -903,6 +937,7 @@ describe('P009-B : sortie et invariants', () => {
       linesStarted: 0,
       preempted: 0,
       queuedDropped: 0,
+      expired: 0,
     });
 
     // Et la premiere replique de la course suivante demarre immediatement.

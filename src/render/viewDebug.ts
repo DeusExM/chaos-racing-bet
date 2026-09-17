@@ -19,6 +19,15 @@ export interface SpriteView {
   readonly id: CharacterId;
   readonly screenX: number;
   readonly screenY: number;
+  /** Taille réellement dessinée, en pixels logiques du canvas. */
+  readonly size: number;
+  /**
+   * Vrai si le personnage est réellement dessiné dans cette frame.
+   *
+   * Un personnage sorti du champ de la caméra est masqué — son marqueur de bord le représente — pour
+   * qu'aucun sprite ne soit dessiné sous la bande réservée au classement (passe corrective 2).
+   */
+  readonly drawn: boolean;
 }
 
 export type { HudDebugSnapshot };
@@ -94,12 +103,47 @@ export interface ChaosRaceViewDebugApi {
    * disparaît quand cet événement se termine — sans jamais avoir à croire une animation sur parole.
    */
   eventFeedback(): readonly EventFeedbackDebugSnapshot[];
+  /**
+   * Géométrie de la **piste** et de la bande réservée au classement, en pixels logiques du canvas.
+   *
+   * C'est la lecture qui rend vérifiable la séparation des zones (passe corrective 2) : un test E2E
+   * compare le rectangle du classement, converti en pixels logiques, à cette bande — et peut donc
+   * prouver qu'aucun personnage n'est dessiné dessous, au lieu de constater une capture d'écran.
+   */
+  track(): TrackViewportDebugSnapshot;
+  /**
+   * Relecture en cours (passe corrective 2), ou `null` hors pause manuelle.
+   *
+   * Elle expose l'instant consulté **et** l'instant réel de la pause, tous deux en pas du noyau :
+   * un test peut donc vérifier que le curseur est borné, que l'affichage suit le curseur, et que la
+   * reprise repart de l'instant réel.
+   */
+  replay(): ReplayDebugSnapshot | null;
 }
 
 /** Occurrence d'événement affichée par la couche de retour visuel. */
 export interface EventFeedbackDebugSnapshot {
   readonly id: CharacterId;
   readonly occurrence: string;
+}
+
+/** Zones de l'arène : piste utilisable et bande réservée au classement, en pixels logiques. */
+export interface TrackViewportDebugSnapshot {
+  /** Largeur de l'arène, en pixels logiques : `VIEW.BASE_WIDTH`. */
+  readonly arenaWidth: number;
+  /** Hauteur de l'arène, en pixels logiques : `VIEW.BASE_HEIGHT`. */
+  readonly arenaHeight: number;
+  /** Largeur de la piste, en pixels logiques : l'arène moins la bande réservée. */
+  readonly trackWidth: number;
+  /** Vrai quand l'interface est en mode téléphone paysage (classement masqué pendant la course). */
+  readonly compact: boolean;
+}
+
+/** Relecture en cours : instants consulté et réel, en pas de simulation. */
+export interface ReplayDebugSnapshot {
+  readonly viewedStep: number;
+  readonly pauseStep: number;
+  readonly visible: boolean;
 }
 
 declare global {

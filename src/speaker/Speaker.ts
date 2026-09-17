@@ -15,7 +15,8 @@
  *              ├─▶ file pleine & fait plus faible ─▶ REJECTED_QUEUE
  *              └─▶ file (≤ QUEUE_MAX)          ──▶ QUEUED ─┐
  *                                                           │
- *   poll(tSim) ──▶ premier candidat éligible de la file ◀───┘
+ *   poll(tSim) ──▶ candidat de la file ◀───────────────────┘
+ *              ├─▶ âge > âge maximal du type    ──▶ EXPIRED (jeté, jamais prononcé)
  *              ├─▶ quota / cooldown de type / global / fenêtre ──▶ reste en file
  *              └─▶ gate ALLOWED ──▶ CURRENT_LINE + SpeakerDecision
  *
@@ -27,10 +28,16 @@
  *
  * ## Ordre des portes
  *
- * `SEGMENT_QUOTA` → `TYPE_COOLDOWN` → `GLOBAL_COOLDOWN` → `SLIDING_REFUSED` (voir `evaluateGates`).
- * Le quota est un plafond absolu, jamais franchi, même par un fait de préemption. Le cooldown par
- * type n'est jamais contournable ; seul le cooldown **global** l'est, et uniquement pour un fait
- * dont l'importance atteint `preemptImportance`.
+ * Péremption → `SEGMENT_QUOTA` → `TYPE_COOLDOWN` → `GLOBAL_COOLDOWN` → `SLIDING_REFUSED` (voir
+ * `evaluateGates`). Le quota est un plafond absolu, jamais franchi, même par un fait de préemption.
+ * Le cooldown par type n'est jamais contournable ; seul le cooldown **global** l'est, et uniquement
+ * pour un fait dont l'importance atteint `preemptImportance`.
+ *
+ * La péremption passe **avant** toutes les portes, et pour une raison de fond : un fait ne décrit
+ * que l'instant où il a été mesuré. Un fait dont l'âge dépasse l'âge maximal de son type ne peut plus
+ * rien affirmer de vrai sur la course en cours, donc il est jeté — jamais re-daté, jamais prononcé en
+ * retard. C'est ce qui garantit qu'une réplique annonçant une position correspond au classement réel
+ * au moment où elle est dite.
  *
  * ## Bornes mémoire
  *
@@ -48,6 +55,7 @@ import {
   type GateVerdict,
 } from './cooldowns';
 import { dedupFingerprint, isImportantEnough } from './importance';
+import { claimsCurrentRank } from './claims';
 import { SPEAKER_POLICY, type SpeakerPolicy } from './policy';
 import type { RaceFact, RaceFactType } from '../core/types';
 
@@ -91,6 +99,8 @@ export interface SpeakerStats {
   readonly linesStarted: number;
   readonly preempted: number;
   readonly queuedDropped: number;
+  /** Faits jetés pour cause de péremption : jamais prononcés, jamais re-datés. */
+  readonly expired: number;
 }
 
 export class Speaker {
@@ -127,6 +137,7 @@ export class Speaker {
     linesStarted: number;
     preempted: number;
     queuedDropped: number;
+    expired: number;
   } {
     return {
       fed: 0,
@@ -137,6 +148,7 @@ export class Speaker {
       linesStarted: 0,
       preempted: 0,
       queuedDropped: 0,
+      expired: 0,
     };
   }
 
@@ -292,6 +304,18 @@ export class Speaker {
    * examinés : un fait trop faible pour couper attend son tour en file. Cette condition est
    * évaluée **par candidat**, avant ses portes.
    *
+   * ## Péremption : un fait ne décrit que son instant
+   *
+   * Un `RaceFact` est une **mesure datée** : ses magnitudes sont vraies à `fact.tSim`, et rien ne les
+   * rend vraies plus tard. Un candidat qui a attendu plus que son âge maximal est donc **jeté sans
+   * être prononcé** — sinon une réplique du type « voilà le 1er » pourrait être diffusée trente
+   * secondes après la mesure, alors que le personnage n'est plus premier.
+   *
+   * L'âge maximal dépend du type de fait (`claims.ts`) : une revendication de **position** n'est
+   * valable que quelques secondes, un fait qui décrit un **épisode passé** (bonus, dépassements,
+   * split) tolère beaucoup plus. La péremption se vérifie **avant** les portes : elle ne consomme ni
+   * cooldown, ni quota, ni tirage.
+   *
    * Retourne la décision si une réplique (re)démarre, `null` sinon.
    */
   poll(nowS: number): SpeakerDecision | null {
@@ -302,7 +326,18 @@ export class Speaker {
     }
 
     this.gateVerdict = null;
-    for (const [position, candidate] of this.queue.entries()) {
+    for (let position = 0; position < this.queue.length; position += 1) {
+      const candidate = this.queue[position];
+      if (candidate === undefined) {
+        continue;
+      }
+      if (nowS - candidate.fact.tSim > this.maxAgeFor(candidate.fact.type)) {
+        // Le fait a manqué son créneau : il est retiré définitivement, sans jamais être prononcé.
+        this.queue.splice(position, 1);
+        position -= 1;
+        this.counts.expired += 1;
+        continue;
+      }
       if (this.current !== null && !this.wouldPreempt(candidate)) {
         continue;
       }
@@ -314,6 +349,14 @@ export class Speaker {
       return this.start(candidate, nowS);
     }
     return null;
+  }
+
+  /**
+   * Âge maximal autorisé pour un type de fait : court pour une revendication de position, plus large
+   * pour un fait qui décrit un épisode passé (`claims.ts` explique pourquoi les deux diffèrent).
+   */
+  private maxAgeFor(type: RaceFactType): number {
+    return claimsCurrentRank(type) ? this.policy.rankFactMaxAgeS : this.policy.factMaxAgeS;
   }
 
   /** Le candidat couperait-il la réplique en cours ? Règle unique : `INTERRUPT_DELTA`. */

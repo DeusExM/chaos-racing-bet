@@ -93,6 +93,24 @@ export interface SpeakConfig {
   readonly QUEUE_MAX: number;
   readonly MAX_LINES_PER_SEGMENT: number;
   readonly MIN_WINDOW_AVG_S: number;
+  /**
+   * Durée **simulée** maximale pendant laquelle un fait peut attendre en file avant d'être prononcé.
+   *
+   * Un fait mesure la course à son instant `tSim` : au-delà de cette durée, il ne décrit plus ce qui
+   * se passe. Un fait trop vieux est donc **jeté**, jamais prononcé.
+   */
+  readonly FACT_MAX_AGE_S: number;
+  /**
+   * Même borne, pour un fait qui **revendique une position** en cours (`BIG_COMEBACK`,
+   * `LAST_COMEBACK`, `LEADER_CHANGE`, `LEADER_MALUS`).
+   *
+   * Elle vaut **zéro** : une position ne se commente qu'à l'instant de sa mesure. Une place change en
+   * quelques dixièmes de seconde, donc toute attente peut rendre fausse une réplique du type
+   * « voilà le 1er ». Mesuré sur 200 seeds avec le classement vérifié pas à pas : à 0 s, aucune
+   * revendication fausse (585 annonces) ; à 1 s, 17 fausses ; à 3 s, 62 ; à 12 s, 301. Le coût est
+   * de 9 % de répliques (7,54 au lieu de 8,29 par course), et il porte sur les annonces périmées.
+   */
+  readonly RANK_FACT_MAX_AGE_S: number;
 }
 
 /**
@@ -322,6 +340,13 @@ export const SPEAK: SpeakConfig = Object.freeze({
   MAX_LINES_PER_SEGMENT: 12,
   /** Moyenne minimale d'écart sur la fenêtre glissante. */
   MIN_WINDOW_AVG_S: 5.0,
+  /**
+   * Âge maximal d'un fait en file : deux créneaux de parole (voir la passe corrective 2 et
+   * `GAME_DESIGN.md` §9.3). Passé ce délai, le fait ne décrit plus la course en cours : il est jeté
+   * au lieu d'être prononcé. Rien n'est réécrit — un fait n'est jamais re-daté.
+   */
+  FACT_MAX_AGE_S: 12.0,
+  RANK_FACT_MAX_AGE_S: 0.0,
 });
 
 /**
@@ -586,6 +611,9 @@ export function validateConfig(config: GameConfig = GAME_CONFIG): void {
   requireIntegerAtLeast(K.QUEUE_MAX, 1, 'SPEAK.QUEUE_MAX');
   requireIntegerAtLeast(K.MAX_LINES_PER_SEGMENT, 1, 'SPEAK.MAX_LINES_PER_SEGMENT');
   requireNonNegative(K.MIN_WINDOW_AVG_S, 'SPEAK.MIN_WINDOW_AVG_S');
+  requirePositive(K.FACT_MAX_AGE_S, 'SPEAK.FACT_MAX_AGE_S');
+  // Zéro est une valeur légitime : une position ne se commente qu'à l'instant de sa mesure.
+  requireNonNegative(K.RANK_FACT_MAX_AGE_S, 'SPEAK.RANK_FACT_MAX_AGE_S');
 
   // Importances de faits : toutes dans [0 ; 100], y compris après le modificateur conditionnel le
   // plus élevé possible. Un fait dont l'importance dépasserait 100 serait un contrat rompu (§9.2).

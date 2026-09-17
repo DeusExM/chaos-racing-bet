@@ -25,6 +25,14 @@ import { buildHudModel } from '../view/hudModel';
 import { SubtitleBanner } from '../view/SubtitleBanner';
 import { buildSubtitleModel, subtitleLineView } from '../view/subtitleModel';
 import { TrackView } from '../view/TrackView';
+import { ReplayBar } from '../view/ReplayBar';
+import {
+  cursorAtPause,
+  replayStateOf,
+  seekCursor,
+  type ReplayCursor,
+} from '../view/replayModel';
+import type { ReplayFrame } from '../../sim/ReplayHistory';
 
 /**
  * Réplique en cours de commentaire, telle que le rendu la lit.
@@ -71,6 +79,8 @@ export interface RaceSceneOptions {
   readonly seedValue: HTMLElement | null;
   /** Bouton Pause / Reprendre : son libellé suit la phase, la commande est câblée par `app/`. */
   readonly pauseButton: HTMLElement | null;
+  /** Racine de la barre de relecture (`#replay-bar`), sous l'arène, avec les commandes. */
+  readonly replayBar: HTMLElement | null;
   readonly debugPanel: HTMLElement | null;
   readonly debug: boolean;
   /** Expose les positions écran réelles pour les tests E2E. */
@@ -160,6 +170,25 @@ export class RaceScene extends Scene {
    */
   private visualXs: readonly number[] = [];
 
+  /**
+   * Largeur de la **piste**, en pixels logiques : l'arène moins la bande réservée au classement.
+   *
+   * Tous les placements d'écran passent par elle (caméra, sprites, décor, badges) : un personnage ne
+   * peut donc pas être dessiné sous le classement, quelle que soit la résolution (passe corrective 2).
+   */
+  private trackWidth = 0;
+
+  /**
+   * Curseur de relecture, ou `null` hors relecture.
+   *
+   * Il n'existe que pendant une pause manuelle. Le noyau, lui, ne connaît ni ce curseur ni la
+   * relecture : il reste gelé à l'instant de la pause, et c'est de là que « Reprendre » repart.
+   */
+  private replayCursor: ReplayCursor | null = null;
+
+  /** Barre de relecture, ou `null` quand le rendu n'a pas de racine de commandes. */
+  private replayBar: ReplayBar | null = null;
+
   private layoutHeight = 0;
 
   private layoutWidth = 0;
@@ -199,6 +228,14 @@ export class RaceScene extends Scene {
       this.debug = new DebugPanel(this.options.debugPanel, this.options.text);
     }
 
+    // La barre de relecture ne décide de rien : elle transmet un pas à consulter, la scène le borne
+    // (`replayModel.ts`) et l'utilise pour dessiner un instant déjà joué.
+    if (this.options.replayBar !== null) {
+      this.replayBar = new ReplayBar(this.options.replayBar, this.options.text, (step) => {
+        this.seekReplay(step);
+      });
+    }
+
     // L'écran d'arrivée vit dans la même grille que le HUD : sa cellule ne recouvre donc jamais le
     // statut, les réglages, le chrono, la seed ni le bandeau de commentaire (P013).
     if (this.options.hudRoot !== null) {
@@ -216,6 +253,10 @@ export class RaceScene extends Scene {
             id: sprite.id,
             screenX: sprite.screenX,
             screenY: sprite.screenY,
+            // Taille et visibilité réelles : un test de géométrie ne peut pas deviner le rectangle
+            // d'un sprite à partir d'une constante recopiée, et il doit savoir s'il est dessiné.
+            size: sprite.size,
+            drawn: sprite.drawn,
           })),
         camera: () => ({ leftM: this.rig.left, windowM: this.rig.span }),
         subtitle: () => this.subtitle?.visibleText() ?? '',
@@ -242,6 +283,23 @@ export class RaceScene extends Scene {
         // l'occurrence d'événement qui les a produits. Elle sert à vérifier qu'un badge vient bien
         // d'un événement du noyau, et qu'il disparaît quand celui-ci se termine.
         eventFeedback: () => this.eventFeedback?.snapshot() ?? [],
+        // Géométrie réelle de la piste : elle vient de la scène, pas d'une constante recopiée dans le
+        // test, et décrit donc ce qui a réellement été dessiné.
+        track: () => ({
+          arenaWidth: this.layoutWidth,
+          arenaHeight: this.layoutHeight,
+          trackWidth: this.trackWidth,
+          compact: this.isCompactViewport(),
+        }),
+        // Relecture en cours : instants consulté et réel, en pas du noyau.
+        replay: () =>
+          this.replayCursor === null
+            ? null
+            : {
+                viewedStep: this.replayCursor.step,
+                pauseStep: this.replayCursor.pauseStep,
+                visible: this.replayBar?.visible ?? false,
+              },
       });
     }
 
@@ -259,6 +317,11 @@ export class RaceScene extends Scene {
     const phase = this.options.simulation.phase;
     const checkpoint = this.options.simulation.checkpoint;
 
+    // 2 bis. Relecture (passe corrective 2) : le curseur suit la pause manuelle, et l'instant consulté
+    // est lu dans l'historique du noyau. Aucun pas n'est exécuté, aucun fait n'est produit, aucun
+    // tirage n'a lieu : on **regarde** un instant déjà calculé.
+    const replayFrame = this.updateReplay(phase);
+
     // 3. À l'arrivée, la photographie du noyau est prise **une fois** : c'est elle, et rien d'autre,
     // qui alimente ensuite le podium et les distances affichées.
     if (phase === 'finished') {
@@ -270,13 +333,20 @@ export class RaceScene extends Scene {
       this.finishElapsedMs = 0;
     }
 
-    // 4. Les positions de rendu : celles du noyau, plus une inertie purement visuelle après l'arrivée.
-    // Le décalage est le même pour les six marcheurs, donc l'ordre à l'écran ne peut pas diverger du
-    // classement figé — une position de sprite n'est jamais un critère de victoire.
+    // 4. Les positions de rendu : celles de l'instant **consulté** pendant une relecture, sinon celles
+    // du noyau, plus une inertie purement visuelle après l'arrivée. Le décalage est le même pour les
+    // six marcheurs, donc l'ordre à l'écran ne peut pas diverger du classement affiché — une position
+    // de sprite n'est jamais un critère de victoire.
     this.visualXs =
-      this.finishSnapshot === null
-        ? state.characters.map((character) => character.x)
-        : deceleratedDistances(this.finishSnapshot, this.finishElapsedMs);
+      replayFrame !== null
+        ? replayFrame.distances
+        : this.finishSnapshot === null
+          ? state.characters.map((character) => character.x)
+          : deceleratedDistances(this.finishSnapshot, this.finishElapsedMs);
+
+    // L'état **affiché** : celui du noyau, ou celui d'un instant passé déjà enregistré. Le HUD, les
+    // badges et le décor lisent tous celui-ci, donc ils décrivent tous le même instant.
+    const displayState = replayFrame === null ? state : replayStateOf(state, replayFrame);
 
     // 5. Le cadrage se déduit des distances de rendu : jamais l'inverse.
     this.rig.follow(this.visualXs);
@@ -286,15 +356,19 @@ export class RaceScene extends Scene {
 
     for (const [index, sprite] of this.sprites.entries()) {
       const distance = this.visualXs[index];
-      const character = state.characters[index];
+      const character = displayState.characters[index];
       if (distance === undefined || character === undefined) {
         continue;
       }
-      sprite.place(this.rig.toScreenX(distance, this.layoutWidth), this.layoutHeight);
-      if (this.rig.isOffscreen(distance, this.layoutWidth)) {
+      const screenX = this.rig.toScreenX(distance, this.trackWidth);
+      sprite.place(screenX, this.layoutHeight);
+      // Un personnage hors du champ est **masqué** : il n'est jamais dessiné sous la bande réservée au
+      // classement permanent. Son marqueur de bord, lui, reste dans la piste et dit qui c'est.
+      sprite.setDrawn(screenX >= 0 && screenX <= this.trackWidth);
+      if (this.rig.isOffscreen(distance, this.trackWidth)) {
         sprite.showEdgeMarker(
-          this.rig.toScreenX(distance, this.layoutWidth) < VIEW.EDGE_MARGIN_PX ? 'left' : 'right',
-          this.layoutWidth,
+          screenX < VIEW.EDGE_MARGIN_PX ? 'left' : 'right',
+          this.trackWidth,
           this.layoutHeight,
         );
       } else {
@@ -305,19 +379,24 @@ export class RaceScene extends Scene {
     // Le HUD est construit une seule fois par frame, à partir de l'instantané déjà lu : le classement,
     // les écarts et les marqueurs qu'il affiche décrivent donc exactement le même instant. Il en est
     // le **seul** écrivain, et les lignes viennent de `sim/leaderboard.ts` (source unique du noyau).
-    const hudModel = buildHudModel(state, phase, checkpoint);
+    //
+    // Pendant une relecture, le badge de checkpoint est masqué : il décrit la borne **réelle** de la
+    // pause, pas l'instant consulté — l'afficher avec le classement du passé serait un mélange de deux
+    // instants.
+    const hudModel = buildHudModel(displayState, phase, replayFrame === null ? checkpoint : null);
     this.hud?.update(hudModel);
 
     // Retour visuel d'événement : il reçoit l'état **déjà lu** de cette frame et les positions des
     // sprites **déjà posés**, et n'a donc aucun moyen de faire avancer la course d'un pas de plus.
+    // La couche couvre exactement la piste : un badge ne peut pas déborder sous le classement.
     this.eventFeedback?.update(
-      state.characters,
+      displayState.characters,
       this.sprites.map((sprite) => ({
         id: sprite.id,
         screenX: sprite.screenX,
         screenY: sprite.screenY,
       })),
-      { width: this.layoutWidth, height: this.layoutHeight },
+      { width: this.trackWidth, height: this.layoutHeight },
     );
 
     // L'écran d'arrivée lit la photographie figée et le fait d'arrivée **réel** : il ne recalcule ni
@@ -332,7 +411,13 @@ export class RaceScene extends Scene {
     // il reçoit un simple nombre, ce qui lui permet de repoller un fait en file dès qu'il devient
     // éligible — sans attendre qu'un nouveau fait arrive. Il continue donc de vivre après l'arrivée,
     // jusqu'à la disparition propre de la réplique d'arrivée.
-    this.updateSubtitle(delta, state.tSim);
+    //
+    // Pendant une relecture, il n'est **pas** appelé du tout : la relecture est muette, ne remet aucune
+    // ancienne réplique dans la file du speaker et ne produit aucun fait. Le bandeau garde simplement
+    // ce qu'il affichait au moment de la pause.
+    if (replayFrame === null) {
+      this.updateSubtitle(delta, state.tSim);
+    }
     this.updateHud();
     if (this.debug !== null) {
       this.debug.update(
@@ -388,6 +473,43 @@ export class RaceScene extends Scene {
     );
   }
 
+  /**
+   * Relecture : suit la pause manuelle et renvoie l'instant **consulté**, ou `null` en course.
+   *
+   * Rien de ce qui suit ne remonte vers le noyau. Le curseur naît à la pause, sur l'instant réel de la
+   * pause (donc `+2 s` ne peut pas dépasser ce que la course a réellement joué), vit tant que la pause
+   * dure, et **disparaît à la reprise** : la scène redessine alors l'instant réel, et la simulation
+   * repart de son état gelé, sans un pas de plus ni un tirage de plus.
+   */
+  private updateReplay(phase: SimPhase): ReplayFrame | null {
+    if (phase !== 'userPaused') {
+      this.replayCursor = null;
+      this.replayBar?.update(false, 0, 0);
+      return null;
+    }
+
+    const pauseStep = this.options.simulation.view.steps;
+    if (this.replayCursor === null) {
+      this.replayCursor = cursorAtPause(pauseStep);
+    } else if (this.replayCursor.pauseStep !== pauseStep) {
+      // Le noyau est gelé pendant la pause : la borne ne bouge pas. Si elle bougeait, c'est que la
+      // pause n'en était pas une — on se recale plutôt que d'afficher une borne fausse.
+      this.replayCursor = cursorAtPause(pauseStep);
+    }
+
+    const frame = this.options.simulation.history.frameAt(this.replayCursor.step);
+    this.replayBar?.update(true, this.replayCursor.step, pauseStep);
+    return frame;
+  }
+
+  /** Déplace le curseur de relecture : la borne est appliquée par `replayModel.ts`, jamais ici. */
+  private seekReplay(step: number): void {
+    if (this.replayCursor === null) {
+      return;
+    }
+    this.replayCursor = seekCursor(this.replayCursor, step);
+  }
+
   /** Réapplique la géométrie quand la taille du canvas change. */
   private applyLayout(): void {
     const width = this.scale.width;
@@ -398,10 +520,37 @@ export class RaceScene extends Scene {
 
     this.layoutWidth = width;
     this.layoutHeight = height;
-    this.track?.layout(width, height);
+
+    // Bande réservée au classement permanent (passe corrective 2). En téléphone paysage, elle est
+    // nulle : le classement est masqué pendant la course et la piste récupère toute la largeur.
+    const compact = this.isCompactViewport();
+    this.trackWidth = Math.round(width * (compact ? 1 : VIEW.TRACK_WIDTH_RATIO));
+
+    // La largeur de la bande est publiée au CSS, qui la consomme pour la colonne du classement : une
+    // seule valeur décide donc de la géométrie de la piste **et** de celle du HUD.
+    const stage = this.scale.parent;
+    if (stage instanceof HTMLElement) {
+      stage.style.setProperty(
+        '--hud-sidebar-width',
+        compact ? '0' : `${String(Math.round((width - this.trackWidth) * 100) / 100)}px`,
+      );
+    }
+
+    this.track?.layout(this.trackWidth, height);
     for (const sprite of this.sprites) {
       sprite.layout(height);
     }
+  }
+
+  /**
+   * L'interface est-elle en mode téléphone paysage ?
+   *
+   * Le seuil est celui de `VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX`, et la requête média de `styles.css`
+   * utilise la même valeur : les deux décisions (piste pleine largeur ici, classement masqué là-bas)
+   * restent donc cohérentes, et le test E2E de géométrie le vérifie en 844×390.
+   */
+  private isCompactViewport(): boolean {
+    return window.matchMedia(`(max-height: ${String(VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX)}px)`).matches;
   }
 }
 

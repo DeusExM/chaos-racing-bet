@@ -361,6 +361,28 @@ test('le chrono et le segment suivent le noyau, sans jamais le piloter', async (
     .toBe(RACE_CONFIG.TOTAL_STEPS);
   await expect.poll(async () => page.getByTestId('hud-sim-time').textContent()).toBe('60,0\u00A0s');
 
+  // …et le bloc segment ne prétend plus qu'un quatrième segment existe : à l'arrivée, il n'y a plus
+  // de segment en cours. Le noyau n'a que trois segments (1 à 3) : `segment 0/3` était un numéro
+  // invalide, et il ne peut plus être affiché (passe corrective 2).
+  await expect.poll(async () => page.getByTestId('hud-segment').textContent()).toBe('Terminé');
+  const finishSegment = await page.getByTestId('hud-segment').textContent();
+  expect(finishSegment ?? '').not.toContain('0/3');
+  // Le **modèle** publié ne contient plus aucun segment : c'est la source de l'affichage, et non une
+  // correction cosmétique du texte. `null` est distingué de « pas de modèle », sinon l'assertion ne
+  // prouverait rien.
+  const segmentModel = await page.evaluate(() => {
+    const model = window.__CHAOS_RACE_VIEW__?.hud() ?? null;
+    return model === null ? 'modèle absent' : { segment: model.segment, tSim: model.tSim };
+  });
+  expect(segmentModel, 'le HUD a bien affiché une frame').not.toBe('modèle absent');
+  if (segmentModel === 'modèle absent') {
+    throw new Error('modèle du HUD absent');
+  }
+  expect(segmentModel.segment, 'le modèle du HUD ne publie aucun segment hors course').toBeNull();
+  expect(segmentModel.tSim, 'le temps simulé affiché reste la fin de course').toBe(
+    RACE_CONFIG.TOTAL_SIM_S,
+  );
+
   expectNoErrors(watch);
 });
 
@@ -560,8 +582,16 @@ for (const viewport of VIEWPORTS) {
     }, 60_000);
 
     const metrics = await hudMetrics(page);
+    // Géométrie **réelle** de la piste, publiée par le rendu : c'est elle qui doit correspondre à la
+    // bande réservée au classement, et non une constante recopiée dans le test (passe corrective 2).
+    const track = await page.evaluate(() => {
+      const view = window.__CHAOS_RACE_VIEW__;
+      if (view === undefined) {
+        throw new Error('hooks absents');
+      }
+      return view.track();
+    });
     const status = relativeTo(await boxOf(page, 'race-status'), metrics);
-    const panel = relativeTo(await boxOf(page, 'leaderboard'), metrics);
     const time = relativeTo(await boxOf(page, 'hud-time'), metrics);
     const seed = relativeTo(await boxOf(page, 'hud-seed'), metrics);
     const settings = relativeTo(await boxOf(page, 'settings'), metrics);
@@ -569,7 +599,6 @@ for (const viewport of VIEWPORTS) {
     // 1) Aucune information essentielle hors de l'arène.
     for (const [name, box] of [
       ['état', status],
-      ['classement', panel],
       ['chrono', time],
       ['seed', seed],
       ['réglages', settings],
@@ -586,14 +615,15 @@ for (const viewport of VIEWPORTS) {
 
     // 2) Aucun chevauchement critique entre les blocs du HUD.
     for (const [aName, a, bName, b] of [
-      ['classement', panel, 'seed', seed],
       ['chrono', time, 'seed', seed],
       ['état', status, 'chrono', time],
     ] as const) {
       expect(overlaps(a, b), `${aName} et ${bName} ne se chevauchent pas`).toBe(false);
     }
 
-    // 3) Le classement reste lisible : six lignes, police au-dessus du plancher.
+    // 3) Le classement reste lisible : six lignes, police au-dessus du plancher. Les lignes existent
+    // même quand le panneau est masqué (téléphone paysage) : le classement de l'écran d'arrivée, lui,
+    // reste complet.
     const rows = page.locator('[data-testid="leaderboard-row"]');
     await expect(rows).toHaveCount(CHARACTER_IDS.length);
     for (const row of await rows.all()) {
@@ -626,6 +656,37 @@ for (const viewport of VIEWPORTS) {
       areaFraction(domRects.leaderboard),
       'le classement permanent ne doit pas occuper plus d’un quart de la piste',
     ).toBeLessThanOrEqual(0.25);
+
+    /*
+     * 4 bis) **Le classement ne recouvre plus la piste** (passe corrective 2).
+     *
+     * La preuve est géométrique et porte sur les deux rectangles réellement mesurés dans la même
+     * tâche : celui du classement, ramené dans le repère de l'arène, et la largeur de piste publiée
+     * par le rendu. Le bord gauche du panneau doit se trouver **à droite** de la piste.
+     *
+     * En téléphone paysage, il n'y a pas de bande latérale : le classement permanent est masqué
+     * pendant la course, et la piste occupe toute la largeur. Masquer est préférable à recouvrir.
+     */
+    const trackWidthCss = track.trackWidth * (arenaRect.width / track.arenaWidth);
+    if (track.compact) {
+      expect(track.trackWidth, 'en téléphone paysage, la piste occupe toute la largeur').toBe(
+        track.arenaWidth,
+      );
+      expect(areaFraction(domRects.leaderboard), 'le classement permanent est masqué').toBe(0);
+      await expect(page.getByTestId('leaderboard')).toBeHidden();
+    } else {
+      const panelRect = domRects.leaderboard;
+      expect(panelRect, 'le classement permanent est affiché hors téléphone paysage').not.toBeNull();
+      const panelLeft = (panelRect?.left ?? 0) - arenaRect.left;
+      expect(
+        panelLeft,
+        `le classement commence après la piste (piste ${trackWidthCss.toFixed(1)} px, panneau ${panelLeft.toFixed(1)} px)`,
+      ).toBeGreaterThanOrEqual(trackWidthCss);
+      expect(track.trackWidth, 'la piste réserve la bande du classement').toBeLessThan(
+        track.arenaWidth,
+      );
+      await expect(page.getByTestId('leaderboard')).toBeVisible();
+    }
 
     // 5) Seed et chrono utilisables : visibles, cliquables, et d'une taille exploitable.
     await expect(page.getByTestId('seed-value')).toHaveText(OVERTAKE_SEED);

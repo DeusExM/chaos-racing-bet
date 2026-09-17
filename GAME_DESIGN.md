@@ -152,6 +152,9 @@ par les tests de `config.ts` et `track.ts`.
    final est calculé sur les distances gelées à cet instant.
 6. Le MJ peut mettre en pause manuellement (`Espace`) à tout moment : `RaceSimulation` arrête
    d'appeler `step()`, puis reprend. Le nombre de pas reste identique, donc le résultat aussi.
+   Pendant cette pause, le MJ peut **revoir** la course déjà jouée (passe corrective 2, §5.2) : la
+   relecture est purement visuelle, bornée à l'instant réel de la pause, et la reprise repart de cet
+   instant — jamais de l'instant consulté.
 7. Le redémarrage relance une course **depuis zéro** avec la même seed (rejeu identique) ou une
    nouvelle seed.
 
@@ -254,15 +257,49 @@ libellés peu clairs et une voix trop lente.
 **Lecture de l'écran — la piste d'abord.** Le HUD n'occupe que des zones **périphériques et basses**
 de l'arène ; la piste doit rester largement visible. Il contient :
 
-* les commandes (Lancer / Pause / Rejouer), le chrono et l'indicateur de segment (`1/3`, `2/3`, `3/3`) ;
+* les commandes (Lancer / Pause / Rejouer), le chrono et l'indicateur de segment (`1/3`, `2/3`, `3/3`,
+  et **`Terminé`** une fois la course finie : le noyau n'a que trois segments, il n'existe donc aucun
+  « segment 0/3 ») ;
 * les réglages, réduits à deux pastilles compactes (voir plus bas) ;
-* le **classement complet** des 6 personnages, en bas à droite, avec l'écart en secondes ;
+* le **classement complet** des 6 personnages, dans une **bande latérale réservée**, avec l'écart en
+  secondes ;
 * la seed, discrète et copiable ;
 * la bande de commentaire (voir plus bas) et les retours d'événement (voir plus bas).
 
 Ce qui a été **retiré** parce qu'il masquait la course : la **mini-carte** permanente (son modèle reste
 un hook de test) et tout affichage permanent du classement détaillé ailleurs qu'au podium. Le
 classement final complet est présenté **au podium**, à l'arrivée.
+
+**Le classement permanent ne recouvre jamais la piste (passe corrective 2).** Le second test joueur
+manuel a montré que le panneau, posé *sur* l'arène, cachait les personnages et leurs noms. La piste
+est donc dessinée dans une zone qui **exclut** la bande du classement : le rendu réserve
+`VIEW.TRACK_WIDTH_RATIO = 0.78` de la largeur de l'arène, et le classement vit dans les 22 % restants.
+Un personnage sorti du champ est **masqué** — son marqueur de bord, lui, reste dans la piste — plutôt
+que dessiné sous le panneau. En **téléphone paysage** (hauteur ≤
+`VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX = 560`), la bande disparaît et le classement permanent est
+**masqué pendant la course** : masquer est préférable à recouvrir, et le classement complet reste
+présenté au podium. La vérification est **géométrique** : à plusieurs instants de la course, et en
+1280×720, 1920×1080 et 844×390, aucun personnage dessiné ne croise le rectangle du classement — une
+fraction de surface ne prouverait rien de la position.
+
+**Relecture pendant une pause manuelle (passe corrective 2).** Pendant une pause du MJ, une petite
+barre apparaît sous les commandes : `−2 s`, une barre de temps, `+2 s`, et une lecture
+`38,4 s / 52,4 s` (instant consulté / instant réel de la pause). Le curseur est **borné** à
+`[0, instant de pause]` : on ne remonte jamais avant le départ, et on n'avance jamais au-delà de ce
+qui a réellement été joué. La relecture est **purement visuelle** : `RaceEngine` ne recule jamais,
+aucun pas n'est exécuté, aucun fait n'est produit, aucun tirage n'a lieu, et la relecture est
+**muette** — aucune ancienne réplique n'est remise dans la file du speaker. Le chrono, le classement,
+les positions, le segment et les retours d'événement décrivent l'instant **consulté** ; le panneau de
+debug, lui, continue de décrire l'état réel du noyau. « Reprendre » repart de l'**instant réel de la
+pause**, sans recalcul : une course relue puis reprise se termine **exactement** comme la même seed
+jouée sans relecture (distances finales identiques bit à bit, `3600` pas, même classement).
+
+Ce que la relecture garde en mémoire est **minimal et borné** : la distance des 6 personnages à chaque
+pas (`3601 × 6` nombres, `172,8 Ko` dans un `Float64Array` alloué une fois) et les événements rares
+sous forme d'**intervalles** de pas (quelques centaines d'octets). Tout le reste — `tSim`, segment,
+classement, écarts — se **déduit** de l'index de pas par les fonctions du noyau. Aucun sprite, aucun
+objet Phaser, aucun élément DOM n'est conservé : moins de `200 Ko` au total, pour un maximum de
+`3601` instants (les `3600` pas plus le départ).
 
 **Checkpoint = retour bref, jamais un tableau.** À chaque checkpoint, l'écran affiche un **bandeau
 temporaire** portant le numéro et l'instant atteint (`Checkpoint 1 · 20 s`) ainsi que le **leader figé**
@@ -764,6 +801,21 @@ il est détecté.
 | `SPEAK.QUEUE_MAX` | `3` | au-delà, on jette la réplique la moins importante |
 | `SPEAK.MAX_LINES_PER_SEGMENT` | `12` | quota dur par segment de 20 s (structurellement non contraignant : le cooldown global de `6 s` plafonne une course de 60 s à ≈ 10 répliques, quota inclus) |
 | `SPEAK.MIN_WINDOW_AVG_S` | `5.0` | moyenne minimale d'écart sur fenêtre glissante de 30 s |
+| `SPEAK.FACT_MAX_AGE_S` | `12.0` | âge maximal d'un fait **épisodique** au moment où il est prononcé (mesure : `5,92 s` au pire sur le corpus) |
+| `SPEAK.RANK_FACT_MAX_AGE_S` | `0.0` | âge maximal d'un fait qui **affirme une position** : une position ne se commente qu'à l'instant de sa mesure |
+
+**Véracité des positions (passe corrective 2).** Un fait peut être **exact** et pourtant être prononcé
+trop tard : la position qu'il décrit n'est vraie qu'à son propre instant. Rien ne bornait cet âge, si
+bien qu'un fait mesuré à `tSim = 0,37 s` pouvait être dit à `30,05 s`, une fois les cooldowns retombés
+— le commentaire annonçait alors un rang périmé (constaté sur la seed `KR7Z8NAR`). Les faits qui
+**affirment un rang** (`LEADER_CHANGE`, `BIG_COMEBACK`, `LAST_COMEBACK`, `LEADER_MALUS`) ont donc une
+fenêtre de fraîcheur **nulle** : ils sont dits au pas de leur mesure, ou pas du tout. Le speaker n'a
+**aucun accès** au classement (§4.4) : il ne peut pas revérifier une position, seulement refuser de
+parler en retard. Mesure sur le corpus canonique : avant, **301 des 1029** répliques de position
+(29 %) étaient fausses au moment d'être dites ; après, **0 sur 585**. Coût : 9 % de répliques en
+moins. Les faits épisodiques (`BIG_BONUS`, `CLOSE_RACE`, `OVERTAKE_STREAK`, `CHECKPOINT_SPLIT`,
+`FINISH`, `PHOTO_FINISH`) gardent `FACT_MAX_AGE_S = 12.0`. Aucune constante de simulation n'est
+concernée : ce sont des constantes de **discipline de parole**, et seul le flux `speaker:lines` change.
 
 Cooldowns par type : `LEADER_CHANGE 12 s`, `BIG_COMEBACK 15 s`, `OVERTAKE_STREAK 12 s`,
 `BIG_BONUS 8 s`, `LEADER_MALUS 10 s`, `CLOSE_RACE 25 s`, `LAST_COMEBACK 20 s`,
@@ -787,6 +839,11 @@ moyenne **8,906** | max **11**, **2 courses sur 1000 sous 6** répliques, **aucu
 (`= 0` : 0 course, `> 14` : 0 course). La cible `12 – 30` de P010 était la **cadence** de la course de
 180 s ; la borne haute `14` correspond au plafond mécanique du cooldown global, majoré des
 préemptions. Détail dans `docs/balance-report.md` §4.2.
+
+Mesuré par la **seconde** passe corrective, après la fenêtre de fraîcheur nulle des faits de position
+(§9.3) : **min 4** | p10 **6** | médiane **8** | moyenne **7,97** | max **11**, **14 courses sur
+1000 sous 6** répliques, **aucune course muette**. La cible `≥ 6` en moyenne et `≥ 8` en médiane reste
+tenue : le correctif retire 9 % des répliques, pas la parole.
 
 ### 9.4 Textes
 
@@ -957,6 +1014,14 @@ document et les seuils changent ensemble.
 > | Répliques du speaker | 12 – 30 | 6 – 14 | la cadence du speaker est bornée par son cooldown global (`6 s`) : `≈ 10` répliques au maximum en 60 s, donc `[12 ; 30]` y est **structurellement inatteignable** (les 200 courses auditées ne violent aucune règle de §9.3) |
 > | Nombre de pas | 10800 | 3600 | `TOTAL_SIM_S / DT_S` |
 >
+> **Seconde passe corrective (test joueur manuel n° 2) — toujours aucune constante de jeu modifiée.**
+> Elle ne touche **ni** la course, **ni** le corpus d'équilibrage : elle n'ajoute qu'une **règle de
+> discipline de parole** (§9.3, fenêtre de fraîcheur nulle pour les faits qui affirment une position).
+> La cadence mesurée du speaker passe de `8,91` à `7,97` répliques par course, ce qui **reste dans la
+> plage `6 – 14`** de la ligne ci-dessus : aucun seuil de §13 n'est modifié, et le corpus de 1000 seeds
+> n'a pas été relancé — aucun calcul de course n'ayant changé, ses résultats restent valides. La
+> véracité des positions est vérifiée par ses **propres** tests (§9.3), pas par ce corpus, qui mesure
+> une cadence.
 > Les lignes qui **ne dépendent pas** de la durée (`Changements de leader 6 – 20`,
 > `Dépassements ≥ 25`, taux de victoire `12 % – 22 %`, part d'événements `10 % – 27 %`, biais de
 > vitesse `± 1,5 %`, reproductibilité `100/100`) ont été **conservées telles quelles** : elles restent

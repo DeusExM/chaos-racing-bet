@@ -62,7 +62,11 @@ export interface HudModel {
   readonly tSim: number;
   /** Nombre de pas du noyau à cet instant : date la frame affichée, sans rien ajouter à la course. */
   readonly steps: number;
-  readonly segment: HudSegment;
+  /**
+   * Segment en cours, ou `null` quand la course n'est **pas** dans un segment (avant le départ,
+   * après l'arrivée). Jamais `0` : `segment 0/3` n'existe pas.
+   */
+  readonly segment: HudSegment | null;
   readonly rows: readonly LeaderboardRow[];
   readonly markers: readonly MinimapMarker[];
   readonly checkpoint: HudCheckpoint | null;
@@ -173,7 +177,8 @@ export interface HudDebugSnapshot {
   /** Nombre de pas de la frame affichée. */
   readonly steps: number;
   readonly seed: string;
-  readonly segment: number;
+  /** Segment affiché, ou `null` si aucun segment n'est en cours : un test peut le vérifier. */
+  readonly segment: number | null;
   readonly rows: readonly {
     readonly id: CharacterId;
     readonly rank: number;
@@ -204,7 +209,7 @@ export function snapshotOf(model: HudModel): HudDebugSnapshot {
     tSim: model.tSim,
     steps: model.steps,
     seed: model.seed,
-    segment: model.segment.number,
+    segment: model.segment?.number ?? null,
     rows: model.rows.map((row) => ({
       id: row.id,
       rank: row.rank,
@@ -353,14 +358,25 @@ export class Hud {
 
     setTextIfChanged(this.seedValue, model.seed);
     setTextIfChanged(this.time, formatSimTime(model.tSim, this.text.gapSecondsLabel));
-    setTextIfChanged(
-      this.segment,
-      `${this.text.segmentLabel} ${String(model.segment.number)}/${String(RACE_CONFIG.SEGMENT_COUNT)}`,
-    );
+    setTextIfChanged(this.segment, this.segmentText(model));
 
     this.updateLeaderboard(model.rows);
     this.updateCheckpoint(model.checkpoint);
     this.applyArrivalState(model.phase === 'finished');
+  }
+
+  /**
+   * Texte du bloc segment : `segment 2/3`, `Terminé` à l'arrivée, `segment —` hors course.
+   *
+   * Jamais `segment 0/3` : un segment est un numéro humain de `1` à `SEGMENT_COUNT`. À l'arrivée, le
+   * chrono porte déjà `60,0 s` ; le bloc segment dit donc ce que la course est devenue, pas un
+   * numéro qui n'existe pas (correctif de la passe corrective 2).
+   */
+  private segmentText(model: HudModel): string {
+    if (model.segment !== null) {
+      return `${this.text.segmentLabel} ${String(model.segment.number)}/${String(RACE_CONFIG.SEGMENT_COUNT)}`;
+    }
+    return model.phase === 'finished' ? this.text.segmentDone : `${this.text.segmentLabel} —`;
   }
 
   /**

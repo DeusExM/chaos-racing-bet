@@ -270,7 +270,12 @@ describe(`P009-B : discipline de parole sur ${SEED_COUNT} courses réelles`, () 
     // produits, pas de la discipline de parole. Les garde-fous garantis par P009-B sont le plafond,
     // l'absence de silence total et l'absence de violation ; la borne basse relève de l'arbitrage
     // d'équilibrage (P010). Un effondrement de la moyenne, en revanche, est un vrai échec.
-    // Mesure à 60 s : min 5, médiane 9, moyenne 8,81, max 11.
+    //
+    // Mesure à 60 s, cadence la plus favorable, avec la péremption de la passe corrective 2 :
+    // min 4, p10 6, médiane 8, moyenne 7,97, max 11, 14 seeds sous 6 répliques. Avant le correctif
+    // (aucune péremption) : min 5, médiane 9, moyenne 8,81, max 11. La différence — 9 % — est le
+    // prix de la véracité : une revendication de position n'est plus prononcée qu'à l'instant de sa
+    // mesure (`SPEAKER_POLICY.rankFactMaxAgeS` vaut 0).
     expect(summary.mean, report).toBeGreaterThanOrEqual(6);
     expect(summary.median, report).toBeGreaterThanOrEqual(8);
   });

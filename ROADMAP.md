@@ -300,6 +300,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P012 | Affichage du speaker + réglages `[x]` | P011 | bande de commentaires |
 | P013 | Arrivée et podium `[x]` | P012 | course complète jouable |
 | **P013-cor** | **Passe corrective après le premier test joueur manuel `[x]`** | P013 | course de 60 s, HUD dégagé, retours d'événement, son et commentateur explicites |
+| **P013-cor2** | **Seconde passe corrective après le second test joueur manuel `[x]`** | P013-cor | commentaire véridique sur la position, relecture pendant la pause, classement hors piste, segment d'arrivée |
 | **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
 | P014 | Identité visuelle et animations des 6 personnages | P013.5 | personnages distincts et drôles |
 | P015 | Polish, accessibilité, audio optionnel | P014 | finition |
@@ -1121,6 +1122,62 @@ bandeau de commentaire, du retour d'événement (comparé aux événements du no
 mini-carte survit sous forme de modèle testable, et aucune tolérance de test n'a été relâchée pour
 faire passer une mesure : là où un seuil gênait, c'est le **CSS** ou l'**échantillon** qui a été
 corrigé (par exemple la police du classement en téléphone paysage, remontée à `0,6rem`).
+
+---
+
+### P013-cor2 — Seconde passe corrective, issue du second test joueur manuel `[x]`
+
+**Nature.** Comme `P013-cor`, ce n'est **pas** une nouvelle étape : c'est une **passe corrective**
+courte, demandée après un **second test joueur manuel** de la course complète, **avant** le jalon
+P013.5. Elle ne renumérote rien, ne change **aucune constante de simulation** (`SPEED.*`, `DRIFT.*`,
+`SURGE.*`, `EVENT.*`, `OVERTAKE.*` sont intacts), ne relance pas le corpus d'équilibrage — aucun
+changement ne touche la course — et ne redessine pas l'arrivée, jugée satisfaisante. Elle corrige
+**quatre** défauts constatés en jouant.
+
+**1. Un commentaire ne peut plus annoncer une position fausse.** Sur une seed reproductible
+(`KR7Z8NAR`), le speaker annonçait `Poulet 3000 fait une remontée, 1er` alors que Poulet 3000
+n'était **pas** premier à l'écran. Diagnostic : chaque fait était **exact à son propre instant**
+(les 22 faits de position de cette seed sont conformes), mais **rien ne bornait son âge** : un fait
+mesuré à `tSim = 0,37 s` pouvait être prononcé à `30,05 s`, une fois les cooldowns de type et global
+retombés — la position annoncée était alors périmée depuis longtemps. Correctif : une **position ne se
+commente qu'à l'instant de sa mesure**. `SPEAK.RANK_FACT_MAX_AGE_S = 0.0` (nouvelle constante de
+**discipline du speaker**, pas de simulation) s'applique aux faits qui **affirment un rang**
+(`LEADER_CHANGE`, `BIG_COMEBACK`, `LAST_COMEBACK`, `LEADER_MALUS`) ; les faits épisodiques gardent
+`SPEAK.FACT_MAX_AGE_S = 12.0`. Mesure : avant le correctif, **301 des 1029** répliques de position
+(29 %) étaient fausses au moment d'être dites ; après, **0 sur 585**. Coût réel : 9 % de répliques en
+moins. Aucune trajectoire, aucun tirage et aucune règle de course n'ont été touchés : seul le flux
+`speaker:lines` change.
+
+**2. Relecture visuelle pendant une pause manuelle.** Pendant une pause, une petite barre apparaît
+sous les commandes : `−2 s`, une barre de temps et `+2 s`, avec une lecture `38,4 s / 52,4 s`
+(instant consulté / instant réel de la pause). Le curseur est **borné** à `[0, instant de pause]` :
+on ne peut ni remonter avant le départ, ni avancer au-delà de ce qui a réellement été joué. La
+relecture est **purement visuelle** : `RaceEngine` ne recule jamais, aucun pas n'est exécuté, aucun
+fait n'est produit, aucun tirage n'a lieu, la relecture est **muette** (aucune ancienne réplique n'est
+remise dans la file du speaker), et « Reprendre » repart de l'**instant réel de la pause**. Les états
+passés nécessaires au dessin (distances des 6 personnages + événements actifs) sont conservés
+**compactement** : `3601` instants au maximum, `172,8 Ko` de distances en `Float64Array` alloué une
+fois, plus quelques centaines d'octets de fiches d'événements — moins de `200 Ko` au total.
+
+**3. Le classement permanent ne recouvre plus la piste.** Une **bande latérale** est réservée au
+classement (`VIEW.TRACK_WIDTH_RATIO = 0.78`) : la piste est dessinée dans les 78 % de gauche, le
+classement vit dans la bande de droite, et un personnage sorti du champ est **masqué** (son marqueur
+de bord reste dans la piste) plutôt que dessiné sous le panneau. En **téléphone paysage**
+(hauteur ≤ `VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX = 560`), la bande disparaît et le classement permanent
+est **masqué pendant la course** : masquer est préférable à recouvrir. Le reste du HUD est inchangé.
+
+**4. Plus de segment invalide à l'arrivée.** Le HUD affichait `segment 0/3` à `60,0 s` : le modèle
+publie désormais `segment: null` hors course, et l'affichage dit **`Terminé`**. Le noyau n'a que trois
+segments (`1` à `3`) ; `0/3` n'existe plus nulle part.
+
+**Preuves.** Tests unitaires : fraîcheur des faits de position (contrôle pas à pas sur `KR7Z8NAR`,
+corpus de 24 seeds, deux niveaux de péremption, classification exhaustive des dix types de faits) ;
+historique de relecture (distances exactes, bornes du curseur, taille mesurée, remise à zéro) ;
+modèle de segment (`null` à l'arrivée). Tests E2E : pause à `52,4 s`, `−2 s` → `50,4 s` → `48,4 s`,
+`+2 s` → `50,4 s`, bornes haute et basse infranchissables, relecture muette et sans pas, invariance
+après relecture et reprise (distances finales **identiques bit à bit**, classement identique,
+`3600` pas), géométrie du classement en 1280×720, 1920×1080 et 844×390 (aucun personnage dessiné sous
+le panneau), et `Terminé` à l'arrivée.
 
 ---
 

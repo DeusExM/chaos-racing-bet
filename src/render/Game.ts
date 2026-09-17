@@ -20,6 +20,8 @@ export interface GameOptions {
   readonly leaderboard: HTMLElement | null;
   readonly seedValue: HTMLElement | null;
   readonly pauseButton: HTMLElement | null;
+  /** Racine de la barre de relecture (`#replay-bar`) : remplie par le rendu, masquée hors pause. */
+  readonly replayBar: HTMLElement | null;
   readonly debugPanel: HTMLElement | null;
   readonly debug: boolean;
   /** Expose les positions écran réelles (dev ou `?e2e=1`), pour les tests E2E. */
@@ -48,6 +50,7 @@ export function createGame(options: GameOptions): void {
     leaderboard: options.leaderboard,
     seedValue: options.seedValue,
     pauseButton: options.pauseButton,
+    replayBar: options.replayBar,
     debugPanel: options.debugPanel,
     debug: options.debug,
     exposeView: options.exposeView,

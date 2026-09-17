@@ -69,9 +69,11 @@ describe('modèle du HUD : lecture seule du noyau', () => {
     }
   });
 
-  it('numérote les segments comme le noyau, et 0 avant le départ', () => {
-    expect(segmentNumberFor({ kind: 'idle' })).toBe(0);
-    expect(segmentNumberFor({ kind: 'finished' })).toBe(0);
+  it('numérote les segments comme le noyau, et n’en invente aucun hors course', () => {
+    // Un segment est un numéro humain de 1 à 3 : `0` n'existe pas. Hors course, le modèle ne publie
+    // donc **aucun** segment, ce qui interdit au HUD d'afficher `segment 0/3` (passe corrective 2).
+    expect(segmentNumberFor({ kind: 'idle' })).toBeNull();
+    expect(segmentNumberFor({ kind: 'finished' })).toBeNull();
     expect(segmentNumberFor({ kind: 'running', segment: 3, segmentElapsedS: 1 })).toBe(3);
 
     // Un pas de segment = `SEGMENT_DURATION_S / DT_S` : la frontière vient du noyau, jamais d'un 20.
@@ -79,8 +81,17 @@ describe('modèle du HUD : lecture seule du noyau', () => {
     for (const segment of [1, 2, 3]) {
       const state = stateAfter(OVERTAKE_SEED, stepsPerSegment * (segment - 1) + 5);
       const model = buildHudModel(state, 'running', null);
-      expect(model.segment.number, `segment ${String(segment)}`).toBe(segment);
+      expect(model.segment?.number, `segment ${String(segment)}`).toBe(segment);
     }
+  });
+
+  it('ne publie plus aucun segment une fois la course terminée', () => {
+    const state = stateAfter(OVERTAKE_SEED, RACE_CONFIG.TOTAL_STEPS);
+    expect(state.phase.kind).toBe('finished');
+    const model = buildHudModel(state, 'finished', null);
+    expect(model.segment).toBeNull();
+    // Le temps, lui, reste celui du noyau : `60,0 s` — c'est ce que le HUD affiche à côté.
+    expect(model.tSim).toBe(RACE_CONFIG.TOTAL_STEPS * RACE_CONFIG.DT_S);
   });
 
   it('borne l’instant d’un checkpoint sur les constantes du noyau', () => {

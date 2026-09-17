@@ -56,6 +56,37 @@ export interface SpeakerPolicy {
   readonly minWindowAvgS: number;
   /** Largeur de la fenêtre glissante de densité, en secondes. */
   readonly windowS: number;
+  /**
+   * Âge maximal, en secondes **simulées**, d'un fait en attente avant d'être jeté.
+   *
+   * Sans cette borne, un candidat bloqué par son cooldown de type pouvait rester en file jusqu'à la
+   * fin de la course et être prononcé une trentaine de secondes plus tard : la réplique décrivait
+   * alors une position qui n'était plus vraie (passe corrective 2, seed `KR7Z8NAR`). Un fait qui a
+   * attendu plus longtemps que cette durée n'est **jamais** prononcé.
+   */
+  readonly factMaxAgeS: number;
+  /**
+   * Âge maximal, en secondes **simulées**, d'un fait qui **revendique une position** (voir
+   * `claims.ts`).
+   *
+   * Il vaut **zéro**, et c'est le cœur du correctif de la passe corrective 2 : une position ne se
+   * commente qu'**à l'instant où elle est mesurée**. Une place au classement change en quelques
+   * dixièmes de seconde, donc toute attente — même d'une seconde — peut transformer « voilà le 1er »
+   * en mensonge. Mesure sur 200 seeds (course réelle, cadence d'affichage comprise, classement
+   * vérifié pas à pas) :
+   *
+   * | borne | répliques / course | revendications de position | fausses |
+   * | ----- | ------------------ | -------------------------- | ------- |
+   * | 0 s   | 7,54               | 585                        | **0**   |
+   * | 1 s   | 7,66               | 700                        | 17      |
+   * | 3 s   | 7,89               | 822                        | 62      |
+   * | 12 s  | 8,29               | 1029                       | 301     |
+   *
+   * À zéro, la revendication est prononcée au pas même de la mesure : sa preuve est donc valable par
+   * construction, et non « statistiquement ». Le coût est de 9 % de répliques, et il porte
+   * exactement sur les annonces qui auraient été fausses ou périmées.
+   */
+  readonly rankFactMaxAgeS: number;
   /** Durée pendant laquelle un fait identique à un fait déjà **prononcé** est supprimé. */
   readonly dedupWindowS: number;
   /** Pas de quantification des magnitudes : nombre de tranches par unité. */
@@ -77,6 +108,10 @@ export const SPEAKER_POLICY: SpeakerPolicy = Object.freeze({
   segmentCount: 3,
   minWindowAvgS: 5.0,
   windowS: 30,
+  // Recopié de `SPEAK.FACT_MAX_AGE_S` : le speaker n'importe pas le noyau, mais la copie est vérifiée
+  // par `tests/unit/speaker.test.ts` contre `src/core/config.ts`.
+  factMaxAgeS: 12.0,
+  rankFactMaxAgeS: 0.0,
   dedupWindowS: 10,
   magnitudeBucketResolution: 4,
   typeCooldownS: SPEAKER_TYPE_COOLDOWN_S,

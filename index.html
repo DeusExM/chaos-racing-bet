@@ -47,6 +47,12 @@
         <button id="start-button" type="button" data-testid="start-button"></button>
         <button id="pause-button" type="button" data-testid="pause-button"></button>
         <button id="replay-button" type="button" data-testid="replay-button"></button>
+        <!--
+          Barre de relecture (passe corrective 2) : elle est remplie par le rendu et reste masquée
+          hors pause manuelle. Elle vit sous l'arène, avec les commandes, pour ne jamais recouvrir la
+          piste — c'est le même principe que le déplacement du classement dans sa bande réservée.
+        -->
+        <div id="replay-bar" class="replay" data-testid="replay-bar" hidden></div>
       </div>
 
       <section id="debug" class="debug" data-testid="debug" hidden></section>

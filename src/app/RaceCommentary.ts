@@ -3,6 +3,7 @@ import type { RaceFact } from '../core/types';
 import type { SpeakerCatalogue, SpeakerLine } from '../render/subtitle';
 import { pickLineCharacter, subtitleDurationMs } from '../render/view/subtitleModel';
 import { Speaker, type SpeakerDecision } from '../speaker/Speaker';
+import { SPEAKER_POLICY, type SpeakerPolicy } from '../speaker/policy';
 import { characterNameFr } from './strings.fr';
 
 /**
@@ -70,7 +71,7 @@ export class RaceCommentary {
 
   private readonly voice: CommentaryVoice | null;
 
-  private readonly speaker = new Speaker();
+  private readonly speaker: Speaker;
 
   private stream: RngStream;
 
@@ -94,9 +95,11 @@ export class RaceCommentary {
     seedValue: number,
     catalogue: SpeakerCatalogue,
     voice: CommentaryVoice | null = null,
+    policy: SpeakerPolicy = SPEAKER_POLICY,
   ) {
     this.catalogue = catalogue;
     this.voice = voice;
+    this.speaker = new Speaker(policy);
     this.stream = forkStream(seedValue, 'speaker:lines');
   }
 

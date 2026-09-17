@@ -82,8 +82,9 @@ body {
 }
 
 /*
- * HUD (P011, allégé par la passe corrective issue du premier test joueur manuel) : grille à deux
- * colonnes posée **dans** l'arène, donc à l'échelle du canvas.
+ * HUD (P011, allégé par la passe corrective issue du premier test joueur manuel, puis par la passe
+ * corrective 2 issue du second) : grille à deux colonnes posée **dans** l'arène, donc à l'échelle du
+ * canvas.
  *
  * Le HUD ne capture aucun clic (`pointer-events: none`) : seuls ses rares éléments interactifs, comme
  * le bouton de copie de la seed, les réactivent. La course reste donc entièrement cliquable.
@@ -101,16 +102,25 @@ body {
  * | 4 | bandeau de commentaire, sur toute la largeur |
  * | 5 | seed, discrète, en bas à gauche |
  *
- * Chaque bloc occupe **sa propre cellule** : aucun recouvrement n'est possible par construction, et
- * la piste n'est jamais traversée par un bloc permanent. La mini-carte, qui occupait une bande
- * entière, a été retirée : le classement donne déjà l'ordre, et la vue de piste appartient à P014.
+ * ## Objectif de la passe corrective 2 : le classement hors de la piste
+ *
+ * Le second test joueur a montré que le classement **recouvrait encore les personnages** : il vivait
+ * dans la rangée de piste. La colonne de droite est donc devenue une **bande réservée**, large de
+ * `--hud-sidebar-width`, dans laquelle vit le classement — et la piste est **réduite d'autant** par
+ * le rendu (`VIEW.TRACK_WIDTH_RATIO`) : un personnage ne peut plus entrer sous le classement, par
+ * construction et non par chance. Le classement n'est donc plus « posé sur » la piste : il est
+ * **à côté**.
+ *
+ * En téléphone paysage, la bande réservée disparaît et le classement est **masqué pendant la
+ * course** (voir la requête média en fin de fichier) : l'écran d'arrivée porte déjà le classement
+ * complet, et masquer vaut mieux que recouvrir les coureurs.
  */
 .hud {
   position: absolute;
   inset: 0;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) var(--hud-sidebar-width, 22%);
   grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   gap: 0.2rem 0.35rem;
   align-items: start;
@@ -143,7 +153,7 @@ body {
  * aucun effet, le soin graphique appartient à P014.
  */
 .hud-checkpoint {
-  grid-column: 1 / -1;
+  grid-column: 1;
   grid-row: 3;
   align-self: start;
   justify-self: center;
@@ -181,9 +191,14 @@ body {
   letter-spacing: 0.06em;
 }
 
-/* Chrono + segment : bande mince de la rangée 2, collée au bord droit. */
+/*
+ * Chrono + segment : bande mince de la rangée 2, collée au bord droit **de la piste**.
+ *
+ * Depuis la passe corrective 2, la colonne de droite est la bande réservée au classement : le chrono
+ * reste donc dans la colonne de piste, aligné à droite, pour ne pas empiéter sur la bande réservée.
+ */
 .hud-time {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 2;
   justify-self: end;
   display: flex;
@@ -213,19 +228,28 @@ body {
 }
 
 /*
- * Classement : panneau existant, compacté et replacé en bas à droite de la rangée de piste.
+ * Classement : panneau de la **bande réservée**, colonne de droite, sur toute la hauteur.
  *
  * Il garde ses **six lignes** et son écart en secondes : c'est ce que les tests comparent frame par
  * frame à l'état du noyau, et c'est l'information la plus utile au spectateur. Ce qui disparaît, ce
  * sont les marges, le titre visible et les gros caractères.
+ *
+ * ## Pourquoi il ne peut plus recouvrir un personnage
+ *
+ * La colonne 2 est la bande réservée (`--hud-sidebar-width`), et la piste est réduite d'autant côté
+ * rendu (`VIEW.TRACK_WIDTH_RATIO`) : aucun sprite n'est dessiné dans cette bande. Le panneau y est
+ * en plus **inset** de `0.6rem` par rapport au bord gauche de la colonne, ce qui absorbe l'écart
+ * entre la largeur de la colonne (pourcentage de la boîte de contenu) et la bande réelle (pourcentage
+ * de l'arène, padding compris). `min()` borne aussi les deux largeurs à la colonne : sur une fenêtre
+ * étroite, le panneau rétrécit au lieu de déborder vers la piste.
  */
 .hud-panel {
   grid-column: 2;
-  grid-row: 3;
+  grid-row: 2 / -1;
   justify-self: end;
-  align-self: end;
-  min-width: 9rem;
-  max-width: 11.5rem;
+  align-self: start;
+  min-width: min(9rem, 100%);
+  max-width: min(11.5rem, calc(100% - 0.6rem));
   margin: 0;
   padding: 0.2rem 0.4rem;
   border-radius: 8px;
@@ -299,17 +323,18 @@ body {
 }
 
 /*
- * Retour visuel d'événement (passe corrective §10) : une couche **pleine arène**, sans grille ni
- * position fixe. Chaque badge est posé en pourcentage de la taille logique du canvas, qui est
- * exactement celle de l'arène (`Scale.FIT` sur une base 16:9) : le libellé suit donc son personnage
- * à n'importe quelle résolution, sans calcul de mise en page dans le code.
+ * Retour visuel d'événement (passe corrective §10) : une couche **de la bande de piste**, sans grille
+ * ni position fixe. Chaque badge est posé en pourcentage de la largeur de **piste** et de la hauteur
+ * de l'arène : le libellé suit donc son personnage à n'importe quelle résolution, sans calcul de mise
+ * en page dans le code, et il ne peut pas déborder sous le classement (passe corrective 2).
  *
  * La couche ne capture aucun clic et n'est jamais annoncée : c'est une décoration, le commentaire et
  * le classement restent les sources d'information accessibles.
  */
 .hud-events {
   position: absolute;
-  inset: 0;
+  inset: 0 auto 0 0;
+  width: calc(100% - var(--hud-sidebar-width, 22%));
   overflow: hidden;
   pointer-events: none;
 }
@@ -703,7 +728,78 @@ body {
 
 .controls {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
+}
+
+/*
+ * Barre de relecture (passe corrective 2) : elle vit avec les commandes, **hors de l'arène**.
+ *
+ * C'est le même principe que le classement : plutôt que de poser un bloc sur la piste, on lui donne
+ * une place qui n'empiète sur rien. Elle n'apparaît que pendant une pause manuelle — donc jamais
+ * pendant que la course avance — et sa hauteur est celle de la rangée des commandes, qui existent
+ * déjà : l'arène ne bouge pas quand elle apparaît.
+ */
+.replay {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.replay[hidden] {
+  display: none;
+}
+
+.replay-title {
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.8em;
+}
+
+.replay-step {
+  min-width: 3.4rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #16203c;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.replay-step:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.replay-step:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.replay-step:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* La barre elle-même : elle représente la course déjà jouée, `0 s` à gauche, la pause à droite. */
+.replay-range {
+  width: clamp(7rem, 26vw, 22rem);
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.replay-readout {
+  min-width: 8.5rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .controls button {
@@ -769,12 +865,18 @@ body {
   /*
    * Le HUD garde ses informations essentielles et abandonne le confort : le titre de la seed et les
    * libellés d'état des réglages disparaissent, la seed se réduit à sa valeur copiable. Rien
-   * d'essentiel — classement, chrono, segment, seed, commentaire — ne quitte l'écran.
+   * d'essentiel — chrono, segment, seed, commentaire — ne quitte l'écran.
+   *
+   * Le **classement permanent**, lui, est masqué pendant la course (passe corrective 2) : sur un écran
+   * de cette taille, il n'existe aucune bande latérale assez large pour lui sans réduire la piste à
+   * presque rien, et masquer vaut mieux que recouvrir les coureurs. L'écran d'arrivée porte le
+   * classement complet, et `--hud-sidebar-width: 0` rend toute la largeur à la piste.
    */
   .hud {
     gap: 0.15rem 0.3rem;
     padding: 0.25rem 0.3rem;
     font-size: 0.55rem;
+    --hud-sidebar-width: 0;
     /*
      * Plancher de lisibilité du classement : `0.6rem` = 9,6 px, au-dessus du minimum de 9 px vérifié
      * par les tests E2E responsive. La passe corrective a d'abord réduit cette ligne à `0.5rem`
@@ -782,6 +884,10 @@ body {
      * plancher de lisibilité, et c'est le CSS qui a été corrigé — jamais le seuil du test.
      */
     --hud-row-font: 0.6rem;
+  }
+
+  .hud-panel {
+    display: none;
   }
 
   .hud-time .hud-title,
@@ -793,14 +899,8 @@ body {
     font-size: 0.55rem;
   }
 
-  .hud-time,
-  .hud-panel {
+  .hud-time {
     padding: 0.15rem 0.3rem;
-  }
-
-  .hud-panel {
-    min-width: 7.5rem;
-    max-width: 9rem;
   }
 
   .hud-row {

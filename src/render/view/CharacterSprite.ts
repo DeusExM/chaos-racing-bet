@@ -87,6 +87,29 @@ export class CharacterSprite {
     this.edgeMarker.setVisible(false);
   }
 
+  /**
+   * Dessine ou masque le personnage.
+   *
+   * Un personnage hors du champ est **masqué** plutôt que dessiné sous le classement permanent
+   * (passe corrective 2) : le HUD occupe une bande réservée de l'arène, et rien de la course ne doit
+   * s'y trouver, même partiellement. Il n'est pas perdu pour le spectateur : `showEdgeMarker()`
+   * affiche son nom collé au bord de la piste.
+   */
+  setDrawn(drawn: boolean): void {
+    this.image.setVisible(drawn);
+    this.nameLabel.setVisible(drawn);
+  }
+
+  /** Taille réellement dessinée, en pixels logiques. */
+  get size(): number {
+    return this.sizePx;
+  }
+
+  /** Vrai si le personnage est réellement dessiné dans cette frame. */
+  get drawn(): boolean {
+    return this.image.visible;
+  }
+
   /** Identifiant stable du personnage représenté. */
   get id(): CharacterId {
     return this.characterId;

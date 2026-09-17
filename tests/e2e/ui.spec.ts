@@ -113,7 +113,17 @@ for (const viewport of VIEWPORTS) {
     );
 
     const rows = page.locator('[data-testid="leaderboard-row"]');
-    await expect(rows.first()).toBeVisible();
+    // Passe corrective 2 : en téléphone paysage, le classement permanent est **masqué pendant la
+    // course** (la piste occupe alors toute la largeur). Les lignes restent dans le DOM, donc le
+    // classement de l'écran d'arrivée reste complet — c'est le panneau qui est caché, pas la donnée.
+    const compact = await page.evaluate(
+      () => window.__CHAOS_RACE_VIEW__?.track().compact ?? false,
+    );
+    if (compact) {
+      await expect(page.getByTestId('leaderboard')).toBeHidden();
+    } else {
+      await expect(rows.first()).toBeVisible();
+    }
 
     const fontSize = await rows.first().evaluate((element) => {
       return Number.parseFloat(getComputedStyle(element).fontSize);

@@ -210,6 +210,7 @@ function bootstrap(): void {
     leaderboard: elementById('leaderboard'),
     seedValue,
     pauseButton,
+    replayBar: elementById('replay-bar'),
     debugPanel: params.get(DEBUG_PARAM) === '1' ? elementById('debug') : null,
     debug: params.get(DEBUG_PARAM) === '1',
     exposeView: hooksEnabled,

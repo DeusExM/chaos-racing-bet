@@ -50,6 +50,8 @@ export const UI_TEXT_FR: UiText = Object.freeze({
 
   timeTitle: 'Chrono',
   segmentLabel: 'segment',
+  // À l'arrivée, le bloc segment ne peut plus afficher de numéro : il affiche l'état de la course.
+  segmentDone: 'Terminé',
   seedLabel: 'Seed',
   copySeedButton: 'Copier',
   copySeedDone: 'Copié !',
@@ -64,6 +66,10 @@ export const UI_TEXT_FR: UiText = Object.freeze({
 
   startButton: 'Lancer',
   replayButton: 'Rejouer',
+  // Barre de relecture (passe corrective 2) : elle n'apparaît que pendant une pause manuelle.
+  replayTitle: 'Revoir',
+  replayBack: '−2 s',
+  replayForward: '+2 s',
   pauseButton: 'Pause',
   resumeButton: 'Reprendre',
   checkpointBanner: 'CHECKPOINT',

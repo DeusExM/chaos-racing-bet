@@ -6,6 +6,7 @@ import { forkStream } from '../../src/core/rng';
 import type { CharacterId, RaceFact, RaceFactType } from '../../src/core/types';
 import { RaceSimulation } from '../../src/sim/RaceSimulation';
 import { SIM_FAST_CONFIG } from '../../src/sim/config';
+import { SPEAKER_POLICY, type SpeakerPolicy } from '../../src/speaker/policy';
 import type { SpeakerLine } from '../../src/render/subtitle';
 import { subtitleDurationMs } from '../../src/render/view/subtitleModel';
 import { VIEW } from '../../src/render/viewConfig';
@@ -38,9 +39,30 @@ function fact(
   });
 }
 
-function director(): { commentary: RaceCommentary; simulation: RaceSimulation } {
+/**
+ * Politique de test où la **péremption** est désactivée.
+ *
+ * Plusieurs tests d'intégration font attendre un fait de position (une remontée) bien au-delà de sa
+ * fenêtre de fraîcheur, parce qu'ils mesurent la **file**, les cooldowns, la durée d'affichage ou les
+ * tirages de variante — pas la fraîcheur. La règle de péremption a ses propres tests
+ * (`speakerFreshness.test.ts`), et le catalogue n'y perd rien : c'est la même isolation que
+ * `withoutTypeCooldowns` dans `speaker.test.ts`.
+ */
+const NO_EXPIRY: SpeakerPolicy = Object.freeze({
+  ...SPEAKER_POLICY,
+  factMaxAgeS: Number.POSITIVE_INFINITY,
+  rankFactMaxAgeS: Number.POSITIVE_INFINITY,
+});
+
+function director(policy: SpeakerPolicy = SPEAKER_POLICY): {
+  commentary: RaceCommentary;
+  simulation: RaceSimulation;
+} {
   const simulation = new RaceSimulation('POULET42', SIM_FAST_CONFIG);
-  return { commentary: new RaceCommentary(simulation.view.seedValue, SPEAKER_CATALOGUE_FR), simulation };
+  return {
+    commentary: new RaceCommentary(simulation.view.seedValue, SPEAKER_CATALOGUE_FR, null, policy),
+    simulation,
+  };
 }
 
 describe('P009-C : intégration visible du speaker', () => {
@@ -210,7 +232,7 @@ describe('P009-C : intégration visible du speaker', () => {
   });
 
   it('reprend un fait en file dès que le temps simulé courant le rend éligible', () => {
-    const { commentary } = director();
+    const { commentary } = director(NO_EXPIRY);
 
     commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
     expect(commentary.currentLine()?.decision.fact.type).toBe('LEADER_CHANGE');
@@ -226,7 +248,7 @@ describe('P009-C : intégration visible du speaker', () => {
     expect(commentary.currentLine()?.decision.fact.type).toBe('BIG_COMEBACK');
 
     // Preuve du bug corrigé : repoller avec l'ancien instant (t=2) laissait B en file pour toujours.
-    const stale = director();
+    const stale = director(NO_EXPIRY);
     stale.commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
     stale.commentary.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
     stale.commentary.update(stale.commentary.remainingDisplayMs() + 1, 2);
@@ -234,7 +256,7 @@ describe('P009-C : intégration visible du speaker', () => {
   });
 
   it('ne contourne aucun cooldown quand le temps simulé est figé (pause)', () => {
-    const { commentary } = director();
+    const { commentary } = director(NO_EXPIRY);
 
     commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
     commentary.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
@@ -258,7 +280,7 @@ describe('P009-C : intégration visible du speaker', () => {
     const simulation = new RaceSimulation('POULET42', SIM_FAST_CONFIG);
     const seedValue = simulation.view.seedValue;
 
-    const commentary = new RaceCommentary(seedValue, SPEAKER_CATALOGUE_FR);
+    const commentary = new RaceCommentary(seedValue, SPEAKER_CATALOGUE_FR, null, NO_EXPIRY);
     commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
     commentary.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
 
@@ -383,7 +405,7 @@ describe('P012 : voix, muet et durée d’affichage', () => {
   });
 
   it('démarre sans préemption sur un fait qui a attendu son tour', () => {
-    const subordinate = new RaceCommentary(1, SPEAKER_CATALOGUE_FR);
+    const subordinate = new RaceCommentary(1, SPEAKER_CATALOGUE_FR, null, NO_EXPIRY);
 
     subordinate.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
     subordinate.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);

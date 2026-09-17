@@ -50,6 +50,8 @@ interface GeometrySample {
   readonly logicalTrackWidth: number;
   readonly logicalArenaWidth: number;
   readonly arenaWidth: number;
+  /** Échelle entre pixels logiques du canvas et pixels CSS de l'arène. */
+  readonly scale: number;
   readonly compact: boolean;
   readonly leaderboardVisible: boolean;
   readonly steps: number;
@@ -108,18 +110,20 @@ async function collectGeometry(page: Page, targets: readonly number[]): Promise<
         leaderboard: visible && leaderboardBox !== null ? inArena(leaderboardBox) : null,
         characters: drawn.map((sprite) => {
           // `screenX` est le **centre** du sprite (origine 0,5 / 0,5) : le rectangle en découle, avec
-          // la taille réellement appliquée par `layout()`.
-          const half = (sprite.size * scale) / 2;
+          // les dimensions réellement appliquées par `layout()` — largeur et hauteur séparées, puisque
+          // les illustrations ne sont pas carrées.
+          const halfWidth = (sprite.width * scale) / 2;
+          const halfHeight = (sprite.height * scale) / 2;
           const centerX = canvasBox.left - stageBox.left + sprite.screenX * scale;
           const centerY = canvasBox.top - stageBox.top + sprite.screenY * scale;
           return {
             id: sprite.id,
-            left: centerX - half,
-            right: centerX + half,
-            top: centerY - half,
-            bottom: centerY + half,
-            width: sprite.size * scale,
-            height: sprite.size * scale,
+            left: centerX - halfWidth,
+            right: centerX + halfWidth,
+            top: centerY - halfHeight,
+            bottom: centerY + halfHeight,
+            width: sprite.width * scale,
+            height: sprite.height * scale,
           };
         }),
         drawnCount: drawn.length,
@@ -127,6 +131,7 @@ async function collectGeometry(page: Page, targets: readonly number[]): Promise<
         logicalTrackWidth: track.trackWidth,
         logicalArenaWidth: track.arenaWidth,
         arenaWidth: stageBox.width,
+        scale,
         compact: track.compact,
         leaderboardVisible: visible,
         steps: api.state().steps,
@@ -195,6 +200,22 @@ for (const viewport of VIEWPORTS) {
       // dessinant plus personne.
       expect(sample.drawnCount, 'au moins quatre personnages sont dessinés').toBeGreaterThanOrEqual(4);
       expect(sample.drawnCount).toBeLessThanOrEqual(CHARACTER_IDS.length);
+
+      // Les visuels sont des **images**, jamais des carrés : la hauteur suit la constante de rendu et
+      // la largeur se déduit du ratio du fichier. Une image écrasée, une texture manquante ou une
+      // résolution utilisée comme taille d'affichage seraient détectées ici, aux trois résolutions.
+      const expectedHeight = VIEW.CHARACTER_HEIGHT_PX * sample.scale;
+      for (const character of sample.characters) {
+        expect(
+          character.height,
+          `pas ${String(sample.steps)} : ${character.id} mesure la hauteur de rendu`,
+        ).toBeCloseTo(expectedHeight, 0);
+        expect(
+          character.width / character.height,
+          `pas ${String(sample.steps)} : ${character.id} garde le ratio de son image`,
+        ).toBeGreaterThan(1.3);
+        expect(character.width / character.height).toBeLessThan(1.37);
+      }
 
       if (sample.compact) {
         // Téléphone paysage : pas de bande latérale, classement masqué pendant la course, piste

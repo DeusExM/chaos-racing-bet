@@ -253,9 +253,11 @@ export class RaceScene extends Scene {
             id: sprite.id,
             screenX: sprite.screenX,
             screenY: sprite.screenY,
-            // Taille et visibilité réelles : un test de géométrie ne peut pas deviner le rectangle
-            // d'un sprite à partir d'une constante recopiée, et il doit savoir s'il est dessiné.
-            size: sprite.size,
+            // Dimensions et visibilité réelles : un test de géométrie ne peut pas deviner le rectangle
+            // d'un sprite à partir d'une constante recopiée, et il doit savoir s'il est dessiné. Les
+            // images n'étant pas carrées, la largeur et la hauteur sont publiées séparément.
+            width: sprite.width,
+            height: sprite.height,
             drawn: sprite.drawn,
           })),
         camera: () => ({ leftM: this.rig.left, windowM: this.rig.span }),
@@ -363,11 +365,15 @@ export class RaceScene extends Scene {
       const screenX = this.rig.toScreenX(distance, this.trackWidth);
       sprite.place(screenX, this.layoutHeight);
       // Un personnage hors du champ est **masqué** : il n'est jamais dessiné sous la bande réservée au
-      // classement permanent. Son marqueur de bord, lui, reste dans la piste et dit qui c'est.
-      sprite.setDrawn(screenX >= 0 && screenX <= this.trackWidth);
-      if (this.rig.isOffscreen(distance, this.trackWidth)) {
+      // classement permanent, pas même partiellement. La décision se prend sur la **taille réellement
+      // affichée** (les images sont plus larges que hautes) : supposer un carré laisserait dépasser
+      // l'image sous le panneau. Son marqueur de bord, lui, reste dans la piste et dit qui c'est.
+      const fitsInsideTrack =
+        screenX - sprite.halfWidth >= 0 && screenX + sprite.halfWidth <= this.trackWidth;
+      sprite.setDrawn(fitsInsideTrack);
+      if (!fitsInsideTrack || this.rig.isOffscreen(distance, this.trackWidth)) {
         sprite.showEdgeMarker(
-          screenX < VIEW.EDGE_MARGIN_PX ? 'left' : 'right',
+          screenX < this.trackWidth / 2 ? 'left' : 'right',
           this.trackWidth,
           this.layoutHeight,
         );

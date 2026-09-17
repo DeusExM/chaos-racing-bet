@@ -1227,7 +1227,8 @@ existant**.
 * Le résultat d'une course doit être **identique au bit près** avec et sans le renderer 3D.
 * L'UI, le classement et les paris peuvent rester en **HTML/2D** au-dessus de la scène.
 * **Aucune dépendance 3D n'est installée avant que ce jalon ne soit explicitement autorisé**
-  (`AGENTS.md` §3.1). Le rendu reste le placeholder 2D de P005 jusque-là.
+  (`AGENTS.md` §3.1). Le rendu reste le **2D actuel** (Phaser, illustrations des six personnages)
+  jusque-là.
 * Inspiration de **mise en scène** uniquement : aucun asset, personnage ou élément protégé d'une
   œuvre existante n'est reproduit — voir `GAME_DESIGN.md` §5.1.
 
@@ -1255,6 +1256,13 @@ Si le jalon retient une option 3D, cette étape s'appuie dessus ; sinon elle res
   animations par état (course, turbo, chute, sieste, vent de face, raccourci), bulles d'émotion.
 * Palette accessible (daltonisme) : distinction jamais fondée sur la seule teinte.
 * Ressources **locales** uniquement (aucun CDN, aucune police distante).
+
+> **Point de départ (passe visuelle).** Les six illustrations fournies par le joueur sont **déjà
+> intégrées** : une image par personnage, servie depuis `public/assets/characters/`, réduite au rendu
+> (hauteur 73 px, ratio conservé) et couverte par les tests (« les six visuels sont servis en PNG
+> transparent, au ratio des sources et dans le budget »). P014 part donc d'identités réelles : son
+> travail restant porte sur les **animations par état**, les bulles d'émotion et l'accessibilité, pas
+> sur le remplacement des formes provisoires, qui n'existent plus.
 
 **Tests (DoD)**
 * Les 6 personnages restent identifiables sur une capture en niveaux de gris.

@@ -19,8 +19,10 @@ export interface SpriteView {
   readonly id: CharacterId;
   readonly screenX: number;
   readonly screenY: number;
-  /** Taille réellement dessinée, en pixels logiques du canvas. */
-  readonly size: number;
+  /** Largeur réellement dessinée, en pixels logiques du canvas (déduite du ratio de la texture). */
+  readonly width: number;
+  /** Hauteur réellement dessinée, en pixels logiques du canvas. */
+  readonly height: number;
   /**
    * Vrai si le personnage est réellement dessiné dans cette frame.
    *

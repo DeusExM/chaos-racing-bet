@@ -34,3 +34,17 @@ Thumbs.db
 # Image de reference des competiteurs : conservee localement, non versionnee pour l'instant
 # (retrait temporaire demande par l'utilisateur ; le fichier reste sur le disque).
 images_des_competiteurs.png
+
+# Sources d'art des 6 personnages : fournies par le joueur, conservees **intactes** a la racine,
+# jamais versionnees (ce sont des originaux haute resolution, ~1 Mo chacun). Ce que l'application
+# sert et ce que git versionne, ce sont les copies runtime de `public/assets/characters/`,
+# produites par `tools/optimizeCharacterAssets.mjs` a partir de ces sources.
+# Les motifs sont **ancres a la racine** (`/`) : sans cela, `Bananix.png` masquerait aussi la copie
+# runtime `public/assets/characters/bananix.png`, dont le nom ne differe que par la casse (git
+# compare les noms sans tenir compte de la casse sous Windows).
+/Poulet 3000.png
+/Bananix.png
+/Gérard le Paladin.png
+/Jean-Michel Turbo.png
+/mamie Nitro.png
+/saucisse mécanique.png

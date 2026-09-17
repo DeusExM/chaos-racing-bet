@@ -43,7 +43,7 @@ configuration. Le résultat dépend uniquement des variations aléatoires de vit
 
 ## 3. Les 6 personnages
 
-6 identités purement cosmétiques (nom + couleur + silhouette + animation). Aucune ne modifie la
+6 identités purement cosmétiques (nom + couleur + visuel PNG + animation). Aucune ne modifie la
 simulation. Le roster vit dans `src/core/characters.ts` (données pures) et est figé :
 
 ```ts
@@ -245,7 +245,7 @@ cette référence ne doit être reproduit. Chaos Race doit avoir son **identité
   est déjà testée (le rendu n'écrit rien dans l'état) et devra le rester.
 
 Tant que le **Jalon 3D** de `ROADMAP.md` (P013.5) n'a pas tranché, **aucune dépendance 3D n'est
-installée** et le rendu reste le placeholder 2D de P005.
+installée** et le rendu reste le **2D actuel** (Phaser, avec les illustrations des six personnages).
 
 ### 5.2 HUD, retour d'événement, commentaire, son et voix (passe corrective)
 
@@ -281,6 +281,19 @@ que dessiné sous le panneau. En **téléphone paysage** (hauteur ≤
 présenté au podium. La vérification est **géométrique** : à plusieurs instants de la course, et en
 1280×720, 1920×1080 et 844×390, aucun personnage dessiné ne croise le rectangle du classement — une
 fraction de surface ne prouverait rien de la position.
+
+**Visuels des personnages (passe visuelle).** Les six coureurs ne sont plus des formes géométriques
+provisoires : chacun affiche son **illustration** (`public/assets/characters/`, une par personnage,
+associée par `src/render/characterAssets.ts` — la seule table du projet qui connaît un chemin
+d'asset). Le rendu ne choisit qu'une **hauteur** (`VIEW.CHARACTER_HEIGHT_PX = 73`) et déduit la largeur
+du ratio de l'image : une image n'est donc **jamais** écrasée en carré, et la résolution du fichier
+n'est jamais une taille d'affichage. Les fichiers servis font 320 px de haut (copies runtime produites
+par `tools/optimizeCharacterAssets.mjs`, ≈ 0,75 Mio au total), les originaux fournis (~1448×1086,
+~6,2 Mio) restant **intacts** hors du dépôt : c'est ce qui garde de la marge pour les écrans à haute
+densité tout en respectant le budget de ressources d'`AGENTS.md` §3.6. Le nom reste au-dessus du
+sprite, positionné à partir de la hauteur réellement affichée, et la visibilité (`setDrawn`) est
+calculée sur la **taille réellement dessinée** : les illustrations étant plus larges que hautes, un
+personnage qui ne tient pas entièrement dans la piste est masqué au profit de son marqueur de bord.
 
 **Relecture pendant une pause manuelle (passe corrective 2).** Pendant une pause du MJ, une petite
 barre apparaît sous les commandes : `−2 s`, une barre de temps, `+2 s`, et une lecture

@@ -34,8 +34,26 @@ export interface ViewConfig {
   readonly LANE_TOP_RATIO: number;
   /** Position verticale de la dernière voie, en fraction de la hauteur. */
   readonly LANE_BOTTOM_RATIO: number;
-  /** Taille d'un personnage, en pixels. */
-  readonly CHARACTER_SIZE_PX: number;
+  /**
+   * Hauteur affichée d'un personnage, en pixels logiques, pour l'arène de référence (1280×720).
+   *
+   * C'est la hauteur de l'**image** : les illustrations comportent une marge transparente de 4 à 11 %,
+   * donc la silhouette visible mesure 65 à 70 px, pour une cible d'environ 68 px. La largeur n'est
+   * jamais une constante : elle se déduit du ratio de la texture, si bien qu'une image n'est jamais
+   * écrasée en carré et que la résolution du fichier n'est jamais une taille d'affichage.
+   *
+   * Les fichiers servis font 320 px de haut (`tools/optimizeCharacterAssets.mjs`) : le rendu les
+   * réduit ici, mais garde de la marge pour les écrans à haute densité, où le canvas est agrandi.
+   */
+  readonly CHARACTER_HEIGHT_PX: number;
+  /**
+   * Hauteur affichée **minimale** d'un personnage, en pixels logiques.
+   *
+   * Plancher de lisibilité si la hauteur logique de l'arène changeait un jour : il conserve la même
+   * proportion que l'ancien minimum (≈ 40 % de la hauteur nominale) et ne s'applique jamais sur
+   * l'arène de référence.
+   */
+  readonly CHARACTER_MIN_HEIGHT_PX: number;
   /** Espacement des repères de distance du décor, en mètres. */
   readonly TRACK_TICK_STEP_M: number;
   /** Espacement des repères de distance **chiffrés**, en mètres. */
@@ -134,7 +152,8 @@ export const VIEW: ViewConfig = Object.freeze({
   CAMERA_SMOOTHING: 0.15,
   LANE_TOP_RATIO: 0.24,
   LANE_BOTTOM_RATIO: 0.86,
-  CHARACTER_SIZE_PX: 44,
+  CHARACTER_HEIGHT_PX: 73,
+  CHARACTER_MIN_HEIGHT_PX: 30,
   TRACK_TICK_STEP_M: 50,
   TRACK_LABEL_STEP_M: 250,
   TRACK_LABEL_POOL: 4,

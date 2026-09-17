@@ -800,10 +800,11 @@ permanente déjà présente (P004).
   corpus**, pas d'une exigence par course (le quota de 12 reste une borne **par segment**, jamais un
   objectif, et aucune réplique n'est forcée). Les deux valeurs du critère du leader sont séparées
   (1000 seeds : **66,90 %**, normatif ; 300 seeds : 66,33 %). L'explication du biais de distance ne
-  parle plus de « convexité » — la formule de gain de §7.2 est **linéaire** en `m` — mais d'un biais
-  **mesuré**, attribué à la combinaison réelle magnitudes/durées/poids + rampes + écrêtage +
-  interactions. `× 0,65` est présenté comme **le plus grand facteur conforme parmi les valeurs
-  testées**, pas comme un minimum mathématique.
+  parle plus de « convexité » **ni de linéarité** : la formule d'un événement isolé (§7.2) ne permet
+  pas d'en déduire la neutralité du catalogue (`t_rampe` dépend de `Δv`, rampes directionnelles,
+  écrêtage, interactions avec dérive et surges), donc le signe et l'amplitude du biais sont **établis
+  par la mesure du moteur réel**. `× 0,65` est présenté comme **le plus grand facteur conforme parmi
+  les valeurs testées**, pas comme un minimum mathématique.
 
 ---
 

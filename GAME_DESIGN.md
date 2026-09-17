@@ -386,10 +386,12 @@ Vitesses cibles maximales atteintes : `TURBO` `26,0 m/s`, `RACCOURCI` `27,6 m/s`
 `31,6 m/s` — toutes sous `SPEED.MAX = 48 m/s`, donc **aucun événement n'est écrasé par le plafond**.
 
 **Neutralité en distance (P010).** Le catalogue **n'est pas** neutre en distance : les événements
-**bonus** rapportent globalement plus de distance que les **malus** n'en retirent. Ce n'est pas une
-propriété de la formule de gain : le gain d'un événement isolé, `Δv × (D − t_rampe / 2)` (§7.2), est
-**linéaire** en `m` — elle ne penche ni du côté positif ni du côté négatif. Le biais est **mesuré**,
-et il provient de la combinaison réelle des effets suivants :
+**bonus** rapportent globalement plus de distance que les **malus** n'en retirent. **La formule d'un
+événement isolé (§7.2) ne suffit pas à déduire la neutralité du catalogue** : `t_rampe` dépend
+elle-même de `Δv`, les rampes sont directionnelles (`MAX_ACCEL ≠ MAX_DECEL`), les vitesses sont
+écrêtées et les événements interagissent avec la dérive et les surges. **Le signe et l'amplitude du
+biais global sont donc établis par la mesure du moteur réel**, pas par le calcul. Les effets en jeu
+sont :
 
 * **Magnitudes, durées et poids tels qu'ils sont tirés** dans le catalogue ci-dessus : les couples
   `TURBO`/`CHUTE` (poids 22 et 20) ne se compensent pas exactement, et rien ne garantit que la

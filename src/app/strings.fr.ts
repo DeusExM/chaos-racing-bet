@@ -140,10 +140,16 @@ export function formatPenaltyPercentFr(magnitude: number): string {
   return `${String(Math.round(Math.abs(magnitude) * 100))} % en moins`;
 }
 
-/** Rang ordinal : `1` → `« 1re »`, `2` → `« 2e »`, `3` → `« 3e »`… */
+/** Rang ordinal **masculin** — « un rang » : `1` → `« 1er »`, `2` → `« 2e »`, `3` → `« 3e »`… */
 function rankLabel(rank: number): string {
   const value = Math.trunc(rank);
-  return value === 1 ? '1re' : `${String(value)}e`;
+  return value === 1 ? '1er' : `${String(value)}e`;
+}
+
+/** Rang ordinal **féminin** — « une place » : `1` → `« 1re place »`, `2` → `« 2e place »`… */
+function placeLabel(rank: number): string {
+  const value = Math.trunc(rank);
+  return value === 1 ? '1re place' : `${String(value)}e place`;
 }
 
 /**
@@ -231,7 +237,7 @@ export const SPEAKER_LINES_FR: Readonly<Record<RaceFactType, readonly ((fact: Ra
     // magnitudes = [places gagnées, rang courant]
     LAST_COMEBACK: Object.freeze([
       (fact: RaceFact) => `${nameAt(fact, 0)} était dernier, le revoilà ${rankLabel(magnitudeAt(fact, 1))} : ${formatPlacesFr(magnitudeAt(fact, 0))} avalées !`,
-      (fact: RaceFact) => `Retour des abysses : ${nameAt(fact, 0)} quitte la cave et grimpe à la ${rankLabel(magnitudeAt(fact, 1))} place !`,
+      (fact: RaceFact) => `Retour des abysses : ${nameAt(fact, 0)} quitte la cave et grimpe à la ${placeLabel(magnitudeAt(fact, 1))} !`,
       (fact: RaceFact) => `${nameAt(fact, 0)} sort de la cave : ${formatPlacesFr(magnitudeAt(fact, 0))} de gagnées, ${rankLabel(magnitudeAt(fact, 1))} au classement !`,
       (fact: RaceFact) => `On l'avait enterré trop vite : ${nameAt(fact, 0)} remonte ${formatPlacesFr(magnitudeAt(fact, 0))} et pointe ${rankLabel(magnitudeAt(fact, 1))} !`,
       (fact: RaceFact) => `${nameAt(fact, 0)} fait le ménage dans le classement : ${formatPlacesFr(magnitudeAt(fact, 0))} de remontées, ${rankLabel(magnitudeAt(fact, 1))} !`,

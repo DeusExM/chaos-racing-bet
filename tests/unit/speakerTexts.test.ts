@@ -292,18 +292,35 @@ describe('P009-C : catalogue de textes', () => {
     }
   });
 
-  it('écrit le premier rang « 1re », et les suivants en « e »', () => {
+  it('écrit le premier rang « 1er », et les suivants en « e »', () => {
     const bonusRank1 = SPEAKER_LINES_FR.BIG_BONUS[4]?.(fact('BIG_BONUS', [1.35, 8, 1])) ?? '';
-    expect(bonusRank1).toContain('1re');
+    expect(bonusRank1).toContain('1er rang');
+    expect(bonusRank1).not.toContain('1re');
     expect(bonusRank1).not.toContain('1e ');
     expect(bonusRank1).not.toContain('100 %');
 
     const bonusRank2 = SPEAKER_LINES_FR.BIG_BONUS[4]?.(fact('BIG_BONUS', [1.35, 8, 2])) ?? '';
-    expect(bonusRank2).toContain('2e');
+    expect(bonusRank2).toContain('2e rang');
 
     const comebackRank1 = SPEAKER_LINES_FR.BIG_COMEBACK[0]?.(fact('BIG_COMEBACK', [3, 1])) ?? '';
-    expect(comebackRank1).toContain('1re');
+    expect(comebackRank1).toContain('1er');
+    expect(comebackRank1).not.toContain('1re');
     expect(comebackRank1).not.toContain('1e ');
+
+    // Aucun « 1re » ne doit subsister hors du féminin « 1re place ».
+    for (const type of SPEAKER_FACT_TYPES) {
+      const line = SPEAKER_LINES_FR[type][0]?.(sampleFact(type)) ?? '';
+      expect(line, `« ${line} »`).not.toMatch(/1re(?!\s+place)/);
+    }
+  });
+
+  it('accorde le féminin « 1re place » seulement là où « place » est écrit', () => {
+    const first = fact('LAST_COMEBACK', [2, 1]);
+    const line = SPEAKER_LINES_FR.LAST_COMEBACK[1]?.(first) ?? '';
+    expect(line).toContain('1re place');
+
+    const third = SPEAKER_LINES_FR.LAST_COMEBACK[1]?.(fact('LAST_COMEBACK', [2, 3])) ?? '';
+    expect(third).toContain('3e place');
   });
 
   it('tronque les distances de pointage au mètre, sans jamais les surestimer', () => {

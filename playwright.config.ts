@@ -30,6 +30,9 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     trace: 'retain-on-failure',
+    // Le HUD de P011 copie la seed : le test vérifie le presse-papiers **réel**, donc la permission
+    // de lecture doit être accordée au contexte. Chromium l'accorde par défaut à l'écriture.
+    permissions: ['clipboard-read', 'clipboard-write'],
   },
 
   projects: [

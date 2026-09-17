@@ -1,5 +1,5 @@
 import { CHARACTERS } from '../core/characters';
-import { computeRanks, gapMeters, sortByRank } from '../core/ranking';
+import { computeRanks, gapMeters, gapSeconds, sortByRank } from '../core/ranking';
 import type { CharacterId, RaceState } from '../core/types';
 
 /**
@@ -8,7 +8,7 @@ import type { CharacterId, RaceState } from '../core/types';
  * Ce module existe pour qu'il n'y ait qu'**une seule** façon de calculer un classement dans tout le
  * projet : le rendu, les hooks de test et l'application passent tous par ici, donc aucun d'eux ne
  * peut afficher un classement qui diverge du noyau. Il ne contient aucune règle : il ne fait que
- * mettre en forme ce que `computeRanks`, `sortByRank` et `gapMeters` renvoient déjà.
+ * mettre en forme ce que `computeRanks`, `sortByRank`, `gapMeters` et `gapSeconds` renvoient déjà.
  */
 
 /** Une ligne du classement affiché. */
@@ -21,6 +21,12 @@ export interface LeaderboardRow {
   readonly distance: number;
   /** Écart avec le leader, en mètres. Exactement `0` pour le leader. */
   readonly gapMeters: number;
+  /**
+   * Écart avec le leader, en secondes, par la convention du noyau (`core/ranking.ts`) :
+   * `gap_m / SPEED.BASE`. Ce n'est **pas** un temps de passage mesuré, mais la durée qu'il faudrait
+   * au poursuivant pour combler l'écart à la vitesse nominale — la seule convention du projet.
+   */
+  readonly gapSeconds: number;
 }
 
 /** Noms affichables, indexés par identifiant stable. */
@@ -45,6 +51,7 @@ export function buildLeaderboard(
 ): readonly LeaderboardRow[] {
   const ranks = computeRanks(distances, ids);
   const gaps = gapMeters(distances);
+  const gapsS = gapSeconds(distances);
 
   return sortByRank(distances, ids).map((index) => {
     const id = ids[index];
@@ -57,6 +64,7 @@ export function buildLeaderboard(
       rank: ranks[index] ?? 0,
       distance: distances[index] ?? 0,
       gapMeters: gaps[index] ?? 0,
+      gapSeconds: gapsS[index] ?? 0,
     };
   });
 }

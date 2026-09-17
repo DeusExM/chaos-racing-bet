@@ -3,15 +3,16 @@ import { Scene } from 'phaser';
 import { CHARACTERS } from '../../core/characters';
 import type { RaceSimulation } from '../../sim/RaceSimulation';
 import type { SimPhase } from '../../sim/types';
-import { leaderboardOf } from '../../sim/leaderboard';
 import type { SpeakerLine } from '../subtitle';
 import type { UiText } from '../uiText';
 import { VIEW } from '../viewConfig';
 import { installViewDebug } from '../viewDebug';
 import { CameraRig } from '../view/CameraRig';
 import { CharacterSprite } from '../view/CharacterSprite';
+import { buildDebugModel } from '../view/debugModel';
 import { DebugPanel } from '../view/DebugPanel';
-import { LeaderboardView } from '../view/LeaderboardView';
+import { Hud } from '../view/Hud';
+import { buildHudModel } from '../view/hudModel';
 import { SubtitleBanner } from '../view/SubtitleBanner';
 import { TrackView } from '../view/TrackView';
 
@@ -36,10 +37,14 @@ export interface CommentaryView {
 export interface RaceSceneOptions {
   readonly simulation: RaceSimulation;
   readonly text: UiText;
-  readonly leaderboard: HTMLElement | null;
+  /** Racine du HUD en HTML : le `Hud` en devient propriétaire et y installe ses blocs. */
+  readonly hudRoot: HTMLElement | null;
   readonly status: HTMLElement | null;
   /** Bannière de checkpoint : visible uniquement pendant la pause réelle. */
   readonly banner: HTMLElement | null;
+  readonly leaderboard: HTMLElement | null;
+  /** Valeur de seed : `app/` y écrit la seed de l'URL, le HUD la rend copiable. */
+  readonly seedValue: HTMLElement | null;
   /** Bouton Pause / Reprendre : son libellé suit la phase, la commande est câblée par `app/`. */
   readonly pauseButton: HTMLElement | null;
   readonly debugPanel: HTMLElement | null;
@@ -76,8 +81,12 @@ function statusLabelFor(phase: SimPhase, text: UiText): string {
  * est exactement ce que le noyau a calculé, et non une reconstruction parallèle.
  *
  * L'ordre des opérations dans `update()` est volontaire : le temps avance d'abord, puis tout
- * (sprites, classement, debug) est lu **dans le même instantané**. Le classement affiché ne peut
- * donc pas être décalé d'une frame par rapport aux positions affichées.
+ * (sprites, HUD, debug) est lu **dans le même instantané**. Le HUD ne peut donc pas être décalé
+ * d'une frame par rapport aux positions affichées.
+ *
+ * La scène ne calcule rien de ce qui est affiché : elle assemble un `HudModel` (`hudModel.ts`) et un
+ * `DebugModel` (`debugModel.ts`) à partir de cet instantané, et les confie aux vues. Le classement
+ * affiché vient de `sim/leaderboard.ts`, seule source de classement du projet.
  */
 export class RaceScene extends Scene {
   private readonly options: RaceSceneOptions;
@@ -88,7 +97,7 @@ export class RaceScene extends Scene {
 
   private track: TrackView | null = null;
 
-  private leaderboard: LeaderboardView | null = null;
+  private hud: Hud | null = null;
 
   private debug: DebugPanel | null = null;
 
@@ -117,9 +126,16 @@ export class RaceScene extends Scene {
       (character, index) => new CharacterSprite(this, character, index),
     );
 
-    if (this.options.leaderboard !== null) {
-      this.leaderboard = new LeaderboardView(this.options.leaderboard, this.options.text);
+    // Le classement est tenu par le HUD : celui-ci en est le **seul** écrivain, donc l'ordre affiché
+    // ne peut pas diverger d'une seconde implémentation qui écrirait les mêmes lignes.
+    if (this.options.hudRoot !== null) {
+      this.hud = new Hud(this.options.hudRoot, this.options.text, {
+        banner: this.options.banner,
+        leaderboard: this.options.leaderboard,
+        seedValue: this.options.seedValue,
+      });
     }
+
     if (this.options.debug && this.options.debugPanel !== null) {
       this.debug = new DebugPanel(this.options.debugPanel, this.options.text);
     }
@@ -134,6 +150,13 @@ export class RaceScene extends Scene {
           })),
         camera: () => ({ leftM: this.rig.left, windowM: this.rig.span }),
         subtitle: () => this.subtitle?.visibleText() ?? '',
+        // La photographie du HUD vient du HUD lui-même : elle décrit ce qu'il vient d'écrire, et non
+        // une reconstruction parallèle du modèle de la frame.
+        hud: () => this.hud?.snapshot() ?? null,
+        // Le chemin de copie est celui du bouton : le hook ne fait que l'appeler et rendre son
+        // résultat, il ne copie rien lui-même et n'écrit jamais dans la simulation.
+        hudCopy: () => this.hud?.copySeed() ?? Promise.resolve(false),
+        hudCopyConfirmed: () => this.hud?.copyConfirmed ?? false,
       });
     }
 
@@ -146,6 +169,8 @@ export class RaceScene extends Scene {
 
     // 2. Un unique instantané, lu par toutes les vues de cette frame.
     const state = this.options.simulation.view;
+    const phase = this.options.simulation.phase;
+    const checkpoint = this.options.simulation.checkpoint;
 
     // 3. Le cadrage se déduit des distances : jamais l'inverse.
     this.rig.follow(state.characters.map((character) => character.x));
@@ -170,13 +195,22 @@ export class RaceScene extends Scene {
       }
     }
 
-    this.leaderboard?.update(leaderboardOf(state));
+    // Le HUD est construit une seule fois par frame, à partir de l'instantané déjà lu : le classement,
+    // les écarts et les marqueurs qu'il affiche décrivent donc exactement le même instant. Il en est
+    // le **seul** écrivain, et les lignes viennent de `sim/leaderboard.ts` (source unique du noyau).
+    const hudModel = buildHudModel(state, phase, checkpoint);
+    this.hud?.update(hudModel);
+
     // Le `tSim` courant vient de l'instantané déjà lu : le commentaire n'a aucun accès au moteur,
     // il reçoit un simple nombre, ce qui lui permet de repoller un fait en file dès qu'il devient
     // éligible — sans attendre qu'un nouveau fait arrive.
     this.updateSubtitle(delta, state.tSim);
     this.updateHud();
-    this.debug?.update(state, this.options.simulation.phase, this.options.simulation.timeScale);
+    if (this.debug !== null) {
+      this.debug.update(
+        buildDebugModel(state, phase, this.options.simulation.timeScale, hudModel.rows),
+      );
+    }
   }
 
   /**
@@ -202,11 +236,8 @@ export class RaceScene extends Scene {
   }
 
   /**
-   * État, bannière de checkpoint et libellé du bouton de pause, en HTML : lisible même quand le
-   * canvas est réduit, et jamais réécrit sans changement.
-   *
-   * La bannière n'apparaît **que** pendant la pause réelle : elle se déduit de la phase, donc elle
-   * disparaît d'elle-même à la reprise, sans minuterie ni animation à entretenir.
+   * État et libellé du bouton de pause, en HTML : lisible même quand le canvas est réduit, et jamais
+   * réécrit sans changement. Le reste du HUD est tenu par `Hud`, qui reçoit le même instantané.
    */
   private updateHud(): void {
     const phase = this.options.simulation.phase;
@@ -216,16 +247,6 @@ export class RaceScene extends Scene {
       this.options.pauseButton,
       phase === 'userPaused' ? this.options.text.resumeButton : this.options.text.pauseButton,
     );
-
-    const checkpoint = this.options.simulation.checkpoint;
-    const showBanner = phase === 'checkpointPause' && checkpoint !== null;
-    setTextIfChanged(
-      this.options.banner,
-      showBanner ? `${this.options.text.checkpointBanner} ${String(checkpoint)}` : '',
-    );
-    if (this.options.banner !== null) {
-      this.options.banner.hidden = !showBanner;
-    }
   }
 
   /** Réapplique la géométrie quand la taille du canvas change. */

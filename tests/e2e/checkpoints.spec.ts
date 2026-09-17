@@ -87,8 +87,16 @@ test('les trois bannières de checkpoint apparaissent puis disparaissent', async
   expect(numbers).toEqual([1, 2, 3]);
 
   for (const sample of pauses) {
+    const number = sample.checkpoint ?? 0;
     expect(sample.bannerHidden, 'bannière visible pendant la pause').toBe(false);
-    expect(sample.banner).toBe(`CHECKPOINT ${String(sample.checkpoint ?? 0)}`);
+    // Le titre porte le numéro du pointage **et** l'instant de la borne (45 / 90 / 135 s), pris dans
+    // le noyau : c'est ce qui rend le bandeau utile, au-delà du simple numéro.
+    expect(sample.banner).toContain(`Pointage ${String(number)}`);
+    // `\u00A0` : l'espace insécable est celle des formateurs du HUD, et elle évite un retour à la
+    // ligne entre le nombre et son unité.
+    expect(sample.banner).toContain(
+      `· ${String(number * RACE_CONFIG.SEGMENT_DURATION_S)}\u00A0s`,
+    );
   }
 
   // Hors pause, elle est masquée et vide : elle ne reste jamais affichée en cours de segment.

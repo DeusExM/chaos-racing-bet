@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import { CHARACTER_IDS } from '../../src/core/characters';
-import { RACE_CONFIG } from '../../src/core/config';
+import { RACE_CONFIG, SPEED } from '../../src/core/config';
 import { OvertakeTracker } from '../../src/core/overtakes';
 import { computeRanks, isLeaderChange } from '../../src/core/ranking';
 import { VIEW } from '../../src/render/viewConfig';
@@ -124,11 +124,16 @@ test('le classement affiché est exactement celui du noyau', async ({ page }) =>
       const expected = sample.ranks.find((candidate) => candidate.id === row.id);
       expect(expected, `le noyau connaît ${row.id}`).toBeDefined();
       expect(row.name.length, 'le nom est affiché').toBeGreaterThan(0);
-      // L'écart est affiché arrondi au dixième de mètre : on tolère un demi-dixième.
-      const displayed = Number(row.gapText.replace(',', '.').replace(/[^0-9.]/g, ''));
+      // Les deux écarts sont affichés arrondis au dixième : on tolère un demi-dixième.
+      const displayedMeters = Number(row.gapText.replace(',', '.').replace(/[^0-9.]/g, ''));
       expect(
-        Math.abs(displayed - (expected?.gapMeters ?? 0)),
-        `écart affiché pour ${row.id} (frame ${String(sample.steps)})`,
+        Math.abs(displayedMeters - (expected?.gapMeters ?? 0)),
+        `écart en mètres affiché pour ${row.id} (frame ${String(sample.steps)})`,
+      ).toBeLessThanOrEqual(0.051);
+      const displayedSeconds = Number(row.gapSecondsText.replace(',', '.').replace(/[^0-9.]/g, ''));
+      expect(
+        Math.abs(displayedSeconds - (expected?.gapMeters ?? 0) / SPEED.BASE),
+        `écart en secondes affiché pour ${row.id} (frame ${String(sample.steps)})`,
       ).toBeLessThanOrEqual(0.051);
     }
     comparedFrames += 1;

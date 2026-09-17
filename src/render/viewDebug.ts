@@ -1,4 +1,5 @@
 import type { CharacterId } from '../core/types';
+import type { HudDebugSnapshot } from './view/Hud';
 
 /**
  * Debug du **rendu** : `window.__CHAOS_RACE_VIEW__`.
@@ -18,6 +19,8 @@ export interface SpriteView {
   readonly screenY: number;
 }
 
+export type { HudDebugSnapshot };
+
 export interface CameraView {
   /** Bord gauche de la fenêtre, en mètres. */
   readonly leftM: number;
@@ -35,6 +38,25 @@ export interface ChaosRaceViewDebugApi {
    * un canvas n'est pas interrogeable depuis le DOM.
    */
   subtitle(): string;
+  /**
+   * Modèle réellement affiché par le HUD à la dernière frame.
+   *
+   * C'est la lecture qui rend vérifiable la DoD du HUD : un test compare ce que le HUD a affiché —
+   * ordre du classement, écarts, positions des marqueurs — à l'état du noyau lu **dans la même
+   * frame**. Il ne s'agit pas d'une seconde source de vérité : c'est le modèle de la frame affichée,
+   * et `null` tant qu'aucune frame n'a été affichée.
+   */
+  hud(): HudDebugSnapshot | null;
+  /**
+   * Chemin de copie de la seed, avec son résultat réel.
+   *
+   * Il existe pour qu'un test puisse exercer la **dégradation** : quand l'API Clipboard est absente
+   * ou refusée, la copie doit retomber sur la sélection et ne jamais prétendre avoir réussi. Le
+   * hook ne modifie rien — il appelle exactement l'action du bouton.
+   */
+  hudCopy(): Promise<boolean>;
+  /** Vrai tant que la confirmation de copie est affichée. */
+  hudCopyConfirmed(): boolean;
 }
 
 declare global {

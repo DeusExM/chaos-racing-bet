@@ -58,17 +58,15 @@ function resolveSeedText(): string {
   return generated;
 }
 
-/** Affiche la seed à l'écran : elle doit rester lisible et copiable en permanence. */
-function displaySeed(seedText: string): void {
-  const element = document.getElementById('seed-value');
-  if (element !== null) {
-    element.textContent = seedText;
-  }
-}
-
 /** Récupère un élément par identifiant, ou `null` s'il est absent. */
 function elementById(id: string): HTMLElement | null {
   const element = document.getElementById(id);
+  return element instanceof HTMLElement ? element : null;
+}
+
+/** Récupère un élément par sélecteur, ou `null` s'il est absent. */
+function querySelector(selector: string): HTMLElement | null {
+  const element = document.querySelector(selector);
   return element instanceof HTMLElement ? element : null;
 }
 
@@ -80,7 +78,13 @@ function bootstrap(): void {
 
   const params = new URLSearchParams(window.location.search);
   const seedText = resolveSeedText();
-  displaySeed(seedText);
+
+  // La seed affichée est écrite ici, une seule fois : le HUD la recopie ensuite depuis son propre
+  // élément. `app/` reste donc la seule couche qui décide de la seed, et le HUD ne fait que l'afficher.
+  const seedValue = elementById('seed-value');
+  if (seedValue !== null) {
+    seedValue.textContent = seedText;
+  }
 
   // Le mode test ne touche pas au noyau : il ne change que le temps réel.
   const preset = params.get(FAST_PARAM) === '1' ? SIM_PRESETS.fast : SIM_PRESETS.normal;
@@ -115,9 +119,11 @@ function bootstrap(): void {
     parent,
     simulation,
     text: UI_TEXT_FR,
-    leaderboard: elementById('leaderboard'),
+    hudRoot: querySelector('.hud'),
     status: elementById('race-status'),
     banner: elementById('checkpoint-banner'),
+    leaderboard: elementById('leaderboard'),
+    seedValue,
     pauseButton,
     debugPanel: params.get(DEBUG_PARAM) === '1' ? elementById('debug') : null,
     debug: params.get(DEBUG_PARAM) === '1',

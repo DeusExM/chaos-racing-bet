@@ -12,9 +12,12 @@ export interface GameOptions {
   readonly parent: HTMLElement;
   readonly simulation: RaceSimulation;
   readonly text: UiText;
-  readonly leaderboard: HTMLElement | null;
+  /** Racine du HUD en HTML (`.hud`) : le HUD y installe ses blocs. */
+  readonly hudRoot: HTMLElement | null;
   readonly status: HTMLElement | null;
   readonly banner: HTMLElement | null;
+  readonly leaderboard: HTMLElement | null;
+  readonly seedValue: HTMLElement | null;
   readonly pauseButton: HTMLElement | null;
   readonly debugPanel: HTMLElement | null;
   readonly debug: boolean;
@@ -36,9 +39,11 @@ export function createGame(options: GameOptions): void {
   const raceScene = new RaceScene({
     simulation: options.simulation,
     text: options.text,
-    leaderboard: options.leaderboard,
+    hudRoot: options.hudRoot,
     status: options.status,
     banner: options.banner,
+    leaderboard: options.leaderboard,
+    seedValue: options.seedValue,
     pauseButton: options.pauseButton,
     debugPanel: options.debugPanel,
     debug: options.debug,

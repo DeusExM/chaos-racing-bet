@@ -53,26 +53,16 @@ body {
   text-align: center;
 }
 
-.seed {
-  margin: 0;
-  color: var(--muted);
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 0.8rem;
-  letter-spacing: 0.08em;
-}
-
-.seed span {
-  color: var(--text);
-  user-select: all;
-}
-
 /*
  * L'arène garde toujours le rapport 16:9 du canvas : le HUD en HTML se superpose alors exactement
  * au canvas, sans bandes noires, donc sans décalage possible entre les deux.
+ *
+ * La soustraction correspond à la hauteur réellement occupée **hors** arène : en-tête, contrôles et
+ * marges. La seed n'en fait plus partie depuis P011 : elle vit dans le HUD, donc dans l'arène.
  */
 .stage {
   position: relative;
-  width: min(100%, 1280px, calc((100vh - 230px) * 16 / 9));
+  width: min(100%, 1280px, calc((100vh - 190px) * 16 / 9));
   aspect-ratio: 16 / 9;
 }
 
@@ -91,54 +81,70 @@ body {
   z-index: 0;
 }
 
+/*
+ * HUD (P011) : grille à deux colonnes posée **dans** l'arène, donc à l'échelle du canvas.
+ *
+ * Le HUD ne capture aucun clic (`pointer-events: none`) : seuls ses rares éléments interactifs, comme
+ * le bouton de copie de la seed, les réactivent. La course reste donc entièrement cliquable.
+ *
+ * Répartition : l'état en haut, la mini-carte et la seed en bas, le classement et le chrono dans la
+ * colonne de droite. Aucun bloc n'est positionné en coordonnées absolues, ce qui garantit qu'ils ne
+ * peuvent pas se chevaucher à une résolution donnée.
+ */
 .hud {
   position: absolute;
   inset: 0;
   z-index: 2;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 0.5rem 0.6rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 0.25rem 0.4rem;
+  align-items: start;
+  padding: 0.4rem 0.5rem;
   pointer-events: none;
+  font-size: clamp(0.58rem, 1.05vw, 0.82rem);
+  --hud-row-font: clamp(0.58rem, 1.05vw, 0.82rem);
 }
 
 .hud-status {
+  grid-column: 1 / -1;
+  justify-self: start;
   margin: 0;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
   background: #00000099;
   color: var(--accent);
-  font-size: clamp(0.6rem, 1.4vw, 0.85rem);
+  font-size: clamp(0.58rem, 1.2vw, 0.8rem);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.hud-panel {
-  align-self: flex-end;
-  min-width: 12rem;
-  max-width: 46%;
-  padding: 0.4rem 0.55rem;
+/*
+ * Bandeau de checkpoint : centré sur l'arène, visible uniquement pendant la pause réelle.
+ * Volontairement sobre — aucune animation, aucun effet : le polish appartient à P014.
+ */
+.hud-checkpoint {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  justify-self: center;
+  max-width: min(100%, 22rem);
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--accent);
   border-radius: 10px;
-  background: #05070fcc;
-  border: 1px solid var(--border);
+  background: #000000cc;
+  text-align: center;
 }
 
-/*
- * Bannière de checkpoint : centrée sur l'arène, visible uniquement pendant la pause réelle.
- * Volontairement sobre — aucune animation, aucun effet : le polish appartient à P015.
- */
+.hud-checkpoint[hidden] {
+  display: none;
+}
+
 .hud-banner {
-  align-self: center;
   margin: 0;
-  padding: 0.3rem 1rem;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  background: #000000cc;
   color: var(--accent);
-  font-size: clamp(0.75rem, 2.4vw, 1.5rem);
+  font-size: clamp(0.7rem, 1.8vw, 1.15rem);
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
@@ -146,22 +152,115 @@ body {
   display: none;
 }
 
-.hud-title {
-  margin: 0 0 0.25rem;
+.hud-splits {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 0.6rem;
+  margin-top: 0.15rem;
+  text-align: left;
+}
+
+.hud-split {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.35rem;
   color: var(--muted);
-  font-size: clamp(0.55rem, 1.2vw, 0.75rem);
+  white-space: nowrap;
+}
+
+.hud-split-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-split-gap {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chrono + segment : cellule haute de la colonne de droite. */
+.hud-time {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  min-width: 7.5rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #05070fcc;
+  text-align: right;
+}
+
+.hud-time-value,
+.hud-segment-value {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hud-time-value {
+  font-size: 1.15em;
+}
+
+.hud-segment-value {
+  color: var(--muted);
+}
+
+/* Classement : panneau existant, replacé dans la cellule basse de la colonne de droite. */
+.hud-panel {
+  grid-column: 2;
+  grid-row: 4;
+  justify-self: end;
+  align-self: end;
+  min-width: 10.5rem;
+  max-width: 15rem;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  border-radius: 10px;
+  background: #05070fcc;
+  border: 1px solid var(--border);
+}
+
+.hud-title {
+  margin: 0 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.82em;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .hud-row {
   display: grid;
-  grid-template-columns: 1.4rem 1fr auto;
-  gap: 0.35rem;
+  grid-template-columns: 1.2rem minmax(0, 1fr) auto auto;
+  gap: 0.3rem;
   align-items: baseline;
-  font-size: clamp(0.6rem, 1.5vw, 0.9rem);
-  line-height: 1.35;
+  line-height: 1.3;
   white-space: nowrap;
+  /*
+   * Taille de police explicite pour les lignes du classement (P011). Elle est **nommée** parce que
+   * c'est l'information la plus dense du HUD et qu'elle est vérifiée par les tests de responsive :
+   * une valeur héritée se remettrait à glisser dès qu'un parent changerait d'échelle.
+   */
+  font-size: var(--hud-row-font);
+}
+
+/* Seed : rangée 1, colonne 1. En haut à gauche, sous le statut, à l'écart du classement. */
+.hud-seed {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: start;
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.15rem 0.4rem;
+  border-radius: 999px;
+  background: #00000080;
+}
+
+.hud-row.is-leader .hud-name,
+.hud-row.is-leader .hud-rank {
+  color: var(--accent);
 }
 
 .hud-rank {
@@ -174,9 +273,117 @@ body {
   text-overflow: ellipsis;
 }
 
-.hud-gap {
+.hud-gap,
+.hud-gap-seconds {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+.hud-gap-seconds {
+  opacity: 0.8;
+}
+
+/* Mini-carte : première colonne de la rangée basse, à gauche de la seed. */
+.hud-minimap {
+  grid-column: 1;
+  grid-row: 4;
+  align-self: end;
+  min-width: 0;
+}
+
+.hud-track {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.hud-track-bound {
+  color: var(--muted);
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hud-rail {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 3rem;
+  height: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #05070fcc;
+}
+
+.hud-markers {
+  position: absolute;
+  inset: 0;
+  padding: 0 0.35rem;
+}
+
+.hud-marker {
+  position: absolute;
+  top: 50%;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-left: -0.275rem;
+  border: 1px solid #05070f;
+  border-radius: 50%;
+  transform: translateY(-50%);
+}
+
+.hud-marker[data-overflow='1'] {
+  outline: 2px solid var(--accent);
+}
+
+/* Dépassement de l'échelle : signalé à l'extrémité de la piste, jamais hors de la mini-carte. */
+.hud-overflow {
+  position: absolute;
+  top: -0.9rem;
+  right: 0;
+  color: var(--accent);
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Seed : copiable, dans la cellule haute de la colonne de gauche (voir `.hud-seed` plus haut). */
+.hud-seed-label {
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hud-seed-value {
+  color: var(--text);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  letter-spacing: 0.06em;
+  user-select: all;
+}
+
+.hud-seed-copy {
+  pointer-events: auto;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #16203c;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.hud-seed-copy:hover {
+  border-color: var(--accent);
+}
+
+.hud-seed-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.hud-seed-state {
+  color: var(--accent);
+  white-space: nowrap;
 }
 
 .controls {
@@ -242,5 +449,38 @@ body {
     padding: 0.35rem 0.7rem;
     min-width: 5.5rem;
     font-size: 0.8rem;
+  }
+
+  /*
+   * Le HUD garde ses informations essentielles et abandonne le confort : les bornes chiffrées de la
+   * mini-carte et les titres de bloc disparaissent, la seed se réduit à sa valeur copiable. Rien
+   * d'essentiel — classement, chrono, segment, seed — ne quitte l'écran.
+   */
+  .hud {
+    gap: 0.15rem 0.3rem;
+    padding: 0.25rem 0.3rem;
+    font-size: 0.55rem;
+  }
+
+  .hud-minimap .hud-title,
+  .hud-time .hud-title,
+  .hud-track-bound,
+  .hud-seed-label {
+    display: none;
+  }
+
+  .hud-status {
+    font-size: 0.55rem;
+  }
+
+  .hud-time,
+  .hud-panel {
+    min-width: 8.5rem;
+    padding: 0.2rem 0.35rem;
+  }
+
+  .hud-row {
+    grid-template-columns: 0.8rem minmax(0, 1fr) auto auto;
+    gap: 0.25rem;
   }
 }

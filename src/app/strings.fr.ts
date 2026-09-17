@@ -33,6 +33,26 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   debugSpeed: 'v',
   debugDrift: 'drift',
   debugSurge: 'surge',
+  debugEvent: 'événement',
+  debugEventBonus: 'bonus événement',
+  debugGap: 'écart',
+  debugNoEvent: 'aucun',
+  debugSegment: 'segment',
+
+  minimapTitle: 'Piste',
+  minimapStart: '0',
+  minimapEnd: 'échelle nominale',
+  timeTitle: 'Chrono',
+  timeLabel: 'temps simulé',
+  segmentLabel: 'segment',
+  seedLabel: 'Seed',
+  copySeedButton: 'Copier',
+  copySeedDone: 'Copié !',
+  // Le rendu accole cette unité à l'écart en secondes du classement.
+  gapSecondsLabel: 's',
+  // Le rendu accole à ces libellés le numéro de checkpoint et l'instant simulé.
+  checkpointTitle: 'Pointage',
+  checkpointLeaderSplit: 'en tête',
 
   nominalScale: 'échelle nominale',
 

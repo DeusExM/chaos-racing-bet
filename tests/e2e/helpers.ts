@@ -1,5 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
+import type { HudDebugSnapshot } from '../../src/render/viewDebug';
+
 /**
  * Helpers des tests E2E.
  *
@@ -30,6 +32,8 @@ export interface HudRowSample {
   readonly rank: number;
   readonly name: string;
   readonly gapText: string;
+  /** Écart en secondes, tel qu'affiché (virgule française). */
+  readonly gapSecondsText: string;
 }
 
 export interface FrameSample {
@@ -39,6 +43,8 @@ export interface FrameSample {
   readonly phase: string;
   /** Phase **temps réel** de `RaceSimulation` : `countdown`, `checkpointPause`, `userPaused`, … */
   readonly simPhase: string;
+  /** Numéro du segment courant (1 à 4), `0` hors course. */
+  readonly segment: number;
   /** Numéro du checkpoint en pause, sinon `null`. */
   readonly checkpoint: number | null;
   /** Texte de la bannière de checkpoint dans cette frame (`''` si aucune). */
@@ -52,6 +58,8 @@ export interface FrameSample {
   readonly camera: CameraSample;
   readonly ranks: readonly RankSample[];
   readonly hud: readonly HudRowSample[];
+  /** Modèle réellement affiché par le HUD dans cette frame (P011), `null` avant la première frame. */
+  readonly hudModel: HudDebugSnapshot | null;
 }
 
 export interface LeaderboardRowView {
@@ -59,6 +67,10 @@ export interface LeaderboardRowView {
   readonly rank: number;
   readonly name: string;
   readonly gapMeters: number;
+  /** Écart en secondes, tel qu'affiché. */
+  readonly gapSeconds: number;
+  /** Vrai pour la ligne du leader. */
+  readonly leader: boolean;
 }
 
 export interface ConsoleWatch {
@@ -169,6 +181,7 @@ export async function collectRace(page: Page, maxFrames = 4000): Promise<FrameSa
           rank: Number(row.getAttribute('data-rank') ?? '0'),
           name: row.querySelector('.hud-name')?.textContent ?? '',
           gapText: row.querySelector('.hud-gap')?.textContent ?? '',
+          gapSecondsText: row.querySelector('.hud-gap-seconds')?.textContent ?? '',
         }));
 
         samples.push({
@@ -176,6 +189,7 @@ export async function collectRace(page: Page, maxFrames = 4000): Promise<FrameSa
           tSim: state.tSim,
           phase: state.phase.kind,
           simPhase: api.phase(),
+          segment: api.segment(),
           checkpoint: api.checkpoint(),
           banner: document.querySelector('[data-testid="checkpoint-banner"]')?.textContent ?? '',
           bannerHidden:
@@ -195,6 +209,7 @@ export async function collectRace(page: Page, maxFrames = 4000): Promise<FrameSa
             gapMeters: row.gapMeters,
           })),
           hud,
+          hudModel: view.hud(),
         });
 
         if (api.phase() === 'finished' || samples.length >= limit) {
@@ -215,12 +230,15 @@ export async function readLeaderboard(page: Page): Promise<LeaderboardRowView[]>
   return page.locator('[data-testid="leaderboard-row"]').evaluateAll((rows) =>
     rows.map((row) => {
       const gapText = row.querySelector('.hud-gap')?.textContent ?? '';
+      const secondsText = row.querySelector('.hud-gap-seconds')?.textContent ?? '';
       return {
         id: row.getAttribute('data-character-id') ?? '',
         rank: Number(row.getAttribute('data-rank') ?? '0'),
         name: row.querySelector('.hud-name')?.textContent ?? '',
         // Le rendu affiche la virgule décimale française : on la ramène à un nombre comparable.
         gapMeters: Number(gapText.replace(',', '.').replace(/[^0-9.]/g, '')),
+        gapSeconds: Number(secondsText.replace(',', '.').replace(/[^0-9.]/g, '')),
+        leader: row.getAttribute('data-leader') === '1',
       };
     }),
   );
@@ -258,4 +276,59 @@ export async function referenceDistances(page: Page, seed: string): Promise<numb
     }
     return [...api.runToCompletion(value).distances];
   }, seed);
+}
+
+/** Résultat de référence complet (classement et distances) d'une seed, sans rendu. */
+export async function referenceResult(
+  page: Page,
+  seed: string,
+): Promise<{ ranking: string[]; distances: number[] }> {
+  await waitForHooks(page);
+  return page.evaluate((value) => {
+    const api = window.__CHAOS_RACE__;
+    if (api === undefined) {
+      throw new Error('hooks absents');
+    }
+    const result = api.runToCompletion(value);
+    return { ranking: [...result.ranking], distances: [...result.distances] };
+  }, seed);
+}
+
+/**
+ * Modèle du HUD réellement affiché à la dernière frame, plus l'état du noyau lu **dans le même
+ * appel** : la comparaison entre les deux ne peut donc pas être décalée d'une frame.
+ */
+export async function readHudFrame(page: Page): Promise<{
+  hudModel: HudDebugSnapshot;
+  distances: number[];
+  ranks: { id: string; rank: number; gapMeters: number }[];
+  tSim: number;
+  steps: number;
+  segment: number;
+}> {
+  await waitForHooks(page);
+  return page.evaluate(() => {
+    const api = window.__CHAOS_RACE__;
+    const view = window.__CHAOS_RACE_VIEW__;
+    if (api === undefined || view === undefined) {
+      throw new Error('hooks absents');
+    }
+    const hudModel = view.hud();
+    if (hudModel === null) {
+      throw new Error('le HUD n’a encore affiché aucune frame');
+    }
+    const state = api.state();
+    return {
+      hudModel,
+      distances: state.characters.map((character) => character.x),
+      ranks: api.ranks().map((row) => ({
+        id: row.id,
+        rank: row.rank,
+        gapMeters: row.gapMeters,
+      })),
+      tSim: state.tSim,
+      steps: state.steps,
+      segment: api.segment(),
+    };
+  });
 }

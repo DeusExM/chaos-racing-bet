@@ -283,6 +283,17 @@ describe('classement affichable', () => {
     expect(rows.every((row) => row.gapMeters === 0)).toBe(true);
   });
 
+  it('exprime l’écart au leader en secondes par la convention du noyau', () => {
+    const rows = buildLeaderboard([100, 60, 80], ['c0', 'c1', 'c2']);
+
+    // Ordre : c0 (100), c2 (80), c1 (60). L'écart en secondes est `gap_m / SPEED.BASE`, la même
+    // convention que `core/ranking.ts` : le HUD n'en invente pas une seconde.
+    expect(rows.map((row) => row.id)).toEqual(['c0', 'c2', 'c1']);
+    expect(rows.map((row) => row.gapMeters)).toEqual([0, 20, 40]);
+    expect(rows.map((row) => row.gapSeconds)).toEqual([0, 20 / SPEED.BASE, 40 / SPEED.BASE]);
+    expect(rows[0]?.gapSeconds).toBe(0);
+  });
+
   it('n’écrit jamais dans les distances du noyau', () => {
     const distances = [30, 10, 20];
     const snapshot = [...distances];

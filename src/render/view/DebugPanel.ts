@@ -1,18 +1,23 @@
-import type { RaceState } from '../../core/types';
-import type { SimPhase } from '../../sim/types';
 import type { UiText } from '../uiText';
+import type { DebugModel } from './debugModel';
 
 /**
- * Panneau de debug (`?debug=1`).
+ * Panneau de debug (`?debug=1`), affiché en HTML sous l'arène.
  *
- * Il n'affiche que des valeurs lues dans l'état du noyau : `tSim`, nombre de pas, distances,
- * vitesses, drift, surge. C'est un outil de mise au point, pas une interface de jeu, et il ne
- * participe jamais au rendu de la course.
+ * C'est une **vue en lecture seule** : il reçoit un `DebugModel` déjà extrait de l'état du noyau et
+ * se contente de l'écrire. Il n'a aucun accès à `RaceSimulation`, à `RaceEngine` ou à un état
+ * mutable — il ne peut donc pas provoquer un pas supplémentaire, consommer un RNG ni modifier une
+ * constante. `debug=1` produit exactement la même course que sans le paramètre, bit à bit.
+ *
+ * Contrairement au HUD, il vit **sous** l'arène et non dedans : il est large, lisible, et ne masque
+ * jamais la course.
  */
 export class DebugPanel {
   private readonly text: UiText;
 
   private readonly pre: HTMLPreElement;
+
+  private lastSnapshot = '';
 
   constructor(root: HTMLElement, text: UiText) {
     this.text = text;
@@ -30,27 +35,44 @@ export class DebugPanel {
   }
 
   /** Réécrit le panneau en une seule affectation, sans reconstruire le DOM. */
-  update(state: Readonly<RaceState>, phase: SimPhase, timeScale: number): void {
+  update(model: DebugModel): void {
     const lines: string[] = [
-      `${this.text.debugPhase} : ${phase}`,
-      `${this.text.debugSeed} : ${state.seed}`,
-      `${this.text.debugSimTime} : ${state.tSim.toFixed(3)} s`,
-      `${this.text.debugSteps} : ${String(state.steps)}`,
-      `${this.text.debugTimeScale} : ×${String(timeScale)}`,
+      `${this.text.debugPhase} : ${model.phase}`,
+      `${this.text.debugSeed} : ${model.seed}`,
+      `${this.text.debugSimTime} : ${model.tSim.toFixed(3)} s`,
+      `${this.text.debugSteps} : ${String(model.steps)}`,
+      `${this.text.debugSegment} : ${String(model.segment)}`,
+      `${this.text.debugTimeScale} : ×${String(model.timeScale)}`,
     ];
 
-    for (const character of state.characters) {
-      const distance = character.x.toFixed(2).replace('.', ',');
-      const speed = character.v.toFixed(3).replace('.', ',');
-      const drift = character.drift.toFixed(4).replace('.', ',');
-      const surge = character.surge.toFixed(4).replace('.', ',');
-      lines.push(
-        `${character.id}  ${this.text.debugDistance}=${distance}${this.text.metres}  ` +
-          `${this.text.debugSpeed}=${speed}  ${this.text.debugDrift}=${drift}  ` +
-          `${this.text.debugSurge}=${surge}`,
-      );
+    for (const row of model.rows) {
+      const values = [
+        `${this.text.debugDistance}=${formatFr(row.x, 2)}`,
+        `${this.text.debugSpeed}=${formatFr(row.v, 3)}`,
+        `${this.text.debugGap}=${formatFr(row.gapMeters, 2)}${this.text.metres}`,
+        `${this.text.debugDrift}=${formatFr(row.drift, 4)}`,
+        `${this.text.debugSurge}=${formatFr(row.surge, 4)}`,
+        `${this.text.debugEvent}=${row.event ?? this.text.debugNoEvent}`,
+        `${this.text.debugEventBonus}=${formatFr(row.eventBonus, 4)}`,
+      ];
+      lines.push(`${String(row.rank)}. ${row.name} (${row.id})  ${values.join('  ')}`);
     }
 
-    this.pre.textContent = lines.join('\n');
+    const snapshot = lines.join('\n');
+    if (snapshot === this.lastSnapshot) {
+      return;
+    }
+    this.lastSnapshot = snapshot;
+    this.pre.textContent = snapshot;
   }
+}
+
+/**
+ * Nombre à `decimals` décimales, virgule française.
+ *
+ * Le remplacement est fait à la main plutôt qu'avec `Intl` : le rendu d'un test ne doit pas dépendre
+ * des données de locale du moteur JavaScript qui exécute la page.
+ */
+function formatFr(value: number, decimals: number): string {
+  return value.toFixed(decimals).replace('.', ',');
 }

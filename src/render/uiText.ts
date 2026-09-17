@@ -34,6 +34,40 @@ export interface UiText {
   readonly debugDrift: string;
   /** Surge courant d'un personnage (P007) : `0` quand aucun surge n'est actif. */
   readonly debugSurge: string;
+  /** Événement rare actif d'un personnage (P011), ou son absence. */
+  readonly debugEvent: string;
+  /** Modulation de vitesse apportée par l'événement en cours (P011). */
+  readonly debugEventBonus: string;
+  /** Écart du personnage au leader, en mètres, dans le panneau de debug (P011). */
+  readonly debugGap: string;
+  /** Absence d'événement rare actif, dans le panneau de debug (P011). */
+  readonly debugNoEvent: string;
+  /** Numéro de segment courant, dans le panneau de debug (P011). */
+  readonly debugSegment: string;
+  /** Titre de la mini-carte du HUD. */
+  readonly minimapTitle: string;
+  /** Libellé du repère de départ de la mini-carte. */
+  readonly minimapStart: string;
+  /** Libellé de l'échelle nominale, en tête de la mini-carte. */
+  readonly minimapEnd: string;
+  /** Titre du bloc chrono / segment. */
+  readonly timeTitle: string;
+  /** Libellé du temps simulé écoulé. */
+  readonly timeLabel: string;
+  /** Libellé du numéro de segment courant. */
+  readonly segmentLabel: string;
+  /** Libellé de la seed affichée dans le HUD. */
+  readonly seedLabel: string;
+  /** Libellé du bouton qui copie la seed. */
+  readonly copySeedButton: string;
+  /** Confirmation affichée après une copie réussie. */
+  readonly copySeedDone: string;
+  /** Libellé de l'écart en secondes dans le classement. */
+  readonly gapSecondsLabel: string;
+  /** Titre du bandeau de checkpoint, suivi du numéro et de l'instant. */
+  readonly checkpointTitle: string;
+  /** Libellé du split de tête dans le bandeau de checkpoint. */
+  readonly checkpointLeaderSplit: string;
   /** Libellé du repère décoratif de l'échelle nominale. */
   readonly nominalScale: string;
   /** Libellé du bouton qui lance la course. */

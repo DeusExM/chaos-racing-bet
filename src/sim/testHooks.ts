@@ -35,6 +35,8 @@ export interface ChaosRaceTestApi {
   seed(): string;
   /** Phase temps réel de la simulation. */
   phase(): SimPhase;
+  /** Numéro du segment courant (1 à 4), `0` tant que la course n'est pas en cours. */
+  segment(): number;
   /** Numéro du checkpoint en pause (`1` à `3`), sinon `null`. */
   checkpoint(): number | null;
 }
@@ -72,6 +74,10 @@ export function createTestApi(simulation: RaceSimulation): ChaosRaceTestApi {
     timeScale: () => simulation.timeScale,
     seed: () => simulation.seed,
     phase: () => simulation.phase,
+    segment: () => {
+      const phase = simulation.view.phase;
+      return phase.kind === 'running' ? phase.segment : 0;
+    },
     checkpoint: () => simulation.checkpoint,
   });
 }

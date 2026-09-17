@@ -291,7 +291,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P008 | Événements rares + planificateur | P007 | turbos, chutes, raccourcis |
 | P009 | Observateur de faits + speaker *(P009-A ✅ observateur, P009-B ✅ speaker, P009-C ⏳ textes)* | P008 | commentaires à cooldowns |
 | P010 | Équilibrage statistique + verrouillage des constantes `[x]` *(25/25 critères sur 1000 seeds)* | P009 | `tools/balance.ts` + seuils testés |
-| P011 | HUD complet + panneau debug | P010 | mini-carte, classement détaillé, chrono |
+| P011 | HUD complet + panneau debug `[x]` | P010 | mini-carte, classement détaillé, chrono |
 | P012 | Affichage du speaker + réglages | P011 | bannières de commentaires |
 | P013 | Arrivée et podium | P012 | course complète jouable |
 | **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
@@ -810,6 +810,8 @@ permanente déjà présente (P004).
 
 ### P011 — HUD complet et panneau de debug
 
+**Statut : `[x]`** (terminé — voir le compte rendu ci-dessous)
+
 **Livrables**
 * `src/render/view/Hud.ts` : mini-carte `0 → VIEW.NOMINAL_SCALE_M` avec les 6 marqueurs colorés (et
   indicateur `+xx m` si dépassement de l'échelle), classement live (6 lignes avec écarts en m et en s),
@@ -824,6 +826,37 @@ permanente déjà présente (P004).
 * La seed affichée est copiable et identique à l'URL.
 * Lisible et sans chevauchement en 1280×720, 1920×1080 et 844×390.
 * `debug=1` n'altère jamais la simulation (distances finales identiques).
+
+**Compte rendu**
+
+Architecture retenue : le HUD est du **HTML dans l'arène** (grille CSS `#hud`), pas du canvas — il
+reste lisible aux petites tailles et comparable par le DOM dans les tests. Les calculs sont sortis
+dans des modules **sans Phaser** (`view/minimap.ts`, `view/hudModel.ts`, `view/debugModel.ts`), donc
+testables en environnement `node`. `Hud` est le **seul** écrivain du classement affiché : l'ancienne
+`view/LeaderboardView.ts`, qui écrivait les mêmes lignes en parallèle, a été **supprimée** (les deux
+écritures produisaient 12 lignes au lieu de 6). L'ordre et les écarts viennent toujours de
+`sim/leaderboard.ts` → `core/ranking.ts`, seule source du classement ; `LeaderboardRow` porte
+désormais `gapSeconds`, et non un recalcul de vue.
+
+Fichiers créés : `src/render/view/minimap.ts`, `src/render/view/Hud.ts`, `src/render/view/hudModel.ts`,
+`src/render/view/debugModel.ts`, `tests/unit/hud.test.ts`, `tests/unit/hudModel.test.ts`,
+`tests/e2e/hud.spec.ts`. Fichiers modifiés : `src/render/view/DebugPanel.ts`, `src/render/viewDebug.ts`,
+`src/render/scenes/RaceScene.ts`, `src/render/Game.ts`, `src/app/main.ts`, `src/sim/leaderboard.ts`,
+`src/sim/testHooks.ts`, `src/render/uiText.ts`, `src/app/strings.fr.ts`, `index.html`, `src/styles.css`,
+`tests/e2e/helpers.ts`, `tests/e2e/race.spec.ts`, `tests/e2e/checkpoints.spec.ts`,
+`playwright.config.ts`. Fichier supprimé : `src/render/view/LeaderboardView.ts`.
+
+Tests : `npm run test` → **33 fichiers, 515 tests, tous verts** (dont 13 tests de mini-carte et 9 de
+modèles HUD/debug) ; `npm run test:e2e` → **36 tests, tous verts** ; `npm run verify` → vert.
+
+`debug=1` n'altère rien : le panneau ne fait que **lire** un `DebugModel` construit depuis l'état du
+noyau, et le test E2E compare, pour la même seed, les distances finales et le classement final avec et
+sans `debug=1`, plus le nombre exact de pas (`10800`).
+
+Point de méthode : la pause d'un pointage dure `checkpointPauseRealS` (0,2 s à ×20). Les tests qui
+doivent **observer** le bandeau pendant sa pause arment donc leur scrutation **dans la page** (à la
+fréquence d'affichage) et figent la géométrie dans la même tâche que l'observation ; comparer des
+mesures prises à deux instants différents produisait des tests instables.
 
 ---
 

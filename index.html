@@ -14,12 +14,15 @@
         <p class="subtitle">
           Course humoristique à 6 personnages — 100 % locale, reproductible par seed.
         </p>
-        <p class="seed">Seed : <span id="seed-value" data-testid="seed-value">—</span></p>
       </header>
 
       <section class="stage">
         <div id="game" class="game" role="img" aria-label="Zone de jeu (canvas)"></div>
-        <div class="hud">
+        <!--
+          Racine du HUD : le HUD (P011) y installe la mini-carte, le classement, le chrono et le bloc
+          seed, et y replace l'état et le bandeau de checkpoint déclarés ci-dessous.
+        -->
+        <div class="hud" data-testid="hud">
           <p id="race-status" class="hud-status" data-testid="race-status">—</p>
           <p
             id="checkpoint-banner"
@@ -29,6 +32,7 @@
             hidden
           ></p>
           <div id="leaderboard" class="hud-panel" data-testid="leaderboard"></div>
+          <p class="seed">Seed : <span id="seed-value" data-testid="seed-value">—</span></p>
         </div>
       </section>
 

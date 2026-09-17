@@ -129,7 +129,7 @@ Règles concrètes :
    `setInterval`, `requestAnimationFrame`. Le temps est toujours injecté sous forme de pas fixes.
    Il ne contient **jamais** non plus de durée réelle (`countdown`, pause, `timeScale`, `maxStepsPerFrame`)
    ni de constante de distance d'arrivée (`finishDistance`, `FINISH_DISTANCE`) : la fin de course est
-   `tSim = 180 s`, et le temps réel appartient à `SIM_CONFIG` (`src/sim/`).
+   `tSim = 60 s`, et le temps réel appartient à `SIM_CONFIG` (`src/sim/`).
    Enfin, **aucune fonction transcendante** (`Math.log`, `Math.cos`, `Math.sqrt`, `Math.pow`, …) :
    ECMAScript ne garantit pas leur arrondi, donc leur dernier bit peut varier d'un moteur à l'autre.
    Les constantes qui en dépendent sont pré-calculées et figées dans `src/core/config.ts`.
@@ -163,7 +163,7 @@ Règles concrètes :
    **aucun argument** de temps. Le mode test ne change que le **nombre** de pas par frame, jamais
    leur taille.
 3. **Fin de course par le temps, jamais par la distance** : la course se termine **exclusivement** à
-   `tSim = 180 s`, soit exactement `10800` pas. Il n'existe **aucune** `FINISH_DISTANCE`, aucune
+   `tSim = 60 s`, soit exactement `3600` pas. Il n'existe **aucune** `FINISH_DISTANCE`, aucune
    condition d'arrivée, de victoire ou de classement fondée sur une distance, une ligne ou une arche
    dessinée. Les repères de distance de `src/render/` sont du **décor** et ne sont jamais lus par
    `src/core/` ni `src/sim/`.
@@ -184,12 +184,12 @@ Règles concrètes :
 10. **Indépendance des flux aléatoires** : `drift:*`, `surge:*`, `events:*`, `speaker:lines`,
     `cosmetic`. Modifier les visuels ou les textes ne doit **jamais** changer le résultat d'une course.
 11. **Responsabilité du temps** : `RaceEngine` ne connaît que le **temps simulé** (pas fixes, `tSim`,
-    segments, fin à `180 s`). Il ne connaît **ni** le compte à rebours, **ni** la durée réelle d'une
+    segments, fin à `60 s`). Il ne connaît **ni** le compte à rebours, **ni** la durée réelle d'une
     pause, **ni** le `timeScale`, **ni** l'horloge réelle : ces valeurs vivent dans `SIM_CONFIG`
     (`src/sim/`) et n'atteignent jamais le noyau.
 12. **Pauses** : pendant une pause (checkpoint ou utilisateur), `RaceSimulation` **n'appelle
     simplement pas** `RaceEngine.step()`. Une pause réelle ne fait donc **jamais** avancer ni modifier
-    le noyau : `tSim`, `x` et `v` sont strictement gelés, le nombre total de pas reste `10800`, et le
+    le noyau : `tSim`, `x` et `v` sont strictement gelés, le nombre total de pas reste `3600`, et le
     résultat final est identique à une course sans pause.
 
 Si un changement proposé par l'utilisateur viole un de ces invariants, **le signaler avant
@@ -345,10 +345,10 @@ public : elles sont formulées sans aucun chemin ni identifiant propre à une ma
 
 ## 10. Périmètre produit (V1) — rappel
 
-**Dans le périmètre** : 6 personnages, une course déclenchée par un seul MJ, 4 segments de 45 s,
-3 checkpoints avec pause automatique, arrivée + podium, moteur de simulation pur et testable,
-speaker à cooldowns, seed reproductible visible, mode test accéléré, PWA installable hors ligne,
-responsive desktop + smartphone paysage.
+**Dans le périmètre** : 6 personnages, une course déclenchée par un seul MJ, 3 segments de 20 s
+(60 s au total), 2 checkpoints avec pause automatique, arrivée + podium, moteur de simulation pur et
+testable, speaker à cooldowns, seed reproductible visible, mode test accéléré, PWA installable hors
+ligne, responsive desktop + smartphone paysage.
 
 **Hors périmètre (V1)** : multijoueur, synchronisation entre spectateurs, backend, base de données,
 comptes utilisateurs, classements en ligne, monétisation, réseau social, traduction, éditeur de

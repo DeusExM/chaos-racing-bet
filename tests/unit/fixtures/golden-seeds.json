@@ -2,7 +2,7 @@
   "note": "Table dorée : distances finales exactes de RaceEngine.runToCompletion(), une entrée par seed affichée. Ces valeurs sont mesurées, jamais choisies. Ne JAMAIS les modifier pour faire passer un test : si elles changent, c'est qu'une règle du noyau a changé.",
   "engine": "src/core/engine.ts",
   "config": "GAME_CONFIG (src/core/config.ts)",
-  "totalSteps": 10800,
+  "totalSteps": 3600,
   "history": [
     {
       "step": "P004",
@@ -23,127 +23,131 @@
     {
       "step": "P010",
       "change": "Deux changements de constantes. (1) Catalogue §7.1 rendu net neutre en distance : magnitudes de bonus réduites de 35 % (TURBO 1.2..1.8 → 0.78..1.17, RACCOURCI 1.6..2.0 → 1.04..1.30, MEGA_TURBO 2.5 → 1.63), malus inchangés — le biais de vitesse partagé passe sous le seuil de ±1,5 %. (2) RATE_PER_S testé à 1/10 puis REMIS à 1/14 : le compte d'événements par course (≈ 10,2) était déjà dans la fourchette [10 ; 16] de §13, et la moyenne des répliques du speaker restait conforme, donc rien ne justifiait de déplacer cette constante. Les six seeds affichées sont conservées, leurs distances et leurs classements sont remesurés à chaque changement : aucune valeur n'est corrigée à la main."
+    },
+    {
+      "step": "Passe corrective (test joueur manuel après P013)",
+      "change": "Course ramenée de 180 s à 60 s (3 segments de 20 s, 2 checkpoints, 3 600 pas) : les six seeds affichées sont conservées, mais leurs distances finales et leurs classements sont remesurés — une course plus courte parcourt environ trois fois moins de distance. Aucune constante physique du noyau n'a été modifiée : seules les bornes de temps de RACE_CONFIG ont changé, donc le pas fixe, les flux aléatoires et la reproductibilité sont intacts."
     }
   ],
   "goldenSeeds": [
     {
       "seed": "K7QM2X9A",
-      "tSim": 180,
+      "tSim": 60,
       "ranking": [
-        "c4",
-        "c2",
         "c5",
+        "c2",
+        "c3",
         "c0",
-        "c1",
-        "c3"
+        "c4",
+        "c1"
       ],
       "distances": [
-        2193.2220652505016,
-        2174.4464153196086,
-        2256.4654438575576,
-        2121.2416719090616,
-        2257.2399124075396,
-        2230.5742671446897
+        731.5021314679749,
+        699.5845412076413,
+        744.6464513911832,
+        738.857914393323,
+        715.5013056362785,
+        746.4499495015928
       ]
     },
     {
       "seed": "ZZZZZZZZ",
-      "tSim": 180,
+      "tSim": 60,
       "ranking": [
+        "c0",
         "c3",
+        "c4",
         "c5",
         "c2",
-        "c4",
-        "c0",
         "c1"
       ],
       "distances": [
-        2124.4591130840377,
-        2106.8496497833366,
-        2202.9914414384853,
-        2268.468753225436,
-        2190.49192200311,
-        2207.77075382313
+        792.0696093652322,
+        711.4939692044845,
+        727.3283486922297,
+        775.0417762579124,
+        753.8873763743118,
+        744.298603336065
       ]
     },
     {
       "seed": "00000000",
-      "tSim": 180,
+      "tSim": 60,
       "ranking": [
-        "c1",
-        "c5",
         "c2",
+        "c5",
         "c3",
+        "c1",
         "c4",
         "c0"
       ],
       "distances": [
-        2053.2010645708765,
-        2240.0362698592994,
-        2207.752886939549,
-        2158.022874185507,
-        2141.981223541739,
-        2228.5277648686792
+        663.3438776928017,
+        696.9153616894328,
+        748.6229366872527,
+        730.0911207252335,
+        683.7994124915347,
+        742.3203156598112
       ]
     },
     {
       "seed": "RACEWAY1",
-      "tSim": 180,
+      "tSim": 60,
       "ranking": [
         "c3",
-        "c1",
         "c2",
+        "c1",
         "c5",
         "c0",
         "c4"
       ],
       "distances": [
-        2124.82107005375,
-        2275.822541184557,
-        2199.9355749849,
-        2340.833787601288,
-        2115.428968840965,
-        2156.3112291724265
+        716.5058089682293,
+        754.1117476184385,
+        766.4964580083358,
+        878.5380406234773,
+        713.1689158978205,
+        724.7486842033891
       ]
     },
     {
       "seed": "BANAN4X2",
-      "tSim": 180,
+      "tSim": 60,
       "ranking": [
-        "c0",
         "c4",
+        "c0",
         "c3",
         "c1",
-        "c2",
-        "c5"
+        "c5",
+        "c2"
       ],
       "distances": [
-        2326.539429483555,
-        2198.1716952457623,
-        2174.053552427198,
-        2227.172064281299,
-        2233.2934032955086,
-        2156.1379367342934
+        749.2795089611515,
+        732.0246289699082,
+        696.7701046158343,
+        733.836820360269,
+        753.1938137696125,
+        719.4121302459915
       ]
     },
     {
       "seed": "PZZA1234",
-      "tSim": 180,
+      "tSim": 60,
       "ranking": [
+        "c3",
         "c0",
         "c4",
         "c1",
         "c5",
-        "c3",
         "c2"
       ],
       "distances": [
-        2242.264261713065,
-        2160.9647030151373,
-        2072.293657093626,
-        2134.9642730876253,
-        2168.59067449121,
-        2139.5713937630753
+        754.3007295295616,
+        687.8501279743926,
+        658.2406308322635,
+        757.8115433971669,
+        749.4618519926589,
+        687.8020438206087
       ]
     }
   ]

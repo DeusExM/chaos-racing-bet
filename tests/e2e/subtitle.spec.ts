@@ -127,15 +127,22 @@ test('affiche une réplique réelle, reconstruite depuis le fait mesuré', async
 test('n’affiche jamais deux nouvelles répliques à moins de 6 s simulées, hors préemption', async ({
   page,
 }) => {
+  // Mode **normal** (×1) volontairement. La durée d'affichage d'une réplique est exprimée en
+  // millisecondes **réelles** (`VIEW.SUBTITLE_*`), alors que le cooldown du speaker l'est en secondes
+  // **simulées** : à ×20, une course de 60 s dure ~3 s réelles, donc aucune réplique n'a le temps
+  // d'expirer et chaque nouvelle réplique serait — à juste titre — comptée comme une préemption. À ×1
+  // les deux horloges coïncident, et la discipline observée est celle que le joueur entend.
+  test.setTimeout(120_000);
   const watch = watchConsole(page);
-  await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
-  const samples = await collectRace(page);
+  await page.goto(raceUrl({ seed: OVERTAKE_SEED, autostart: true }));
+  // ~33 s réelles : assez pour plusieurs répliques, sans attendre la fin de la course (72 s).
+  const samples = await collectRace(page, 2000);
 
   const starts = lineStarts(samples);
-  expect(starts.length, 'la course doit produire plusieurs répliques').toBeGreaterThan(1);
+  expect(starts.length, 'la course doit produire plusieurs répliques').toBeGreaterThan(2);
 
   let normalStarts = 0;
-  let preemptedStarts = 0;
+  let bypassStarts = 0;
   for (let position = 1; position < starts.length; position += 1) {
     const previous = samples[starts[position - 1] ?? 0]?.subtitleLine ?? null;
     const current = samples[starts[position] ?? 0]?.subtitleLine ?? null;
@@ -146,23 +153,32 @@ test('n’affiche jamais deux nouvelles répliques à moins de 6 s simulées, ho
     }
 
     const delta = current.startedAtS - previous.startedAtS;
-    if (current.preempted) {
-      // Cas explicitement prévu par P009 : une réplique d'importance suffisante coupe la précédente.
-      preemptedStarts += 1;
-      expect(current.fact.importance).toBeGreaterThanOrEqual(SPEAKER_POLICY.preemptImportance);
+    if (delta < SPEAKER_POLICY.globalCooldownS) {
+      // Un démarrage plus rapproché n'est ouvert qu'aux faits dont l'importance atteint
+      // `PREEMPT_IMPORTANCE` : c'est la règle du speaker, vérifiée ici sur les répliques réellement
+      // affichées par le navigateur.
+      expect(
+        current.fact.importance,
+        `démarrage à ${delta.toFixed(2)} s simulées (types ${previous.fact.type} → ${current.fact.type})`,
+      ).toBeGreaterThanOrEqual(SPEAKER_POLICY.preemptImportance);
+      bypassStarts += 1;
       continue;
     }
 
     normalStarts += 1;
-    expect(
-      delta,
-      `deux répliques non préemptées à ${delta.toFixed(2)} s simulées (types ${previous.fact.type} → ${current.fact.type})`,
-    ).toBeGreaterThanOrEqual(SPEAKER_POLICY.globalCooldownS);
+  }
+
+  // Toute préemption — affichée comme telle — est elle aussi réservée aux faits majeurs.
+  for (const sample of samples) {
+    const line = sample.subtitleLine;
+    if (line?.preempted === true) {
+      expect(line.fact.importance).toBeGreaterThanOrEqual(SPEAKER_POLICY.preemptImportance);
+    }
   }
 
   // Le test distingue réellement les deux cas : il ne se contente pas d'une marge arbitraire.
   expect(normalStarts, 'des démarrages normaux ont été observés').toBeGreaterThan(0);
-  expect(preemptedStarts).toBeGreaterThanOrEqual(0);
+  expect(bypassStarts).toBeGreaterThanOrEqual(0);
   expectNoErrors(watch);
 });
 
@@ -267,20 +283,19 @@ for (const viewport of VIEWPORTS) {
       }
 
       const text = document.querySelector('[data-testid="subtitle-text"]');
-      const mute = document.querySelector('[data-testid="settings-mute"]');
+      const sound = document.querySelector('[data-testid="settings-sound"]');
       return {
         arena: asRect(read('.stage')),
         subtitle: asRect(read('[data-testid="subtitle"]')),
         settings: asRect(read('[data-testid="settings"]')),
         status: asRect(read('[data-testid="race-status"]')),
         leaderboard: asRect(read('[data-testid="leaderboard"]')),
-        minimap: asRect(read('[data-testid="hud-minimap"]')),
         time: asRect(read('[data-testid="hud-time"]')),
         seed: asRect(read('[data-testid="hud-seed"]')),
         checkpoint: asRect(read('[data-testid="checkpoint-banner"]')),
         subtitleFontPx:
           text === null ? 0 : Number.parseFloat(getComputedStyle(text).fontSize),
-        muteHeight: mute === null ? 0 : mute.getBoundingClientRect().height,
+        soundHeight: sound === null ? 0 : sound.getBoundingClientRect().height,
       };
     }, 60_000);
 
@@ -295,7 +310,6 @@ for (const viewport of VIEWPORTS) {
     const status = measured.status === null ? null : relativeTo(measured.status, measured.arena);
     const leaderboard =
       measured.leaderboard === null ? null : relativeTo(measured.leaderboard, measured.arena);
-    const minimap = measured.minimap === null ? null : relativeTo(measured.minimap, measured.arena);
     const time = measured.time === null ? null : relativeTo(measured.time, measured.arena);
     const seed = measured.seed === null ? null : relativeTo(measured.seed, measured.arena);
 
@@ -320,7 +334,6 @@ for (const viewport of VIEWPORTS) {
     if (subtitle !== null) {
       for (const [name, box] of [
         ['classement', leaderboard],
-        ['mini-carte', minimap],
         ['chrono', time],
         ['seed', seed],
         ['état', status],
@@ -330,6 +343,22 @@ for (const viewport of VIEWPORTS) {
         }
         expect(overlaps(subtitle, box), `le bandeau ne recouvre pas ${name}`).toBe(false);
       }
+
+      // 2 bis) Le commentaire est une **bande**, pas un panneau : largeur et hauteur bornées. C'est
+      // l'exigence §6 de la passe corrective — le premier test joueur trouvait que le speaker masquait
+      // l'action. La largeur est celle du texte (bornée par `max-width: min(100%, 34rem)`), donc la
+      // borne vérifiée est une fraction de la piste : sous 90 %, le bandeau ne peut pas traverser
+      // l'arène de part en part.
+      const subtitleWidth = subtitle.right - subtitle.left;
+      const subtitleHeight = subtitle.bottom - subtitle.top;
+      expect(
+        subtitleWidth,
+        'le bandeau reste une bande, pas un bloc central',
+      ).toBeLessThanOrEqual(arenaBox.right * 0.9);
+      expect(
+        subtitleHeight,
+        'le bandeau ne prend qu’une fraction de la hauteur de la piste',
+      ).toBeLessThanOrEqual(arenaBox.bottom * 0.2);
     }
     if (settings !== null) {
       for (const [name, box] of [
@@ -337,7 +366,6 @@ for (const viewport of VIEWPORTS) {
         ['chrono', time],
         ['seed', seed],
         ['classement', leaderboard],
-        ['mini-carte', minimap],
       ] as const) {
         if (box === null) {
           continue;
@@ -348,11 +376,11 @@ for (const viewport of VIEWPORTS) {
 
     // 3) Le texte reste lisible, et les boutons de réglages utilisables à cette résolution.
     expect(measured.subtitleFontPx, 'le commentaire reste lisible').toBeGreaterThanOrEqual(8);
-    expect(measured.muteHeight, 'le bouton muet est cliquable').toBeGreaterThanOrEqual(12);
-    await page.getByTestId('settings-mute').click();
-    await expect(page.getByTestId('settings-mute')).toHaveAttribute('aria-pressed', 'true');
-    await page.getByTestId('settings-mute').click();
-    await expect(page.getByTestId('settings-mute')).toHaveAttribute('aria-pressed', 'false');
+    expect(measured.soundHeight, 'le bouton « Son » est cliquable').toBeGreaterThanOrEqual(12);
+    await page.getByTestId('settings-sound').click();
+    await expect(page.getByTestId('settings-sound')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('settings-sound').click();
+    await expect(page.getByTestId('settings-sound')).toHaveAttribute('aria-pressed', 'false');
 
     expectNoErrors(watch);
   });

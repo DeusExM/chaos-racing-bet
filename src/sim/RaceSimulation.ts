@@ -22,8 +22,8 @@ import type { SimConfig, SimPhase } from './types';
  * ## P006 : countdown, checkpoints, pauses — et surtout **aucun rattrapage**
  *
  * Une pause réelle n'appelle simplement pas `step()`. Le noyau ignore qu'elle existe : `tSim`, `x`,
- * `v` et le drift sont strictement gelés, et le nombre total de pas d'une course reste `10800`
- * qu'il y ait eu 0, 3 ou 100 pauses.
+ * `v` et le drift sont strictement gelés, et le nombre total de pas d'une course reste `3600`
+ * qu'il y ait eu 0, 2 ou 100 pauses.
  *
  * Corollaire moins évident, et c'est le piège de cette étape : **le temps réel passé en pause ne
  * doit jamais devenir du temps simulé à rattraper**. Sans précaution, une frame qui traverse une

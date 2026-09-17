@@ -5,9 +5,9 @@ import { CHARACTERS } from '../../src/core/characters';
 import { RACE_CONFIG } from '../../src/core/config';
 import { VIEW } from '../../src/render/viewConfig';
 import {
-  OVERTAKE_SEED,
   PHOTO_FINISH_SEED,
   PHOTO_FINISH_SEED_EVIDENCE,
+  PLAIN_FINISH_SEED,
 } from '../fixtures/seeds';
 import {
   expectNoErrors,
@@ -27,7 +27,7 @@ import {
  * dizaine de secondes réelles au lieu de trois minutes, **sans changer un seul chiffre du résultat**
  * (c'est le contrat de `SimConfig`). Chaque comparaison porte sur des identifiants et des nombres lus
  * sur les hooks en lecture seule, jamais sur une supposition : le podium doit être exactement le
- * classement du noyau à `tSim = 180 s`, et rien ne doit plus bouger ensuite.
+ * classement du noyau à `tSim = 60 s`, et rien ne doit plus bouger ensuite.
  */
 
 /** Rectangle d'élément mesuré dans la page. */
@@ -122,28 +122,28 @@ function expectPodiumMatchesCore(core: FinishCoreSample, dom: FinishDomSample): 
   expect(dom.newRaceEnabled).toBe(true);
 }
 
-test('une course fast=1 atteint l’écran d’arrivée : 10 800 pas, 180 s, podium affiché', async ({
+test('une course fast=1 atteint l’écran d’arrivée : 3 600 pas, 60 s, podium affiché', async ({
   page,
 }) => {
   test.setTimeout(90_000);
   const watch = watchConsole(page);
-  await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
+  await page.goto(raceUrl({ seed: PLAIN_FINISH_SEED, fast: true, autostart: true }));
   await waitForFinished(page);
 
   const { core, dom } = await readArrival(page);
 
-  // La frontière est absolue : phase terminée, 180 s simulées, exactement 10 800 pas.
+  // La frontière est absolue : phase terminée, 60 s simulées, exactement 3 600 pas.
   expect(core.simPhase).toBe('finished');
   expect(core.phaseKind).toBe('finished');
   expect(core.tSim).toBe(RACE_CONFIG.TOTAL_SIM_S);
   expect(core.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
-  expect(core.seed).toBe(OVERTAKE_SEED);
+  expect(core.seed).toBe(PLAIN_FINISH_SEED);
 
   // Le modèle affiché date lui aussi de l'arrivée : ce n'est pas une frame intermédiaire.
   expect(core.panel).not.toBeNull();
   expect(core.panel?.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
   expect(core.panel?.tSim).toBe(RACE_CONFIG.TOTAL_SIM_S);
-  expect(core.panel?.seed).toBe(OVERTAKE_SEED);
+  expect(core.panel?.seed).toBe(PLAIN_FINISH_SEED);
 
   expectPodiumMatchesCore(core, dom);
 
@@ -159,24 +159,23 @@ test('une course fast=1 atteint l’écran d’arrivée : 10 800 pas, 180 s, pod
     'rgb(255, 209, 102)',
   );
 
-  // OVERTAKE_SEED n'a pas produit de photo finish : la mention ne doit pas apparaître.
+  // PLAIN_FINISH_SEED n'a pas produit de photo finish : la mention ne doit pas apparaître.
   expect(dom.photoVisible).toBe(false);
   expect(dom.photoText).toBe('');
   expect(core.panel?.photoFinish).toBeNull();
 
   // Le classement live du HUD a disparu : il ne peut pas y avoir deux classements à l'écran.
   await expect(page.getByTestId('leaderboard')).toBeHidden();
-  await expect(page.getByTestId('hud-minimap')).toBeHidden();
   // Le chrono et la seed restent, arrêtés sur les valeurs finales.
-  await expect(page.getByTestId('hud-sim-time')).toHaveText('180,0\u00A0s');
-  await expect(page.getByTestId('seed-value')).toHaveText(OVERTAKE_SEED);
+  await expect(page.getByTestId('hud-sim-time')).toHaveText('60,0\u00A0s');
+  await expect(page.getByTestId('seed-value')).toHaveText(PLAIN_FINISH_SEED);
 
   // Les réglages restent utilisables **sur** l'écran d'arrivée : rien ne les recouvre, et leur
   // persistance n'est pas touchée par P013.
-  await page.getByTestId('settings-mute').click();
-  await expect(page.getByTestId('settings-mute')).toHaveAttribute('aria-pressed', 'true');
-  await page.getByTestId('settings-mute').click();
-  await expect(page.getByTestId('settings-mute')).toHaveAttribute('aria-pressed', 'false');
+  await page.getByTestId('settings-sound').click();
+  await expect(page.getByTestId('settings-sound')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('settings-sound').click();
+  await expect(page.getByTestId('settings-sound')).toHaveAttribute('aria-pressed', 'false');
 
   expectNoErrors(watch);
 });
@@ -186,7 +185,7 @@ test('après l’arrivée, la décélération est purement visuelle : aucun pas,
 }) => {
   test.setTimeout(120_000);
   const watch = watchConsole(page);
-  await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
+  await page.goto(raceUrl({ seed: PLAIN_FINISH_SEED, fast: true, autostart: true }));
   await waitForFinished(page);
 
   const first = await readFinishCore(page);
@@ -245,7 +244,7 @@ test('après l’arrivée, la décélération est purement visuelle : aucun pas,
 test('« Rejouer la même seed » rejoue exactement la même course', async ({ page }) => {
   test.setTimeout(150_000);
   const watch = watchConsole(page);
-  await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
+  await page.goto(raceUrl({ seed: PLAIN_FINISH_SEED, fast: true, autostart: true }));
   await waitForFinished(page);
 
   const first = await readArrival(page);
@@ -265,7 +264,7 @@ test('« Rejouer la même seed » rejoue exactement la même course', async ({ p
   const second = await readArrival(page);
   expectPodiumMatchesCore(second.core, second.dom);
 
-  // Même seed source, même course, mêmes distances, même classement, même podium, 10 800 pas.
+  // Même seed source, même course, mêmes distances, même classement, même podium, 3 600 pas.
   expect(second.core.seed).toBe(first.core.seed);
   expect(second.core.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
   expect([...second.core.distances]).toEqual([...first.core.distances]);
@@ -281,7 +280,7 @@ test('« Rejouer la même seed » rejoue exactement la même course', async ({ p
 
   // La seed n'a pas bougé, ni dans l'URL, ni dans le HUD.
   expect(new URL(page.url()).searchParams.get('seed')).toBe(firstUrlSeed);
-  expect(second.dom.seedText).toBe(OVERTAKE_SEED);
+  expect(second.dom.seedText).toBe(PLAIN_FINISH_SEED);
 
   expectNoErrors(watch);
 });
@@ -289,7 +288,7 @@ test('« Rejouer la même seed » rejoue exactement la même course', async ({ p
 test('« Nouvelle course » change réellement la seed et la course (5 essais)', async ({ page }) => {
   test.setTimeout(240_000);
   const watch = watchConsole(page);
-  await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
+  await page.goto(raceUrl({ seed: PLAIN_FINISH_SEED, fast: true, autostart: true }));
   await waitForFinished(page);
 
   const initial = await readFinishCore(page);
@@ -311,7 +310,7 @@ test('« Nouvelle course » change réellement la seed et la course (5 essais)',
 
     const core = await readFinishCore(page);
     expect(core.seed, `essai ${String(attempt)} : seed différente`).not.toBe(previousSeed);
-    expect(core.seed).not.toBe(OVERTAKE_SEED);
+    expect(core.seed).not.toBe(PLAIN_FINISH_SEED);
     expect(core.steps, `essai ${String(attempt)} : course réellement terminée`).toBe(
       RACE_CONFIG.TOTAL_STEPS,
     );
@@ -376,7 +375,7 @@ test('la mention PHOTO_FINISH apparaît si, et seulement si, le noyau l’a prod
   expect(best - second).toBeCloseTo(PHOTO_FINISH_SEED_EVIDENCE.gapMeters, 9);
 
   // 2) Course sans photo finish : aucune mention, ni dans le DOM, ni dans le modèle.
-  await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
+  await page.goto(raceUrl({ seed: PLAIN_FINISH_SEED, fast: true, autostart: true }));
   await waitForFinished(page);
   const plain = await readArrival(page);
 
@@ -401,7 +400,7 @@ for (const viewport of VIEWPORTS) {
     test.setTimeout(120_000);
     const watch = watchConsole(page);
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
+    await page.goto(raceUrl({ seed: PLAIN_FINISH_SEED, fast: true, autostart: true }));
     await waitForFinished(page);
 
     // La géométrie est relevée **dans la page**, en une seule tâche : aucune mesure ne peut être

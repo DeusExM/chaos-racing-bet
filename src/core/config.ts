@@ -156,20 +156,29 @@ export interface FactConfig {
   readonly CHECKPOINT_SPLIT_CLOSE_GAP_M: number;
 }
 
-/** Temps simulé de la course. Le noyau ignore tout du temps réel. */
+/**
+ * Temps simulé de la course. Le noyau ignore tout du temps réel.
+ *
+ * **Durée ramenée de 180 s à 60 s par la passe corrective du premier test joueur manuel** : trois
+ * segments de 20 s, deux checkpoints intermédiaires (20 s et 40 s) et l'arrivée à 60 s. Motif : une
+ * course de 180 s était trop longue à regarder. Le pas fixe, le nombre de personnages, le catalogue
+ * d'événements et les invariants (§5 de `AGENTS.md`) sont inchangés ; seules les bornes de temps
+ * bougent. Les valeurs dérivées (`STEPS_PER_SEGMENT`, `TOTAL_STEPS`) sont mises à jour avec elles, et
+ * `validateConfig()` refuse toute incohérence.
+ */
 export const RACE_CONFIG: RaceTimeConfig = Object.freeze({
   /** Nombre de segments. */
-  SEGMENT_COUNT: 4,
+  SEGMENT_COUNT: 3,
   /** Durée **simulée** d'un segment, en secondes. */
-  SEGMENT_DURATION_S: 45,
+  SEGMENT_DURATION_S: 20,
   /** `SEGMENT_COUNT × SEGMENT_DURATION_S`. Fin de course : c'est le **seul** critère d'arrêt. */
-  TOTAL_SIM_S: 180,
+  TOTAL_SIM_S: 60,
   /** Pas fixe de simulation, en secondes. `RaceEngine.step()` ne prend aucun autre argument. */
   DT_S: 1 / 60,
   /** `SEGMENT_DURATION_S / DT_S`. */
-  STEPS_PER_SEGMENT: 2700,
+  STEPS_PER_SEGMENT: 1200,
   /** `TOTAL_SIM_S / DT_S` : nombre de pas d'une course complète, pauses comprises. */
-  TOTAL_STEPS: 10800,
+  TOTAL_STEPS: 3600,
 });
 
 /**
@@ -239,12 +248,22 @@ export const EVENT: EventConfig = Object.freeze({
    * Taux global, en événements par seconde simulée.
    *
    * `1 / 14` (intervalle moyen de 14 s) : c'est la valeur d'origine de §7.3, **rétablie par P010**
-   * après un aller-retour. Elle produit ≈ 10,2 événements par course, donc le **bas** de la
-   * fourchette `[10 ; 16]` de §13 — mais à l'intérieur, et « proche d'une borne » n'est pas un motif
-   * de réglage. Le passage temporaire à `1 / 10` ne visait que la densité de répliques du speaker
-   * (16,4 → 17,5 en moyenne) ; il a été annulé parce que la ligne §13 du speaker se lit sur la
+   * après un aller-retour. Elle produisait ≈ 10,2 événements par course de 180 s, donc le **bas** de
+   * la fourchette `[10 ; 16]` de §13 — mais à l'intérieur, et « proche d'une borne » n'est pas un
+   * motif de réglage. Le passage temporaire à `1 / 10` ne visait que la densité de répliques du
+   * speaker (16,4 → 17,5 en moyenne) ; il a été annulé parce que la ligne §13 du speaker se lit sur la
    * **moyenne**, déjà conforme à `1 / 14`, et parce que la traîne des courses pauvres vient des
    * cooldowns de type, pas du nombre de faits (`docs/balance-report.md` §4.2).
+   *
+   * **Passe corrective 60 s : constante conservée.** C'est un **taux**, pas un quota : le nombre
+   * d'événements d'une course doit donc suivre mécaniquement sa durée. La course de 60 s produit
+   * 3,36 événements en moyenne sur le corpus canonique — soit **un toutes les 17,9 s**, exactement la
+   * cadence de la course de 180 s (10,07 événements, un toutes les 17,9 s). La ligne §13 a donc été
+   * réinterprétée en **cadence** (`[3 ; 6]` événements par course de 60 s) et non en nombre absolu.
+   * Un balayage à `1 / 10` a été mesuré (4,35 événements par course, biais de vitesse `1,31 %`) puis
+   * **écarté** : il aurait artificiellement densifié le jeu par seconde pour retrouver des nombres
+   * absolus, alors que la perception des bonus/malus est traitée par le retour visuel d'événement,
+   * qui ne touche à aucune constante de simulation.
    */
   RATE_PER_S: 1 / 14,
   /** Délai minimal entre deux événements, tous personnages confondus. */

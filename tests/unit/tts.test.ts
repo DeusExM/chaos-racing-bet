@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  TTS_RATE,
   VOICE_LANGUAGE,
   createVoiceOutput,
   isFrenchVoice,
@@ -49,7 +50,7 @@ function fakeSynthesis(voices: readonly VoiceInfo[]): {
 }
 
 function utteranceFactory(): (text: string) => UtteranceLike {
-  return () => ({ voice: null, lang: '' });
+  return () => ({ voice: null, lang: '', rate: 1 });
 }
 
 describe('P012 : choix de la voix', () => {
@@ -127,6 +128,21 @@ describe('P012 : sortie vocale', () => {
     expect(cancels()).toBe(2);
   });
 
+  it('impose un débit de commentateur sportif à chaque énonciation', () => {
+    const { synthesis, spoken } = fakeSynthesis([voice('fr-FR')]);
+    const output = createVoiceOutput({ speechSynthesis: synthesis, createUtterance: utteranceFactory() });
+
+    output?.speak('Une phrase');
+    output?.speak('Une autre');
+
+    // Le débit est écrit sur l'énonciation, pas sur un objet global : aucune n'y échappe.
+    expect(spoken.map((utterance) => utterance.rate)).toEqual([TTS_RATE, TTS_RATE]);
+    // Le premier test joueur manuel a jugé la voix trop lente : le débit retenu doit rester
+    // nettement supérieur à la vitesse normale, sans devenir inintelligible.
+    expect(TTS_RATE).toBeGreaterThan(1);
+    expect(TTS_RATE).toBeLessThanOrEqual(1.8);
+  });
+
   it('transmet une annulation explicite', () => {
     const { synthesis, cancels } = fakeSynthesis([voice('fr-FR')]);
     const output = createVoiceOutput({ speechSynthesis: synthesis, createUtterance: utteranceFactory() });
@@ -155,6 +171,7 @@ describe('P012 : détection du Web Speech API', () => {
     class FakeUtterance implements UtteranceLike {
       voice: VoiceInfo | null = null;
       lang = '';
+      rate = 1;
       constructor(readonly text: string) {}
     }
     const scope: SpeechApiScope = webSpeechScope({

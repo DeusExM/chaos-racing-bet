@@ -39,8 +39,8 @@ import type {
  * **P004 est une course minimale** : vitesse de base, dérive d'Ornstein–Uhlenbeck indépendante,
  * rampe progressive, intégration de position.
  *
- * **P006 ajoute les checkpoints**, et rien d'autre : le moteur **signale** les instants `tSim = 45`,
- * `90` et `135 s` par un fait `CHECKPOINT_SPLIT`, puis **continue**. Il ne s'arrête pas, ne connaît
+ * **P006 ajoute les checkpoints**, et rien d'autre : le moteur **signale** les instants `tSim = 20`
+ * et `40 s` par un fait `CHECKPOINT_SPLIT`, puis **continue**. Il ne s'arrête pas, ne connaît
  * aucune durée de pause et ignore qu'une pause existe : ce qui se passe après le signal appartient
  * entièrement à `RaceSimulation`.
  *
@@ -64,7 +64,7 @@ import type {
  */
 
 /** Numéros humains des segments, dans l'ordre. `RacePhase.segment` est en base 1 (contrat P003). */
-const HUMAN_SEGMENTS: readonly (1 | 2 | 3 | 4)[] = [1, 2, 3, 4];
+const HUMAN_SEGMENTS: readonly (1 | 2 | 3)[] = [1, 2, 3];
 
 /** Fige une phase : ce sont des valeurs, elles ne doivent jamais pouvoir être modifiées en place. */
 function frozenPhase(phase: RacePhase): RacePhase {
@@ -266,13 +266,13 @@ export class RaceEngine {
 
     this.state.steps += 1;
 
-    // Multiplication, jamais accumulation : `steps × DT_S` tombe exactement sur 45, 90, 135 et 180,
-    // alors qu'une accumulation flottante donnerait 44.99999999999873 et 180.00000000003539 (P003).
+    // Multiplication, jamais accumulation : `steps × DT_S` tombe exactement sur 20, 40 et 60,
+    // alors qu'une accumulation flottante donnerait 20.000000000000146 et 59.999999999997875 (P003).
     this.state.tSim = this.state.steps * DT_S;
     this.state.phase = this.phaseFor(this.state.tSim);
 
     // Le fait est produit **après** l'intégration du pas qui atteint la borne : les distances
-    // publiées sont donc exactement celles de `tSim` = 45, 90 ou 135 s, sans décalage d'un pas.
+    // publiées sont donc exactement celles de `tSim` = 20 ou 40 s, sans décalage d'un pas.
     // L'observateur voit le noyau à CHAQUE pas simulé, jamais à la fréquence du rendu.
     const produced = this.observer.observe({
       tSim: this.state.tSim,
@@ -384,7 +384,7 @@ export class RaceEngine {
       return IDLE_PHASE;
     }
 
-    // `track.ts` indexe les segments à partir de 0 ; `RacePhase.segment` est un numéro humain 1..4.
+    // `track.ts` indexe les segments à partir de 0 ; `RacePhase.segment` est un numéro humain 1..3.
     const segment = HUMAN_SEGMENTS[segmentIndexAt(tSim)];
     if (segment === undefined) {
       throw new RangeError(`Segment hors bornes pour tSim=${tSim}.`);

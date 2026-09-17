@@ -22,9 +22,9 @@ import {
  *
  * ## Pourquoi du HTML dans l'arène
  *
- * Comme le HUD de P011, et pour la même raison : le bandeau partage l'arène avec le classement, la
- * mini-carte, le chrono, la seed et le bandeau de pointage, dont la géométrie dépend de la taille de
- * la fenêtre. Une grille CSS place ces blocs **par construction** — ils ne peuvent pas se recouvrir —
+ * Comme le HUD de P011, et pour la même raison : le bandeau partage l'arène avec le classement, le
+ * chrono, la seed et le bandeau de checkpoint, dont la géométrie dépend de la taille de la fenêtre.
+ * Une grille CSS place ces blocs **par construction** — ils ne peuvent pas se recouvrir —
  * alors qu'un texte dessiné dans le canvas suivrait les unités logiques de la scène et pourrait
  * passer sous un bloc du HUD selon la résolution. Le texte reste en outre lisible en 844×390, où une
  * police de canvas mise à l'échelle descendrait sous les 10 px, et il est comparable par le DOM dans

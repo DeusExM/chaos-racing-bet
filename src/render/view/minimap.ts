@@ -1,19 +1,24 @@
 import type { CharacterId } from '../../core/types';
 
 /**
- * Mini-carte du HUD : placement **pur** des 6 marqueurs sur l'échelle `0 → VIEW.NOMINAL_SCALE_M`.
+ * Modèle de piste : placement **pur** des 6 marqueurs sur l'échelle `0 → VIEW.NOMINAL_SCALE_M`.
  *
  * Ce module ne lit aucune source de données : il reçoit des distances déjà calculées par le noyau et
  * renvoie des positions bornées. Il n'a donc aucun accès à la simulation, et ne peut ni la modifier
- * ni la décaler. Les positions renvoyées n'influencent rien : elles ne vivent que dans le DOM du HUD.
+ * ni la décaler. Les positions renvoyées n'influencent rien : elles sont publiées dans le modèle du
+ * HUD (`HudModel.markers`).
+ *
+ * **La mini-carte n'est plus dessinée depuis la passe corrective** (premier test joueur : le HUD
+ * masquait trop la course). Ce module est conservé comme **hook de test et de debug** — il est encore
+ * vérifié par les tests unitaires et E2E — et pour une éventuelle carte en P014.
  *
  * ## Dépassement de l'échelle
  *
  * `NOMINAL_SCALE_M` est la longueur du décor, jamais une ligne d'arrivée (invariant §5.3) : un
- * personnage peut la franchir. Quand c'est le cas, le marqueur est **borné** à l'extrémité de la
- * piste — il ne sort jamais de la mini-carte — et `overflowM` publie de combien il l'a dépassée,
- * ce que le HUD affiche sous la forme `+xx m`. Le marqueur reste donc lisible, et l'information
- * « au-delà de l'échelle » n'est jamais perdue.
+ * personnage peut la franchir. Quand c'est le cas, le marqueur est **borné** à `1` — l'échelle n'est
+ * jamais recadrée en cours de course — et `overflowM` publie de combien il l'a dépassée. Le modèle
+ * porte donc toujours l'information « au-delà de l'échelle », même si plus aucun élément d'interface
+ * ne l'affiche aujourd'hui.
  */
 
 /** Entrée d'un marqueur : identité visuelle et distance lue dans le noyau. */

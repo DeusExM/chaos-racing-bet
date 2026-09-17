@@ -1,10 +1,11 @@
 /**
- * Réglages locaux de l'application (P012).
+ * Réglages locaux de l'application (P012, forme revue par la passe corrective).
  *
  * ## Ce que ce module est
  *
- * Deux booléens d'**interface** — `mute` (aucune sortie vocale) et `tts` (vocalisation activée) —
- * encapsulés avec la persistance `localStorage`, la validation et les valeurs par défaut.
+ * Deux booléens d'**interface**, nommés par ce qu'ils activent : `sound` (effets sonores) et
+ * `commentator` (commentateur vocal), encapsulés avec la persistance `localStorage`, la validation,
+ * les valeurs par défaut et la **migration** de l'ancienne forme `{ mute, tts }`.
  *
  * ## Ce que ce module n'est pas
  *
@@ -14,29 +15,41 @@
  * rang, un fait ou le nombre de pas d'une course. Un test unitaire de frontière (`boundaries.test.ts`)
  * interdit d'ailleurs `localStorage` partout sauf ici.
  *
- * ## Robustesse
+ * ## Robustesse et migration
  *
  * `localStorage` peut être absent (mode privé, contexte non sécurisé, iframe restreinte), refuser
  * l'écriture (quota) ou lever à la lecture. Aucun de ces cas ne doit empêcher le jeu de démarrer :
- * toute défaillance de stockage retombe sur les valeurs par défaut, documentées ci-dessous.
- * Une donnée corrompue est traitée comme une absence de donnée, jamais comme une erreur fatale.
+ * toute défaillance de stockage retombe sur les valeurs par défaut. Une donnée corrompue est traitée
+ * comme une absence de donnée, jamais comme une erreur fatale.
+ *
+ * La forme persistée a changé avec la passe corrective : `{ mute, tts }` est devenu
+ * `{ sound, commentator }`. `parseSettings` accepte **les deux** et ne lève jamais :
+ *
+ * * si `sound` ou `commentator` est présent et booléen, il est utilisé ;
+ * * sinon, l'ancienne paire est convertie — `commentator = tts && !mute` (le commentateur était
+ *   audible exactement quand la voix était activée sans mode muet), et `sound = false`, puisque
+ *   aucun effet sonore n'existait dans l'ancienne version ;
+ * * tout le reste retombe sur les défauts, champ par champ.
+ *
+ * La première écriture suivante réécrit la forme nouvelle : la migration est donc silencieuse,
+ * automatique et sans perte d'information utile.
  */
 
-/** Valeurs par défaut : l'audio de la V1 est **désactivé**, y compris la synthèse vocale. */
+/** Valeurs par défaut : l'audio de la V1 est **désactivé**, commentateur comme effets sonores. */
 export const DEFAULT_SETTINGS: RaceSettings = Object.freeze({
-  mute: false,
-  tts: false,
+  sound: false,
+  commentator: false,
 });
 
 /** Clé de stockage : préfixée par le nom du jeu, pour ne rien écraser d'autre sur l'origine. */
 export const SETTINGS_STORAGE_KEY = 'chaos-race:settings';
 
-/** Réglages P012 : purement locaux, jamais transmis à la simulation. */
+/** Réglages P012/P0-corrective : purement locaux, jamais transmis à la simulation. */
 export interface RaceSettings {
-  /** `true` : aucune sortie vocale. Les sous-titres texte restent affichés. */
-  readonly mute: boolean;
-  /** `true` : une réplique déjà choisie par le speaker est vocalisée (si `mute` est faux). */
-  readonly tts: boolean;
+  /** `true` : les effets sonores (aujourd'hui le klaxon de confirmation) sont autorisés. */
+  readonly sound: boolean;
+  /** `true` : une réplique déjà choisie par le speaker est vocalisée. */
+  readonly commentator: boolean;
 }
 
 /**
@@ -80,8 +93,10 @@ export function createSettingsStorage(scope: {
 /**
  * Convertit une chaîne stockée en réglages valides. **Ne lève jamais.**
  *
- * Tout ce qui n'est pas un objet JSON portant des booléens pour `mute` et `tts` est ignoré, champ
- * par champ : une valeur corrompue n'entraîne pas la perte du champ voisin qui, lui, était lisible.
+ * Tout ce qui n'est pas un objet JSON est ignoré. La lecture est faite **champ par champ**, ce qui
+ * permet deux choses : une valeur corrompue n'entraîne pas la perte du champ voisin qui, lui, était
+ * lisible, et l'ancienne forme `{ mute, tts }` reste exploitable (voir la migration en tête de
+ * module).
  */
 export function parseSettings(raw: string | null | undefined): RaceSettings {
   if (raw === null || raw === undefined || raw.length === 0) {
@@ -102,9 +117,23 @@ export function parseSettings(raw: string | null | undefined): RaceSettings {
   }
 
   const record = parsed as Record<string, unknown>;
+  const sound = typeof record['sound'] === 'boolean' ? record['sound'] : null;
+  const commentator = typeof record['commentator'] === 'boolean' ? record['commentator'] : null;
+
+  if (sound === null && commentator === null) {
+    // Ancienne forme : le commentateur était audible quand la voix était active et le mode muet
+    // désactivé. Les effets sonores n'existaient pas, ils retombent donc sur leur défaut.
+    const legacyTts = typeof record['tts'] === 'boolean' ? record['tts'] : false;
+    const legacyMute = typeof record['mute'] === 'boolean' ? record['mute'] : false;
+    return Object.freeze({
+      sound: DEFAULT_SETTINGS.sound,
+      commentator: legacyTts && !legacyMute,
+    });
+  }
+
   return Object.freeze({
-    mute: typeof record['mute'] === 'boolean' ? record['mute'] : DEFAULT_SETTINGS.mute,
-    tts: typeof record['tts'] === 'boolean' ? record['tts'] : DEFAULT_SETTINGS.tts,
+    sound: sound ?? DEFAULT_SETTINGS.sound,
+    commentator: commentator ?? DEFAULT_SETTINGS.commentator,
   });
 }
 
@@ -191,11 +220,11 @@ export class SettingsStore {
 }
 
 /**
- * Le mode muet autorise-t-il une sortie vocale, avec ces réglages ?
+ * Le commentateur est-il autorisé à parler, avec ces réglages ?
  *
- * Règle unique, et volontairement très courte : la voix exige que le TTS soit **activé** et que le
- * mode muet soit **désactivé**. Aucune autre couche ne redécide cela.
+ * Règle unique, et volontairement très courte : la voix exige que le commentateur soit activé. Les
+ * effets sonores (`sound`) n'ont aucun pouvoir sur elle, et aucune autre couche ne redécide cela.
  */
 export function allowsVoice(settings: RaceSettings): boolean {
-  return settings.tts && !settings.mute;
+  return settings.commentator;
 }

@@ -14,18 +14,15 @@ import {
  */
 const BOUNDARIES = [
   { tSim: 0, segment: 0, elapsedS: 0, checkpoint: false, over: false },
-  { tSim: 44.999, segment: 0, elapsedS: 44.999, checkpoint: false, over: false },
-  { tSim: 45.0, segment: 1, elapsedS: 0, checkpoint: true, over: false },
-  { tSim: 45.001, segment: 1, elapsedS: 0.001, checkpoint: false, over: false },
-  { tSim: 89.999, segment: 1, elapsedS: 44.999, checkpoint: false, over: false },
-  { tSim: 90.0, segment: 2, elapsedS: 0, checkpoint: true, over: false },
-  { tSim: 90.001, segment: 2, elapsedS: 0.001, checkpoint: false, over: false },
-  { tSim: 134.999, segment: 2, elapsedS: 44.999, checkpoint: false, over: false },
-  { tSim: 135.0, segment: 3, elapsedS: 0, checkpoint: true, over: false },
-  { tSim: 135.001, segment: 3, elapsedS: 0.001, checkpoint: false, over: false },
-  { tSim: 179.999, segment: 3, elapsedS: 44.999, checkpoint: false, over: false },
-  { tSim: 180.0, segment: 3, elapsedS: 45, checkpoint: false, over: true },
-  { tSim: 180.001, segment: 3, elapsedS: 45.001, checkpoint: false, over: true },
+  { tSim: 19.999, segment: 0, elapsedS: 19.999, checkpoint: false, over: false },
+  { tSim: 20.0, segment: 1, elapsedS: 0, checkpoint: true, over: false },
+  { tSim: 20.001, segment: 1, elapsedS: 0.001, checkpoint: false, over: false },
+  { tSim: 39.999, segment: 1, elapsedS: 19.999, checkpoint: false, over: false },
+  { tSim: 40.0, segment: 2, elapsedS: 0, checkpoint: true, over: false },
+  { tSim: 40.001, segment: 2, elapsedS: 0.001, checkpoint: false, over: false },
+  { tSim: 59.999, segment: 2, elapsedS: 19.999, checkpoint: false, over: false },
+  { tSim: 60.0, segment: 2, elapsedS: 20, checkpoint: false, over: true },
+  { tSim: 60.001, segment: 2, elapsedS: 20.001, checkpoint: false, over: true },
 ] as const;
 
 describe('segments temporels', () => {
@@ -44,18 +41,21 @@ describe('segments temporels', () => {
     }
   });
 
-  it('découpe la course en quatre segments de 45 s, soit 180 s', () => {
+  it('découpe la course en trois segments de 20 s, soit 60 s', () => {
     expect(segmentIndexAt(0)).toBe(0);
-    expect(segmentIndexAt(179.999)).toBe(RACE_CONFIG.SEGMENT_COUNT - 1);
-    expect(segmentIndexAt(180)).toBe(RACE_CONFIG.SEGMENT_COUNT - 1);
+    expect(segmentIndexAt(59.999)).toBe(RACE_CONFIG.SEGMENT_COUNT - 1);
+    expect(segmentIndexAt(60)).toBe(RACE_CONFIG.SEGMENT_COUNT - 1);
     // Au-delà de la fin, on reste dans le dernier segment : l'information n'est pas écrêtée.
     expect(segmentIndexAt(1000)).toBe(RACE_CONFIG.SEGMENT_COUNT - 1);
-    expect(segmentElapsedS(1000)).toBeCloseTo(1000 - 3 * RACE_CONFIG.SEGMENT_DURATION_S, 9);
+    expect(segmentElapsedS(1000)).toBeCloseTo(
+      1000 - (RACE_CONFIG.SEGMENT_COUNT - 1) * RACE_CONFIG.SEGMENT_DURATION_S,
+      9,
+    );
   });
 });
 
 describe('instants de checkpoint', () => {
-  it('ne reconnaît un checkpoint qu’à 45, 90 et 135 secondes simulées', () => {
+  it('ne reconnaît un checkpoint qu’à 20 et 40 secondes simulées', () => {
     for (const boundary of BOUNDARIES) {
       expect(
         isCheckpointInstant(boundary.tSim),
@@ -66,14 +66,14 @@ describe('instants de checkpoint', () => {
 
   it('ne reconnaît aucun autre instant de checkpoint sur toute la course', () => {
     const detected: number[] = [];
-    for (let milliseconds = 0; milliseconds <= 180_000; milliseconds += 1) {
+    for (let milliseconds = 0; milliseconds <= 60_000; milliseconds += 1) {
       const tSim = milliseconds / 1000;
       if (isCheckpointInstant(tSim)) {
         detected.push(tSim);
       }
     }
 
-    expect(detected).toEqual([45, 90, 135]);
+    expect(detected).toEqual([20, 40]);
   });
 
   it('tombe exactement sur un pas de simulation, sans aucune tolérance', () => {
@@ -93,16 +93,16 @@ describe('instants de checkpoint', () => {
 });
 
 describe('fin de course', () => {
-  it('est vrai à partir de 180 s, et seulement là', () => {
+  it('est vrai à partir de 60 s, et seulement là', () => {
     for (const boundary of BOUNDARIES) {
       expect(isRaceOver(boundary.tSim), `isRaceOver(${boundary.tSim})`).toBe(boundary.over);
     }
   });
 
-  it('bascule exactement une fois, au pas 10800', () => {
+  it('bascule exactement une fois, au pas 3600', () => {
     let violations = 0;
     let firstOver = -1;
-    for (let milliseconds = 0; milliseconds <= 180_001; milliseconds += 1) {
+    for (let milliseconds = 0; milliseconds <= 60_001; milliseconds += 1) {
       const tSim = milliseconds / 1000;
       const over = isRaceOver(tSim);
       if (over !== tSim >= RACE_CONFIG.TOTAL_SIM_S) {

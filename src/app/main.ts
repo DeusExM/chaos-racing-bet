@@ -6,6 +6,7 @@ import { installTestHooks, testHooksEnabled } from '../sim/testHooks';
 import { RaceCommentary, type CommentaryVoice } from './RaceCommentary';
 import { SettingsPanel } from './SettingsPanel';
 import { allowsVoice, createSettingsStorage, SettingsStore, type SettingsStorage } from './settings';
+import { createSoundOutput, webAudioScope } from './sound';
 import { SPEAKER_CATALOGUE_FR, UI_TEXT_FR } from './strings.fr';
 import { createVoiceOutput, webSpeechScope } from './tts';
 
@@ -140,11 +141,13 @@ function bootstrap(): void {
   // touchent ni la simulation, ni la seed, ni le speaker.
   const settings = new SettingsStore(readBrowserSettingsStorage());
   const voiceOutput = createVoiceOutput(webSpeechScope(window));
+  const soundOutput = createSoundOutput(webAudioScope(window));
 
   const hudRoot = querySelector('.hud');
 
-  // Couper le son coupe réellement l'énonciation en cours : le mode muet ne doit pas laisser une
-  // phrase continuer après avoir été activé.
+  // Couper le commentateur coupe réellement l'énonciation en cours : le réglage ne doit pas laisser
+  // une phrase continuer après avoir été coupé. Le son, lui, n'a rien à interrompre (le klaxon est
+  // plus court que le clic qui le déclenche) : couper le son ne joue donc **aucun** son.
   settings.subscribe((current) => {
     if (!allowsVoice(current)) {
       voiceOutput?.cancel();
@@ -182,8 +185,19 @@ function bootstrap(): void {
 
   // Le panneau de réglages est créé par `app/`, qui possède déjà le DOM et la persistance : le rendu
   // n'a donc jamais à connaître un réglage.
+  //
+  // Les deux rappels ne sont appelés qu'à l'**activation**, et depuis le clic lui-même : le klaxon et
+  // la courte confirmation vocale sont donc des réponses à un geste utilisateur, jamais des sons de
+  // chargement. Ils ne passent ni par le speaker, ni par sa file, ni par ses cooldowns.
   if (hudRoot !== null) {
-    new SettingsPanel(hudRoot, settings, UI_TEXT_FR);
+    new SettingsPanel(hudRoot, settings, UI_TEXT_FR, {
+      onSoundEnabled: () => {
+        soundOutput?.playHorn();
+      },
+      onCommentatorEnabled: () => {
+        voiceOutput?.speak(UI_TEXT_FR.voiceEnabledConfirmation);
+      },
+    });
   }
 
   createGame({

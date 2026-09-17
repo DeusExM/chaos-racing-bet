@@ -83,8 +83,8 @@ export class TypeCooldownTracker {
  * Quota dur de répliques par segment, avec **une seule** segmentation possible.
  *
  * `segmentIndex(t)` est volontairement total : `floor` puis bornage sur `segmentCount − 1`. La borne
- * est ce qui empêche l'instant d'arrivée `tSim = 180` de créer un cinquième segment accidentel — la
- * segmentation du design est `[0,45[ [45,90[ [90,135[ [135,180]`, le quota de l'arrivée est donc
+ * est ce qui empêche l'instant d'arrivée `tSim = 60` de créer un segment accidentel — la
+ * segmentation du design est `[0,20[ [20,40[ [40,60]`, le quota de l'arrivée est donc
  * celui du **dernier** segment.
  */
 export function segmentIndex(policy: SpeakerPolicy, nowS: number): number {

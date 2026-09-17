@@ -367,12 +367,20 @@ export async function readStoredSettings(page: Page): Promise<string | null> {
   return page.evaluate((key) => window.localStorage.getItem(key), SETTINGS_STORAGE_KEY);
 }
 
-/** État affiché par les deux boutons de réglages, lu depuis `aria-pressed`. */
-export async function readSettingsButtons(page: Page): Promise<{ mute: boolean; tts: boolean }> {
+/**
+ * État affiché par les deux boutons de réglages, lu depuis `aria-pressed`.
+ *
+ * Passe corrective (§11) : les commandes `Muet` / `Voix` sont devenues `Son activé/coupé` et
+ * `Commentateur activé/coupé`, avec de nouveaux identifiants. La lecture reste une lecture de
+ * `aria-pressed`, donc de ce que le joueur voit réellement.
+ */
+export async function readSettingsButtons(
+  page: Page,
+): Promise<{ sound: boolean; commentator: boolean }> {
   return page.evaluate(() => {
     const pressed = (testId: string): boolean =>
       document.querySelector(`[data-testid="${testId}"]`)?.getAttribute('aria-pressed') === 'true';
-    return { mute: pressed('settings-mute'), tts: pressed('settings-tts') };
+    return { sound: pressed('settings-sound'), commentator: pressed('settings-commentator') };
   });
 }
 

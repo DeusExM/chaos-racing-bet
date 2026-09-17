@@ -64,6 +64,11 @@ export interface SubtitleLineView {
  * reste du temps **réel** : elle ne touche ni un cooldown du speaker, ni la sélection des lignes, ni
  * `tSim`. Le seul effet de bord — voulu et déjà présent en P009 — est de libérer plus ou moins tôt la
  * place de la réplique courante.
+ *
+ * Les bornes de `VIEW` sont dérivées du catalogue **réel** (46 à 98 caractères, médiane 74) et d'une
+ * vitesse de lecture confortable (≤ 20 caractères par seconde, et ≤ 17 cps pour les plus longues) :
+ * voir `SUBTITLE_MIN_MS`. Aucune réplique réelle n'y est écrasée au plafond, sauf les toutes
+ * dernières, ce qui rend l'adaptation effective au lieu d'être nominale.
  */
 export function subtitleDurationMs(text: string): number {
   const characters = text.trim().length;

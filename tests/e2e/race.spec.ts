@@ -45,10 +45,10 @@ test('les 6 personnages avancent, dans l’ordre exact des distances', async ({ 
     return;
   }
 
-  // La course se termine par le temps : exactement 10 800 pas, soit tSim = 180 s.
+  // La course se termine par le temps : exactement 3 600 pas, soit tSim = 60 s.
   expect(last.phase).toBe('finished');
   expect(last.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
-  expect(last.tSim).toBe(180);
+  expect(last.tSim).toBe(60);
 
   // A) Un sprite par personnage, tous présents et distincts.
   const spriteIds = last.sprites.map((sprite) => sprite.id);
@@ -222,7 +222,7 @@ test('un gel du navigateur de 2 secondes ne change ni le résultat ni le nombre 
 
   // Aucun pas n'est perdu, aucun n'est compté deux fois.
   expect(last.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
-  expect(last.tSim).toBe(180);
+  expect(last.tSim).toBe(60);
 
   const reference = await referenceDistances(page, OVERTAKE_SEED);
   expect([...last.distances], 'résultat identique malgré le gel').toEqual(reference);

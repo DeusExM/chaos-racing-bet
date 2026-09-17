@@ -424,7 +424,7 @@ class FactAuditor {
       }
 
       case 'CHECKPOINT_SPLIT': {
-        const expectedTimes: readonly number[] = [45, 90, 135];
+        const expectedTimes: readonly number[] = [20, 40];
         this.exactly(expectedTimes.includes(tSim), `CHECKPOINT_SPLIT : borne ${tSim}`);
         const order: CharacterId[] = [];
         for (let position = 0; position < COUNT; position += 1) {
@@ -497,14 +497,15 @@ class FactAuditor {
     return this.fail('aucun 2e au classement');
   }
 
-  /** Fin de course : exactement trois splits et une seule arrivée. */
+  /** Fin de course : exactement deux splits et une seule arrivée. */
   finish(): void {
     const problems = [...this.problems];
     this.problems = [];
     if (problems.length > 0) {
       throw new Error(`${this.seed} : ${problems.join(' | ')}`);
     }
-    if (this.splitTimes.length !== 3) {
+    const expectedSplits = RACE_CONFIG.SEGMENT_COUNT - 1;
+    if (this.splitTimes.length !== expectedSplits) {
       throw new Error(`${this.seed} : ${this.splitTimes.length} splits (${this.splitTimes.join(', ')})`);
     }
     if (this.arrivals !== 1) {
@@ -547,7 +548,7 @@ function auditSeeds(seeds: readonly string[]): Partial<Record<RaceFactType, numb
 }
 
 describe('véracité des faits sur 200 seeds', () => {
-  // Le test rejoue volontairement 200 courses × 10 800 pas (14 à 18 s) : le délai est donc déclaré
+  // Le test rejoue volontairement 200 courses × 3 600 pas (5 à 7 s) : le délai est donc déclaré
   // localement, sans toucher au délai par défaut de Vitest ni à SEED_COUNT.
   it('recompose chaque fait à partir de la seule mesure de la course', { timeout: 60_000 }, () => {
     const seeds = canonicalSeeds(SEED_COUNT);
@@ -565,7 +566,7 @@ describe('véracité des faits sur 200 seeds', () => {
     );
 
     // Les faits structurels sont certains ; les faits d'épisode doivent au moins exister.
-    expect(totals.CHECKPOINT_SPLIT).toBe(3 * SEED_COUNT);
+    expect(totals.CHECKPOINT_SPLIT).toBe((RACE_CONFIG.SEGMENT_COUNT - 1) * SEED_COUNT);
     expect((totals.FINISH ?? 0) + (totals.PHOTO_FINISH ?? 0)).toBe(SEED_COUNT);
     expect(totals.LEADER_CHANGE ?? 0).toBeGreaterThan(0);
     expect(totals.OVERTAKE_STREAK ?? 0).toBeGreaterThan(0);

@@ -70,12 +70,12 @@ describe('construction et état initial', () => {
 
     expect(engine.drainFacts()).toEqual([]);
 
-    // P009-A : une course complète produit les trois splits de checkpoint, puis exactement un fait
+    // P009-A : une course complète produit les deux splits de checkpoint, puis exactement un fait
     // d'arrivée. Le reste du flux dépend de la seed et de la course : il n'est donc pas figé ici.
     engine.runToCompletion();
     const facts = engine.drainFacts();
     const splits = facts.filter((fact) => fact.type === 'CHECKPOINT_SPLIT');
-    expect(splits.map((fact) => fact.tSim)).toEqual([45, 90, 135]);
+    expect(splits.map((fact) => fact.tSim)).toEqual([20, 40]);
     expect(
       facts.filter((fact) => fact.type === 'FINISH' || fact.type === 'PHOTO_FINISH'),
     ).toHaveLength(1);
@@ -102,15 +102,14 @@ describe('step() avance d’un pas fixe, sans argument', () => {
     expect(state.tSim).toBe(DT);
   });
 
-  it('tombe exactement sur 45, 90, 135 et 180 secondes', () => {
+  it('tombe exactement sur 20, 40 et 60 secondes', () => {
     // Contrat P003 : `tSim = steps × DT_S` par multiplication. Une accumulation flottante
-    // donnerait 44.99999999999873 puis 180.00000000003539 et raterait les checkpoints.
+    // donnerait 20.000000000000146 puis 59.999999999997875 et raterait les checkpoints.
     const engine = new RaceEngine(SEED);
     const marks: readonly (readonly [number, number])[] = [
-      [2700, 45],
-      [5400, 90],
-      [8100, 135],
-      [10_800, 180],
+      [1200, 20],
+      [2400, 40],
+      [3600, 60],
     ];
 
     for (const [steps, seconds] of marks) {
@@ -136,7 +135,7 @@ describe('phase', () => {
     });
   });
 
-  it('change de segment exactement aux bornes de 45 s, sans jamais dépasser 4', () => {
+  it('change de segment exactement aux bornes de 20 s, sans jamais dépasser 3', () => {
     const engine = new RaceEngine(SEED);
     const seen = new Set<number>();
     const kinds = new Set<string>();
@@ -150,14 +149,14 @@ describe('phase', () => {
       }
     }
 
-    expect([...seen].sort()).toEqual([1, 2, 3, 4]);
+    expect([...seen].sort()).toEqual([1, 2, 3]);
     // Aucun état de pause, de checkpoint ou de compte à rebours n'existe dans le noyau.
     expect([...kinds].sort()).toEqual(['finished', 'running']);
   });
 
   it('repasse le temps du segment à zéro à chaque borne', () => {
     const engine = new RaceEngine(SEED);
-    while (engine.getState().steps < 2700) {
+    while (engine.getState().steps < RACE_CONFIG.STEPS_PER_SEGMENT) {
       engine.step();
     }
 
@@ -170,17 +169,17 @@ describe('phase', () => {
 });
 
 describe('fin de course uniquement par le temps', () => {
-  it('fait exactement 10 800 pas et tSim = 180', () => {
+  it('fait exactement 3 600 pas et tSim = 60', () => {
     const engine = new RaceEngine(SEED);
     const result = engine.runToCompletion();
     const state = engine.getState();
 
     expect(state.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
-    expect(state.steps).toBe(10_800);
+    expect(state.steps).toBe(3_600);
     expect(state.tSim).toBe(RACE_CONFIG.TOTAL_SIM_S);
-    expect(state.tSim).toBe(180);
+    expect(state.tSim).toBe(60);
     expect(state.phase).toEqual({ kind: 'finished' });
-    expect(result.tSim).toBe(180);
+    expect(result.tSim).toBe(60);
     expect(result.ranking).toHaveLength(6);
     expect(result.distances).toHaveLength(6);
   });
@@ -189,20 +188,20 @@ describe('fin de course uniquement par le temps', () => {
     const engine = new RaceEngine(SEED, withScaledSpeed(0.1));
     const result = engine.runToCompletion();
 
-    expect(engine.getState().steps).toBe(10_800);
-    expect(engine.getState().tSim).toBe(180);
-    // Nominal 216 m, plus la dérive : la distance n'a aucune influence sur la fin.
-    expect(Math.max(...result.distances)).toBeLessThan(240);
+    expect(engine.getState().steps).toBe(3_600);
+    expect(engine.getState().tSim).toBe(60);
+    // Nominal 72 m, plus la dérive : la distance n'a aucune influence sur la fin.
+    expect(Math.max(...result.distances)).toBeLessThan(90);
   });
 
   it('se termine au même pas avec des vitesses multipliées par 10', () => {
     const engine = new RaceEngine(SEED, withScaledSpeed(10));
     const result = engine.runToCompletion();
 
-    expect(engine.getState().steps).toBe(10_800);
-    expect(engine.getState().tSim).toBe(180);
-    // Plus de 21 km parcourus : aucune distance n'est écrasée ni plafonnée à une valeur d'arrivée.
-    expect(Math.max(...result.distances)).toBeGreaterThan(20_000);
+    expect(engine.getState().steps).toBe(3_600);
+    expect(engine.getState().tSim).toBe(60);
+    // Plus de 7 km parcourus : aucune distance n'est écrasée ni plafonnée à une valeur d'arrivée.
+    expect(Math.max(...result.distances)).toBeGreaterThan(7_000);
   });
 
   it('classe les personnages par distance décroissante', () => {
@@ -360,7 +359,7 @@ describe('indépendance des flux aléatoires', () => {
     let x = 0;
     let violations = 0;
 
-    for (let step = 0; step < 4000; step += 1) {
+    for (let step = 0; step < RACE_CONFIG.TOTAL_STEPS; step += 1) {
       engine.step();
       const character = engine.getState().characters[0];
       if (character === undefined) {
@@ -396,12 +395,15 @@ describe('indépendance des flux aléatoires', () => {
 describe('équivalence des 6 personnages', () => {
   /**
    * La vitesse moyenne d'une course vaut exactement `x_final / tSim` : c'est la moyenne temporelle
-   * des 10 800 vitesses, donc une mesure gratuite et exacte. L'écart-type de cette moyenne sur une
-   * seule course est de 2,1 % ; sur 384 courses (4 147 200 pas) il tombe à 0,11 %, ce qui rend les
-   * seuils ci-dessous inatteignables par le hasard.
+   * des 3 600 vitesses, donc une mesure gratuite et exacte. L'écart-type de cette moyenne sur une
+   * seule course est de 3,6 % (il valait 2,1 % pour une course de 10 800 pas : la moyenne porte trois
+   * fois moins d'échantillons) ; sur **1 152 courses (4 147 200 pas)** il tombe à 0,11 %, ce qui rend
+   * les seuils ci-dessous inatteignables par le hasard. Le nombre de courses a été multiplié par 3
+   * avec la division de la durée par 3 : c'est **le même nombre total de pas simulés** qu'avant la
+   * passe corrective, donc la même puissance statistique et les mêmes seuils.
    */
   it('mesure un biais partagé strictement sous le seuil §13 ± 1,5 %', () => {
-    const races = 384;
+    const races = 1152;
     const totals = CHARACTER_IDS.map(() => 0);
 
     for (let race = 0; race < races; race += 1) {

@@ -44,9 +44,10 @@ import { characterNameFr } from './strings.fr';
  *
  * `CommentaryVoice` est une sortie **facultative** branchée sur une ligne déjà sélectionnée. Elle ne
  * peut ni déclencher, ni retarder, ni remplacer une réplique : elle vocalise ce que le speaker a déjà
- * décidé. Le **mode muet** (voir `src/app/settings.ts`) se résout donc en une seule question —
- * « une émission vocale est-elle autorisée ? » — et n'a aucun effet sur les faits, les cooldowns, la
- * file, les préemptions ou les sous-titres texte, qui continuent exactement à l'identique.
+ * décidé. Le réglage **`Commentateur`** (voir `src/app/settings.ts`) se résout donc en une seule
+ * question — « une émission vocale est-elle autorisée ? » — et n'a aucun effet sur les faits, les
+ * cooldowns, la file, les préemptions ou les sous-titres texte, qui continuent exactement à
+ * l'identique : couper le commentateur laisse les sous-titres intacts.
  */
 
 /** Sortie vocale telle que le commentaire l'utilise. Une ligne **déjà choisie** en entrée. */
@@ -54,8 +55,8 @@ export interface CommentaryVoice {
   /**
    * Une émission vocale est-elle autorisée à cet instant ?
    *
-   * C'est ici, et nulle part ailleurs, que se lit le mode muet : la logique du speaker n'en sait
-   * rien, donc elle ne peut pas en dépendre.
+   * C'est ici, et nulle part ailleurs, que se lit le réglage `Commentateur` : la logique du speaker
+   * n'en sait rien, donc elle ne peut pas en dépendre.
    */
   allowsVoice(): boolean;
   /** Vocalise la réplique affichée. Appelée uniquement si `allowsVoice()` est vrai. */
@@ -255,7 +256,7 @@ export class RaceCommentary {
     this.remainingMs = subtitleDurationMs(text);
 
     // La voix ne fait que vocaliser une ligne déjà choisie : elle ne peut ni la remplacer ni la
-    // retarder, et le mode muet la rend simplement silencieuse.
+    // retarder, et couper le commentateur la rend simplement silencieuse.
     if (this.voice?.allowsVoice() === true) {
       this.voice.speak(text);
     }

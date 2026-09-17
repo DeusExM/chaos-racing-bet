@@ -43,7 +43,7 @@ chaos-race/
       speedModel.ts           #   drift + surge + event ⇒ v_cible ⇒ v (rampe) ⇒ x
       events.ts               #   catalogue, tirage pondéré, planificateur, cooldowns
       observer.ts             #   détection des faits + buffer d'historique borné
-      engine.ts               #   RaceEngine : step() sans argument, tSim, segments, finished à 180 s
+      engine.ts               #   RaceEngine : step() sans argument, tSim, segments, finished à 60 s
       index.ts                #   surface publique du noyau
     sim/                      # TEMPS RÉEL (pas de Phaser)
       config.ts               #   SIM_CONFIG : countdown, pauses réelles, timeScale, mode test
@@ -55,20 +55,25 @@ chaos-race/
       Speaker.ts              #   file de répliques, arbitrage, préemption
     render/                   # PHASER — lecture seule
       Game.ts                 #   création du jeu Phaser, Scale.FIT
-      viewConfig.ts           #   VIEW.NOMINAL_SCALE_M = 2160 m (dimensionnement DÉCOR uniquement)
+      format.ts               #   mise en forme d'affichage (arrondis) — jamais une valeur de simulation
+      viewConfig.ts           #   VIEW.NOMINAL_SCALE_M = 720 m (dimensionnement DÉCOR uniquement)
       scenes/BootScene.ts
       scenes/RaceScene.ts
       scenes/FinishScene.ts
       view/TrackView.ts       #   sol, repères de distance décoratifs, décor
       view/CharacterSprite.ts #   1 sprite = 1 personnage, animation selon son état
       view/CameraRig.ts       #   suivi du peloton, zoom borné, marqueurs de bord
-      view/Hud.ts             #   mini-carte, classement, chrono, bandeau checkpoint
-      view/SubtitleBanner.ts  #   affichage des répliques du speaker
+      view/Hud.ts             #   classement, chrono, segment, seed, bandeau checkpoint
+      view/SubtitleBanner.ts  #   affichage des répliques du speaker (bande compacte)
+      view/EventFeedback.ts   #   retour TURBO/CHUTE attaché au personnage (lecture seule)
       view/DebugPanel.ts      #   panneau debug (seed, tSim, x, v, modificateurs)
     app/
       main.ts                 #   bootstrap : URL params, seed, création sim + Phaser, input
       strings.fr.ts           #   TOUS les textes visibles (FR)
-      settings.ts             #   localStorage : dernier seed, muet, TTS (n'affecte jamais la sim)
+      settings.ts             #   localStorage : dernier seed, son, commentateur (n'affecte jamais la sim)
+      SettingsPanel.ts        #   réglages `Son` / `Commentateur` (activé / coupé)
+      sound.ts                #   klaxon de confirmation (Web Audio synthétisé, aucun asset)
+      tts.ts                  #   synthèse vocale locale (rate centralisé, désactivée par défaut)
       pwa.ts                  #   enregistrement service worker + prompt d'installation
     styles.css                #   layout, safe-areas, overlay portrait, boutons ≥ 44px
   tests/
@@ -115,8 +120,8 @@ Règles vérifiées par test (`tests/unit/boundaries.test.ts`, P002) :
 /** Phase du NOYAU : ne connaît que le temps simulé. Aucune notion de pause. */
 export type RacePhase =
   | { kind: 'idle' }
-  | { kind: 'running'; segment: 1 | 2 | 3 | 4; segmentElapsedS: number }
-  | { kind: 'finished' };            // atteint si et seulement si tSim >= 180
+  | { kind: 'running'; segment: 1 | 2 | 3; segmentElapsedS: number }
+  | { kind: 'finished' };            // atteint si et seulement si tSim >= 60
 
 export interface CharacterState {
   readonly id: CharacterId;          // index stable 0..5
@@ -155,7 +160,7 @@ export interface SimConfig {
 class RaceEngine {
   constructor(seed: string, config?: RaceConfig);
   step(): void;                          // avance d'EXACTEMENT un DT. Aucun argument.
-  runToCompletion(): RaceResult;         // 10 800 pas, sans rendu ni pause
+  runToCompletion(): RaceResult;         // 3 600 pas, sans rendu ni pause
   getState(): Readonly<RaceState>;
   drainFacts(): readonly RaceFact[];     // faits produits par les pas écoulés
   serialize(): string; deserialize(s: string): void;   // préparation serveur (P018)
@@ -182,13 +187,13 @@ class RaceSimulation {
 | Temps | **simulé** | **réel** |
 | Avance | `step()` = 1 pas de `DT`, sans argument | `update(realDtMs)` = `floor(acc / DT)` pas |
 | Countdown | inconnu | géré |
-| Pause checkpoint | inconnu (signale seulement l'instant `tSim = 45/90/135`) | décidée, chronométrée, reprise automatique |
+| Pause checkpoint | inconnu (signale seulement l'instant `tSim = 20/40`) | décidée, chronométrée, reprise automatique |
 | Pause utilisateur | inconnu | suspend l'appel à `step()` |
 | Mode test / `timeScale` | inconnu | nombre de pas par frame |
 | Effet d'une pause | **aucun** : le noyau n'est pas appelé | gèle `tSim`, `x`, `v` |
 
 **Conséquence non négociable** : une pause réelle ne fait jamais avancer ni modifier `RaceEngine`.
-Le nombre total de pas d'une course est donc toujours `10 800`, avec ou sans pauses, et le résultat
+Le nombre total de pas d'une course est donc toujours `3 600`, avec ou sans pauses, et le résultat
 est identique.
 
 ### A.6 Choix techniques et justification
@@ -284,16 +289,17 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P001 | Scaffolding, scripts et garde-fous | — | projet qui build, typecheck, teste |
 | P002 | Seed, RNG déterministe, garde-fous de frontière | P001 | `core/rng.ts` + test de frontière |
 | P003 | Types, config (temps simulé / temps réel), piste temporelle, classement | P002 | `core/config.ts`, `core/track.ts`, `core/ranking.ts` |
-| P004 | Moteur minimal + modèle de vitesse (base + dérive + rampes) | P003 | `core/engine.ts` déterministe, fin à `tSim = 180 s` |
+| P004 | Moteur minimal + modèle de vitesse (base + dérive + rampes) | P003 | `core/engine.ts` déterministe, fin au temps simulé total |
 | **P005** | **Première course visible : `RaceSimulation` minimale + rendu Phaser minimal + classement** | P004 | **6 formes qui courent, se dépassent, classement à l'écran** |
-| P006 | Structure 4 × 45 s + checkpoints (segments au noyau, pauses réelles dans `sim/`) | P005 | 4 segments, 3 pauses automatiques |
+| P006 | Structure en segments + checkpoints (segments au noyau, pauses réelles dans `sim/`) | P005 | 3 segments, 2 pauses automatiques |
 | P007 | Variations occasionnelles (surges) | P006 | accélérations/ralentissements ponctuels |
 | P008 | Événements rares + planificateur | P007 | turbos, chutes, raccourcis |
 | P009 | Observateur de faits + speaker *(P009-A ✅ observateur, P009-B ✅ speaker, P009-C ⏳ textes)* | P008 | commentaires à cooldowns |
 | P010 | Équilibrage statistique + verrouillage des constantes `[x]` *(25/25 critères sur 1000 seeds)* | P009 | `tools/balance.ts` + seuils testés |
-| P011 | HUD complet + panneau debug `[x]` | P010 | mini-carte, classement détaillé, chrono |
-| P012 | Affichage du speaker + réglages `[x]` | P011 | bannières de commentaires |
+| P011 | HUD complet + panneau debug `[x]` | P010 | classement détaillé, chrono (mini-carte retirée depuis la passe corrective) |
+| P012 | Affichage du speaker + réglages `[x]` | P011 | bande de commentaires |
 | P013 | Arrivée et podium `[x]` | P012 | course complète jouable |
+| **P013-cor** | **Passe corrective après le premier test joueur manuel `[x]`** | P013 | course de 60 s, HUD dégagé, retours d'événement, son et commentateur explicites |
 | **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
 | P014 | Identité visuelle et animations des 6 personnages | P013.5 | personnages distincts et drôles |
 | P015 | Polish, accessibilité, audio optionnel | P014 | finition |
@@ -301,6 +307,12 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P017 | E2E complets + budget de performance | P016 | non-régression bout en bout |
 | P018 | Sérialisation, préparation serveur, docs finales | P017 | V1 stable documentée |
 | P019+ | *(backlog)* Blender, mode drame, multi-spectateurs… | P018 | voir backlog |
+
+> **Les lignes ci-dessus décrivent l'état au moment de leur étape.** La passe corrective
+> **P013-cor** (issue du premier test joueur manuel après P013) a ramené la course de `180 s`
+> (4 × 45 s, 3 checkpoints) à **`60 s` (3 × 20 s, 2 checkpoints)** : là où une description d'étape
+> antérieure mentionne `180 s`, `10800` pas, `4 × 45 s` ou `2160 m`, c'est un **compte rendu
+> historique**, pas l'état courant. Les valeurs courantes sont celles de `GAME_DESIGN.md` §4 et §13.
 
 **Jalon clé : à la fin de P005, on doit pouvoir juger si les mouvements et les dépassements sont
 amusants à regarder.** Aucune étape lourde (événements, speaker, équilibrage, graphismes) ne doit
@@ -1032,6 +1044,83 @@ erreur console. Cinq essais « Nouvelle course » exécutés réellement, depuis
 toutes différentes de la seed initiale) et six podiums observés — `c3,c2,c1` (course initiale),
 `c2,c1,c3`, `c1,c3,c4`, `c5,c0,c4`, `c2,c5,c0`, `c1,c5,c0` : au moins un podium diffère (ici les cinq
 diffèrent), et les courses diffèrent réellement, pas seulement leurs étiquettes. Aucun blocage.
+
+---
+
+### P013-cor — Passe corrective issue du premier test joueur manuel après P013 `[x]`
+
+**Nature.** Ce n'est **pas** une nouvelle étape de la roadmap : c'est une **passe corrective** demandée
+explicitement après le premier test joueur manuel de la course complète (P013), **avant** le jalon
+P013.5. Elle ne renumérote rien, ne change aucun invariant et ne modifie **aucune constante de
+simulation** : elle corrige neuf problèmes constatés en jouant — durée de course, HUD envahissant,
+speaker qui masque l'action, voix trop lente, bonus/malus imperceptibles, nombres bruts affichés,
+libellé `Pointage`, réglages `Muet` / `Voix` ambigus, absence de retour immédiat à l'activation du son
+et du commentaire.
+
+**1. Course de 60 s.** `RACE_CONFIG` passe à `SEGMENT_COUNT = 3`, `SEGMENT_DURATION_S = 20`,
+`TOTAL_SIM_S = 60`, `STEPS_PER_SEGMENT = 1200`, `TOTAL_STEPS = 3600`. Les checkpoints tombent à
+`tSim = 20` et `40 s` ; l'indicateur de segment affiche `1/3`, `2/3`, `3/3`. Après `FINISHED`, `tSim`
+reste à `60` et le nombre de pas à `3600` : **aucun pas supplémentaire**, la décélération d'arrivée
+reste **purement visuelle** (P013). Le mode test accéléré passe à ≈ 3,2 s réelles.
+
+**2. Équilibrage : aucune constante de jeu touchée.** `SPEED.*`, `DRIFT.*`, `SURGE.*`, `EVENT.*`
+(dont `RATE_PER_S = 1/14`) et `OVERTAKE.*` sont **inchangés**. Seules les lignes de §13 qui
+**dépendent de la durée** ont été réinterprétées, chacune avec sa mesure :
+écart P1–P6 `[45 ; 150] m` / `≥ 15` / `≤ 290` (l'écart-type croît comme la **racine** du temps),
+critère du leader déplacé au **début du dernier segment** (`TOTAL_SIM_S − SEGMENT_DURATION_S = 40 s`,
+valeur **dérivée**), événements `[3 ; 6]` et surges `[4,7 ; 8,7]` (mêmes **taux** qu'en 180 s),
+répliques du speaker `[6 ; 14]` (plafonnées par le cooldown global de `6 s`). Les lignes indépendantes
+de la durée (changements de leader, dépassements, taux de victoire, part d'événements, biais de
+vitesse, reproductibilité) sont **conservées telles quelles**. Résultat du corpus canonique de
+1000 seeds : **25/25 critères conformes**, reproductibilité **100/100** bit à bit.
+
+**3. Vocabulaire.** `Pointage` disparaît de tout texte visible au profit de **`Checkpoint`**
+(`Checkpoint 1 · 20 s`) ; les noms techniques internes sont conservés.
+
+**4. Piste dégagée.** La **mini-carte** permanente est retirée du HUD (son modèle reste un hook de test
+et de debug), le classement permanent est conservé mais compacté en bas à droite, le chrono est
+resserré, la seed devient discrète, les réglages sont réduits à deux pastilles. Tous les hooks de test
+et de debug restent en place.
+
+**5. Checkpoint = retour bref.** Le grand tableau central a disparu : le checkpoint affiche un
+**bandeau temporaire** (numéro, instant atteint, leader figé).
+
+**6. Commentaire = bande de retransmission.** Zone basse non critique, largeur et hauteur bornées,
+deux lignes, nom du personnage conservé, **aucune** seconde file d'attente : le texte reste celui du
+speaker réel.
+
+**7. Voix plus rapide.** `TTS_RATE = 1.6`, constante de **présentation** centralisée, vérifiée sur une
+voix française. La voix ne peut influencer ni la simulation, ni le RNG, ni l'horloge.
+
+**8. Sous-titres lisibles.** `VIEW.SUBTITLE_MIN_MS = 800`, `SUBTITLE_PER_CHAR_MS = 60`,
+`SUBTITLE_MAX_MS = 5800` (mesures : ≤ 20 caractères/s, catalogue 40–110 caractères, et
+`SUBTITLE_MAX_MS < SPEAK.GLOBAL_COOLDOWN_S`). Règle d'affichage : aucun cooldown ni fait n'est touché.
+
+**9. Nombres lisibles.** Un module unique (`src/render/format.ts`) met en forme **toutes** les valeurs
+affichées (`35.9333333333 %` → `36 %`, `6.1333333333 s` → `6 s`, `26.0 m` pour les distances) ; l'audit
+couvre tous les gabarits du speaker, et **aucune valeur de simulation n'est arrondie**.
+
+**10. Retour des bonus et malus.** Chaque événement actif affiche un libellé court et son sens
+(`BONUS !` / `MALUS !`) **attaché au personnage**, temporaire, non obscurcissant, multiple, lu
+**exclusivement** dans les événements réels du noyau (aucun tirage, aucune écriture).
+
+**11. `Son` / `Commentateur`.** Les réglages `Muet` / `Voix` deviennent des commandes explicites à état
+(`activé` / `coupé`), persistées, avec **migration** de l'ancien format et **aucun plantage** sur une
+valeur corrompue. Activer le son joue un **court klaxon** synthétisé (Web Audio, dans le clic, aucun
+asset, aucune dépendance) ; activer le commentateur prononce **`Let's go!`** (action du joueur
+uniquement, jamais au chargement, jamais à la désactivation, hors file et cooldowns du speaker).
+Le système audio complet reste en **P015**.
+
+**Preuves.** Tests unitaires des helpers de mise en forme, du retour d'événement, du son, des réglages
+et de la voix ; tests E2E de la course de 60 s (`3600` pas, `tSim = 60 s`), des deux checkpoints, du
+bandeau de commentaire, du retour d'événement (comparé aux événements du noyau), du klaxon et de
+`Let's go!`, de l'invariance TTS/audio et du responsive en 1280×720, 1920×1080 et 844×390 ;
+`npm run balance` sur le corpus canonique de 1000 seeds (25/25) ; re-validation de P013 en 60 s.
+
+**Décisions et écarts.** Aucun écart par rapport à la demande. Les hooks de debug sont conservés, la
+mini-carte survit sous forme de modèle testable, et aucune tolérance de test n'a été relâchée pour
+faire passer une mesure : là où un seuil gênait, c'est le **CSS** ou l'**échantillon** qui a été
+corrigé (par exemple la police du classement en téléphone paysage, remontée à `0,6rem`).
 
 ---
 

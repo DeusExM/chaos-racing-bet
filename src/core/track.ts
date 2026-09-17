@@ -15,13 +15,12 @@ import { RACE_CONFIG } from './config';
  *
  * | Pas | `step × DT_S` | Accumulation naïve |
  * | --- | --- | --- |
- * | `2700` | `45` exactement | `44.99999999999873` |
- * | `5400` | `90` exactement | `89.99999999999618` |
- * | `8100` | `135` exactement | `134.99999999999957` |
- * | `10800` | `180` exactement | `180.00000000003539` |
+ * | `1200` | `20` exactement | `20.000000000000146` |
+ * | `2400` | `40` exactement | `39.99999999999901` |
+ * | `3600` | `60` exactement | `59.999999999997875` |
  *
  * Avec la multiplication, les comparaisons ci-dessous sont **exactes** et aucune tolérance n'est
- * nécessaire — ce qui permet d'affirmer « la course se termine à partir de `tSim = 180 s`, et
+ * nécessaire — ce qui permet d'affirmer « la course se termine à partir de `tSim = 60 s`, et
  * seulement là » sans zone grise.
  */
 
@@ -35,9 +34,9 @@ function requireFiniteTime(tSim: number): void {
 /**
  * Index du segment courant, de `0` à `SEGMENT_COUNT - 1`.
  *
- * Segments : `[0, 45)`, `[45, 90)`, `[90, 135)`, `[135, 180]`. L'instant de séparation appartient
- * toujours au segment qui commence. Un temps simulé négatif est ramené à `0`, et un temps au-delà de
- * la fin de course reste dans le dernier segment.
+ * Segments : `[0, 20)`, `[20, 40)`, `[40, 60]`. L'instant de séparation appartient toujours au
+ * segment qui commence. Un temps simulé négatif est ramené à `0`, et un temps au-delà de la fin de
+ * course reste dans le dernier segment.
  */
 export function segmentIndexAt(tSim: number): number {
   requireFiniteTime(tSim);
@@ -63,9 +62,9 @@ export function segmentElapsedS(tSim: number): number {
 }
 
 /**
- * Vrai si `tSim` est **exactement** un instant de checkpoint : `45`, `90` ou `135 s`.
+ * Vrai si `tSim` est **exactement** un instant de checkpoint : `20` ou `40 s`.
  *
- * Le départ (`tSim = 0`) et la fin de course (`tSim = 180 s`) n'en sont pas : un checkpoint sépare
+ * Le départ (`tSim = 0`) et la fin de course (`tSim = 60 s`) n'en sont pas : un checkpoint sépare
  * deux segments, il ne les termine pas. Un découpage d'un millième de seconde plus loin n'en est
  * évidemment pas un.
  */
@@ -75,10 +74,10 @@ export function isCheckpointInstant(tSim: number): boolean {
 }
 
 /**
- * Vrai à partir de `tSim = TOTAL_SIM_S` (`180 s`), et seulement là.
+ * Vrai à partir de `tSim = TOTAL_SIM_S` (`60 s`), et seulement là.
  *
  * Aucune distance n'intervient dans cette décision : c'est le **seul** critère d'arrêt de la course,
- * exactement `TOTAL_STEPS = 10800` pas.
+ * exactement `TOTAL_STEPS = 3600` pas.
  */
 export function isRaceOver(tSim: number): boolean {
   requireFiniteTime(tSim);

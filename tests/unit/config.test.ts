@@ -33,28 +33,30 @@ function assertDeeplyFrozen(value: unknown, path: string): void {
 }
 
 describe('constantes de temps simulé', () => {
-  it('décrit exactement 4 segments de 45 s, soit 180 s de course', () => {
-    expect(RACE_CONFIG.SEGMENT_COUNT).toBe(4);
-    expect(RACE_CONFIG.SEGMENT_DURATION_S).toBe(45);
-    expect(RACE_CONFIG.TOTAL_SIM_S).toBe(180);
+  it('décrit exactement 3 segments de 20 s, soit 60 s de course', () => {
+    expect(RACE_CONFIG.SEGMENT_COUNT).toBe(3);
+    expect(RACE_CONFIG.SEGMENT_DURATION_S).toBe(20);
+    expect(RACE_CONFIG.TOTAL_SIM_S).toBe(60);
     expect(RACE_CONFIG.SEGMENT_COUNT * RACE_CONFIG.SEGMENT_DURATION_S).toBe(RACE_CONFIG.TOTAL_SIM_S);
   });
 
-  it('compte 2700 pas par segment et 10800 pas pour la course entière', () => {
+  it('compte 1200 pas par segment et 3600 pas pour la course entière', () => {
     expect(RACE_CONFIG.DT_S).toBe(1 / 60);
-    expect(RACE_CONFIG.STEPS_PER_SEGMENT).toBe(2700);
-    expect(RACE_CONFIG.TOTAL_STEPS).toBe(10800);
+    expect(RACE_CONFIG.STEPS_PER_SEGMENT).toBe(1200);
+    expect(RACE_CONFIG.TOTAL_STEPS).toBe(3600);
     expect(RACE_CONFIG.SEGMENT_COUNT * RACE_CONFIG.STEPS_PER_SEGMENT).toBe(RACE_CONFIG.TOTAL_STEPS);
   });
 
   it('place chaque instant de checkpoint exactement sur un pas de simulation', () => {
     // C'est cette exactitude qui permet à `track.ts` de comparer sans la moindre tolérance, et donc
-    // d'affirmer « terminé à partir de 180 s, et seulement là ». Si cette propriété cassait, le
+    // d'affirmer « terminé à partir de 60 s, et seulement là ». Si cette propriété cassait, le
     // moteur devrait accumuler du temps et raterait les checkpoints : ce test est le garde-fou.
     expect(RACE_CONFIG.STEPS_PER_SEGMENT * RACE_CONFIG.DT_S).toBe(RACE_CONFIG.SEGMENT_DURATION_S);
     expect(RACE_CONFIG.TOTAL_STEPS * RACE_CONFIG.DT_S).toBe(RACE_CONFIG.TOTAL_SIM_S);
-    expect(2 * RACE_CONFIG.STEPS_PER_SEGMENT * RACE_CONFIG.DT_S).toBe(90);
-    expect(3 * RACE_CONFIG.STEPS_PER_SEGMENT * RACE_CONFIG.DT_S).toBe(135);
+    // Les deux checkpoints intermédiaires : 20 s et 40 s, soit les deux bornes internes.
+    expect(1 * RACE_CONFIG.STEPS_PER_SEGMENT * RACE_CONFIG.DT_S).toBe(20);
+    expect(2 * RACE_CONFIG.STEPS_PER_SEGMENT * RACE_CONFIG.DT_S).toBe(40);
+    expect(RACE_CONFIG.SEGMENT_COUNT - 1, 'deux checkpoints intermédiaires').toBe(2);
   });
 
   it('ne contient que les six constantes de temps simulé prévues', () => {

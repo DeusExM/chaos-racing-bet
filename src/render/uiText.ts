@@ -44,16 +44,8 @@ export interface UiText {
   readonly debugNoEvent: string;
   /** Numéro de segment courant, dans le panneau de debug (P011). */
   readonly debugSegment: string;
-  /** Titre de la mini-carte du HUD. */
-  readonly minimapTitle: string;
-  /** Libellé du repère de départ de la mini-carte. */
-  readonly minimapStart: string;
-  /** Libellé de l'échelle nominale, en tête de la mini-carte. */
-  readonly minimapEnd: string;
-  /** Titre du bloc chrono / segment. */
+  /** Titre du bloc chrono / segment. Porté en `aria-label` : le bloc n'a plus de titre visible. */
   readonly timeTitle: string;
-  /** Libellé du temps simulé écoulé. */
-  readonly timeLabel: string;
   /** Libellé du numéro de segment courant. */
   readonly segmentLabel: string;
   /** Libellé de la seed affichée dans le HUD. */
@@ -68,7 +60,7 @@ export interface UiText {
   readonly checkpointTitle: string;
   /** Libellé du split de tête dans le bandeau de checkpoint. */
   readonly checkpointLeaderSplit: string;
-  /** Libellé du repère décoratif de l'échelle nominale. */
+  /** Libellé du repère décoratif de l'échelle nominale, dessiné sur la piste. */
   readonly nominalScale: string;
   /** Libellé du bouton qui lance la course. */
   readonly startButton: string;
@@ -89,14 +81,30 @@ export interface UiText {
   readonly queuedLines: string;
   /** Titre du bloc de réglages locaux (P012). */
   readonly settingsTitle: string;
-  /** Libellé du bouton qui coupe **toutes** les sorties vocales. */
-  readonly muteLabel: string;
-  /** Libellé du bouton qui autorise la vocalisation des répliques. */
-  readonly ttsLabel: string;
+  /** Libellé du bouton qui active ou coupe les effets sonores. */
+  readonly soundLabel: string;
+  /** Libellé du bouton qui active ou coupe le commentateur vocal. */
+  readonly commentatorLabel: string;
   /** État affiché d'un réglage activé. */
   readonly settingsOn: string;
   /** État affiché d'un réglage désactivé. */
   readonly settingsOff: string;
+  /**
+   * Libellés du retour visuel d'événement (passe corrective), indexés par `EventId`.
+   *
+   * Ils sont **textuels et courts** (`TURBO !`, `RALENTI !`) : ils accompagnent le sprite pendant
+   * l'événement et nomment ce que le noyau applique réellement, sans jamais l'interpréter.
+   */
+  readonly eventLabels: Readonly<Record<string, string>>;
+  /** Mots-clés du retour visuel, réutilisés par les tests : bonus, malus, accélération, freinage. */
+  readonly eventFeedback: Readonly<Record<string, string>>;
+  /**
+   * Confirmation **orale** jouée à l'activation du commentateur (passe corrective).
+   *
+   * Ce n'est pas une réplique du speaker : elle ne vient d'aucun fait, ne consomme ni cooldown ni
+   * file, et n'existe qu'en réponse à un clic de l'utilisateur.
+   */
+  readonly voiceEnabledConfirmation: string;
   /** Titre de l'écran d'arrivée (P013). */
   readonly finishTitle: string;
   /** Étiquette du vainqueur, suivie de son nom et de sa distance. */

@@ -15,10 +15,10 @@ import {
 /**
  * Tests E2E de P006 : compte à rebours, bannières de checkpoint, pauses.
  *
- * Le mode test est utilisé dès qu'une course entière doit être observée : à ×20, les trois
- * checkpoints et l'arrivée tiennent en une dizaine de secondes, alors qu'une course normale dure
- * 192 s réelles. Le compte à rebours, lui, se vérifie **en mode normal**, puisque c'est précisément
- * le seul mode où il existe.
+ * Le mode test est utilisé dès qu'une course entière doit être observée : à ×20, les deux checkpoints
+ * et l'arrivée tiennent en une dizaine de secondes, alors qu'une course normale dure 60 s simulées,
+ * plus deux pauses de 3 s et le compte à rebours. Le compte à rebours, lui, se vérifie **en mode
+ * normal**, puisque c'est précisément le seul mode où il existe.
  */
 
 /** Pas et distances figés, lus dans la même évaluation pour qu'ils soient cohérents entre eux. */
@@ -64,7 +64,7 @@ test('le mode test n’a aucun compte à rebours', async ({ page }) => {
   expectNoErrors(watch);
 });
 
-test('les trois bannières de checkpoint apparaissent puis disparaissent', async ({ page }) => {
+test('les deux bannières de checkpoint apparaissent puis disparaissent', async ({ page }) => {
   const watch = watchConsole(page);
   await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
 
@@ -75,23 +75,26 @@ test('les trois bannières de checkpoint apparaissent puis disparaissent', async
   expect(last?.phase).toBe('finished');
 
   const pauses = samples.filter((sample) => sample.simPhase === 'checkpointPause');
-  expect(pauses.length, 'les trois pauses doivent être observées').toBeGreaterThan(0);
+  expect(pauses.length, 'les deux pauses doivent être observées').toBeGreaterThan(0);
 
-  // Les pauses se succèdent dans l'ordre 1, 2, 3 — chacune sur plusieurs frames.
+  // Les pauses se succèdent dans l'ordre 1, 2 — chacune sur plusieurs frames. Une troisième
+  // apparition signifierait qu'un checkpoint a été inventé : la course de 60 s n'en compte que deux.
   const numbers: number[] = [];
   for (const sample of pauses) {
     if (numbers[numbers.length - 1] !== sample.checkpoint) {
       numbers.push(sample.checkpoint ?? -1);
     }
   }
-  expect(numbers).toEqual([1, 2, 3]);
+  expect(numbers).toEqual([1, 2]);
 
   for (const sample of pauses) {
     const number = sample.checkpoint ?? 0;
     expect(sample.bannerHidden, 'bannière visible pendant la pause').toBe(false);
-    // Le titre porte le numéro du pointage **et** l'instant de la borne (45 / 90 / 135 s), pris dans
-    // le noyau : c'est ce qui rend le bandeau utile, au-delà du simple numéro.
-    expect(sample.banner).toContain(`Pointage ${String(number)}`);
+    // Le titre porte le numéro du checkpoint **et** l'instant de la borne (20 / 40 s), pris dans le
+    // noyau : c'est ce qui rend le bandeau utile, au-delà du simple numéro. Le mot employé est bien
+    // « Checkpoint » — la passe corrective a retiré « Pointage », qui n'était pas naturel.
+    expect(sample.banner).toContain(`Checkpoint ${String(number)}`);
+    expect(sample.banner).not.toContain('Pointage');
     // `\u00A0` : l'espace insécable est celle des formateurs du HUD, et elle évite un retour à la
     // ligne entre le nombre et son unité.
     expect(sample.banner).toContain(
@@ -108,7 +111,7 @@ test('les trois bannières de checkpoint apparaissent puis disparaissent', async
   }
 
   // Aucune pause n'est un flash d'une seule frame, et la course ne s'arrête jamais sur la dernière.
-  for (const number of [1, 2, 3]) {
+  for (const number of [1, 2]) {
     const visible = pauses.filter((sample) => sample.checkpoint === number);
     expect(visible.length, `bannière ${number} visible assez longtemps`).toBeGreaterThan(3);
   }
@@ -171,7 +174,7 @@ test('la course se termine normalement malgré une pause utilisateur au milieu',
     .toBe(RACE_CONFIG.TOTAL_STEPS);
   await expect(page.getByTestId('race-status')).toHaveText('Course terminée');
 
-  // 10800 pas exactement, et le résultat est celui du noyau seul : la pause n'a rien changé.
+  // 3 600 pas exactement, et le résultat est celui du noyau seul : la pause n'a rien changé.
   const final = await readFreeze(page);
   expect(final.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
   expect(final.distances).toEqual(await referenceDistances(page, OVERTAKE_SEED));

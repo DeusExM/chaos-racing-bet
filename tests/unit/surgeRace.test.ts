@@ -82,7 +82,7 @@ describe('le moteur applique exactement le planning tiré', () => {
       });
     }
 
-    // Le moteur et un planning reconstruit à part doivent coïncider sur 10 800 pas × 6 personnages.
+    // Le moteur et un planning reconstruit à part doivent coïncider sur 3 600 pas × 6 personnages.
     expect(mismatches).toBe(0);
   });
 
@@ -179,7 +179,10 @@ describe('le moteur applique exactement le planning tiré', () => {
       previous = characters.map((character) => character.surge);
     }
 
-    expect(blocks).toBeGreaterThan(60);
+    // Au moins 5 surges par personnage et par course : c'est la cadence design (`TOTAL_SIM_S / 9`),
+    // et c'est ce qui garantit que plusieurs frontières de surge ont réellement été traversées.
+    // Mesure à 60 s : 36 blocs pour les six personnages.
+    expect(blocks).toBeGreaterThanOrEqual(CHARACTER_IDS.length * 5);
     expect(changes).toBe(0);
   });
 });
@@ -217,7 +220,10 @@ describe('progressivité et bornes, surges compris', () => {
     }
 
     // Les démarrages et les fins de surge sont nombreux : la rampe est donc réellement éprouvée.
-    expect(boundarySteps).toBeGreaterThan(100);
+    // La borne est dérivée de la cadence design — au moins 5 surges par personnage et par course,
+    // chacun produisant deux frontières — et non d'une constante héritée des courses de 180 s.
+    // Mesure à 60 s : 36 blocs et 71 frontières.
+    expect(boundarySteps).toBeGreaterThanOrEqual(2 * CHARACTER_IDS.length * 5);
     expect(violations).toBe(0);
     expect(outOfBounds).toBe(0);
   });
@@ -259,8 +265,9 @@ describe('pauses : aucun temps simulé, donc aucun surge consommé', () => {
 
     expect(simulation.view.steps).toBe(found.endStep);
     // Le surge avait bien une durée simulée restante significative après la borne : c'est ce qui
-    // rend la vérification utile.
-    expect(found.endStep - checkpointStep).toBeGreaterThan(10);
+    // rend la vérification utile. La borne est basse depuis la passe corrective (course de 60 s,
+    // borne à 20 s) mais non nulle : mesure 10 pas restants sur la seed retenue.
+    expect(found.endStep - checkpointStep).toBeGreaterThanOrEqual(5);
 
     // Et la course entière reste identique au noyau seul.
     let finishGuard = 0;
@@ -355,7 +362,16 @@ describe('espérance des constantes de surge', () => {
     // Moyenne temporelle du surge : `E[magnitude] × E[durée] / E[intervalle]`, entièrement dérivée
     // des constantes documentées. C'est cette grandeur — et non la vitesse, que la rampe retarde un
     // peu — qui doit coller à l'algèbre.
-    const races = 24;
+    // L'estimateur porte sur le **nombre de surges** échantillonnés, pas sur le nombre de pas : un
+    // surge dure 1,5 à 4 s, donc la moyenne ci-dessus est bruitée par le tirage des magnitudes, dont
+    // l'écart-type (~0,15) est plus de quatre fois la grandeur mesurée (~0,01).
+    //
+    // Les `24` courses de 180 s d'avant la passe corrective échantillonnaient 2 880 surges, soit à
+    // peine 1 σ pour la tolérance de 20 % : le test ne tenait que de justesse. Une course de 60 s
+    // n'en contient qu'un tiers (6,67 par personnage) ; il faut donc trois fois plus de courses pour
+    // retrouver **le même volume d'échantillon** — 216 × 3 600 pas = 8 640 surges, ≈ 4 σ pour la même
+    // tolérance. La tolérance n'est pas touchée : c'est la mesure qui retrouve sa puissance.
+    const races = 216;
     let total = 0;
     let steps = 0;
 
@@ -448,7 +464,7 @@ describe('reproductibilité', () => {
     let drift = 0;
     let mismatches = 0;
 
-    for (let step = 1; step <= 5000; step += 1) {
+    for (let step = 1; step <= TOTAL_STEPS; step += 1) {
       engine.step();
       drift = stepOrnsteinUhlenbeck(drift, gaussianFrom(stream), params);
       if (engine.getState().characters[0]?.drift !== drift) {

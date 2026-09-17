@@ -133,8 +133,9 @@ export function surgeParams(config: GameConfig): SurgeParams {
  * Planning initial d'un personnage, au pas `0`.
  *
  * Le premier surge est tiré **comme les suivants** : la course ne commence donc pas avec un surge
- * « gratuit ». Sans cette symétrie, le nombre attendu de surges sur 180 s serait de 21 et non de 20,
- * et la mesure statistique ne correspondrait plus à `TOTAL_SIM_S / INTERVAL_MEAN_S`.
+ * « gratuit ». Sans cette symétrie, le nombre attendu de surges sur la course serait supérieur de 1
+ * à `TOTAL_SIM_S / INTERVAL_MEAN_S`, et la mesure statistique ne correspondrait plus à cette
+ * espérance.
  */
 export function createSurgeState(stream: RngStream, params: SurgeParams): SurgeState {
   return {

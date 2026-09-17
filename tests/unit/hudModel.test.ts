@@ -74,22 +74,22 @@ describe('modèle du HUD : lecture seule du noyau', () => {
     expect(segmentNumberFor({ kind: 'finished' })).toBe(0);
     expect(segmentNumberFor({ kind: 'running', segment: 3, segmentElapsedS: 1 })).toBe(3);
 
-    // Un pas de segment = `SEGMENT_DURATION_S / DT_S` : la frontière vient du noyau, jamais d'un 45.
+    // Un pas de segment = `SEGMENT_DURATION_S / DT_S` : la frontière vient du noyau, jamais d'un 20.
     const stepsPerSegment = RACE_CONFIG.SEGMENT_DURATION_S / RACE_CONFIG.DT_S;
-    for (const segment of [1, 2, 3, 4]) {
+    for (const segment of [1, 2, 3]) {
       const state = stateAfter(OVERTAKE_SEED, stepsPerSegment * (segment - 1) + 5);
       const model = buildHudModel(state, 'running', null);
       expect(model.segment.number, `segment ${String(segment)}`).toBe(segment);
     }
   });
 
-  it('borne l’instant d’un pointage sur les constantes du noyau', () => {
+  it('borne l’instant d’un checkpoint sur les constantes du noyau', () => {
     expect(checkpointTimeS(1)).toBe(RACE_CONFIG.SEGMENT_DURATION_S);
-    expect(checkpointTimeS(3)).toBe(3 * RACE_CONFIG.SEGMENT_DURATION_S);
+    expect(checkpointTimeS(2)).toBe(2 * RACE_CONFIG.SEGMENT_DURATION_S);
   });
 
-  it('n’expose un pointage que pendant la pause, avec les écarts figés', () => {
-    // 45 s = 2700 pas : c'est exactement l'instant de la première borne.
+  it('n’expose un checkpoint que pendant la pause, avec les écarts figés', () => {
+    // 20 s = 1200 pas : c'est exactement l'instant de la première borne.
     const state = stateAfter(OVERTAKE_SEED, RACE_CONFIG.STEPS_PER_SEGMENT + 1);
 
     const withoutPause = buildHudModel(state, 'running', null);
@@ -165,7 +165,9 @@ describe('modèle du panneau de debug : valeurs réelles du noyau', () => {
     expect(api.segment()).toBe(0);
 
     simulation.start();
-    for (let index = 0; index < 300; index += 1) {
+    // 90 frames à ×20 ≈ 30 s simulées : on est dans le **deuxième** segment d'une course de 60 s, donc
+    // bien après la première frontière et bien avant l'arrivée.
+    for (let index = 0; index < 90; index += 1) {
       simulation.update(1000 / 60);
     }
 

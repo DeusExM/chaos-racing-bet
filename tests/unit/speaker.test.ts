@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { SPEAK } from '../../src/core/config';
+import { RACE_CONFIG, SPEAK } from '../../src/core/config';
 import type { CharacterId, RaceFact, RaceFactType } from '../../src/core/types';
 import { magnitudeBucket, dedupFingerprint } from '../../src/speaker/importance';
 import { segmentIndex, typeCooldownsOf } from '../../src/speaker/cooldowns';
@@ -76,6 +76,16 @@ describe('P009-B : conformite des constantes au design', () => {
     expect(SPEAKER_POLICY.minWindowAvgS).toBe(5.0);
   });
 
+  it('decoupe ses segments exactement comme la course, sans copie divergente', () => {
+    // Le speaker ne peut pas importer `RACE_CONFIG` (frontiere P009) : la duree et le nombre de
+    // segments sont donc recopies dans sa politique. Ce test est le garde-fou de cette copie : sans
+    // lui, une course de 60 s pourrait etre decoupee en quatre segments de 45 s par le quota de
+    // repliques, et le dernier tiers de la course n'aurait plus de quota propre.
+    expect(SPEAKER_POLICY.segmentDurationS).toBe(RACE_CONFIG.SEGMENT_DURATION_S);
+    expect(SPEAKER_POLICY.segmentCount).toBe(RACE_CONFIG.SEGMENT_COUNT);
+    expect(SPEAKER_POLICY.dtS).toBe(RACE_CONFIG.DT_S);
+  });
+
   it('reprend exactement les cooldowns par type du design', () => {
     expect(typeCooldownsOf(SPEAKER_POLICY)).toStrictEqual({
       LEADER_CHANGE: 12,
@@ -96,16 +106,15 @@ describe('P009-B : conformite des constantes au design', () => {
     expect(SPEAKER_TYPE_COOLDOWN_S.PHOTO_FINISH).toBe(0);
   });
 
-  it('decoupe les segments en [0,45[ [45,90[ [90,135[ [135,180]', () => {
+  it('decoupe les segments en [0,20[ [20,40[ [40,60]', () => {
     expect(segmentIndex(SPEAKER_POLICY, 0)).toBe(0);
-    expect(segmentIndex(SPEAKER_POLICY, 44.999)).toBe(0);
-    expect(segmentIndex(SPEAKER_POLICY, 45)).toBe(1);
-    expect(segmentIndex(SPEAKER_POLICY, 89.999)).toBe(1);
-    expect(segmentIndex(SPEAKER_POLICY, 90)).toBe(2);
-    expect(segmentIndex(SPEAKER_POLICY, 135)).toBe(3);
-    // L'arrivee a 180 s appartient au **dernier** segment : aucun segment 5 accidentel.
-    expect(segmentIndex(SPEAKER_POLICY, 180)).toBe(3);
-    expect(segmentIndex(SPEAKER_POLICY, 200)).toBe(3);
+    expect(segmentIndex(SPEAKER_POLICY, 19.999)).toBe(0);
+    expect(segmentIndex(SPEAKER_POLICY, 20)).toBe(1);
+    expect(segmentIndex(SPEAKER_POLICY, 39.999)).toBe(1);
+    expect(segmentIndex(SPEAKER_POLICY, 40)).toBe(2);
+    // L'arrivee a 60 s appartient au **dernier** segment : aucun segment 4 accidentel.
+    expect(segmentIndex(SPEAKER_POLICY, 60)).toBe(2);
+    expect(segmentIndex(SPEAKER_POLICY, 200)).toBe(2);
   });
 });
 
@@ -625,7 +634,7 @@ describe('P009-B : quota par segment', () => {
     expect(speaker.totalLinesStarted()).toBe(12);
 
     // Le segment suivant repart avec son propre quota : le blocage n'est pas definitif.
-    const next = speaker.feed(fact('LEADER_MALUS', 45, 60, [1], ['c1']));
+    const next = speaker.feed(fact('LEADER_MALUS', 25, 60, [1], ['c1']));
     expect(next).not.toBeNull();
     expect(speaker.linesInSegment(1)).toBe(1);
   });
@@ -634,44 +643,44 @@ describe('P009-B : quota par segment', () => {
     const speaker = new Speaker();
     expect(speaker.feed(fact('LEADER_CHANGE', 0, 60))).not.toBeNull();
     speaker.finish();
-    expect(speaker.feed(fact('BIG_BONUS', 45, 60, [1], ['c1']))).not.toBeNull();
+    expect(speaker.feed(fact('BIG_BONUS', 25, 60, [1], ['c1']))).not.toBeNull();
     expect(speaker.linesInSegment(0)).toBe(1);
     expect(speaker.linesInSegment(1)).toBe(1);
   });
 
-  it('place la replique a 44,999 s dans le segment 0 et celle a 45 s dans le segment 1', () => {
+  it('place la replique a 19,999 s dans le segment 0 et celle a 20 s dans le segment 1', () => {
     const speaker = new Speaker();
-    expect(speaker.feed(fact('LEADER_CHANGE', 44.999, 60))).not.toBeNull();
+    expect(speaker.feed(fact('LEADER_CHANGE', 19.999, 60))).not.toBeNull();
     speaker.finish();
-    expect(speaker.segmentIndexAt(44.999)).toBe(0);
+    expect(speaker.segmentIndexAt(19.999)).toBe(0);
     expect(speaker.linesInSegment(0)).toBe(1);
     expect(speaker.linesInSegment(1)).toBe(0);
 
     // La replique suivante ne peut demarrer qu'une fois le cooldown global ecoule, donc dans le
     // segment 1, et elle doit tomber dans le **bon** segment selon son instant de demarrage.
-    expect(speaker.feed(fact('BIG_BONUS', 51, 60, [1], ['c1']))).not.toBeNull();
-    expect(speaker.segmentIndexAt(51)).toBe(1);
+    expect(speaker.feed(fact('BIG_BONUS', 26, 60, [1], ['c1']))).not.toBeNull();
+    expect(speaker.segmentIndexAt(26)).toBe(1);
     expect(speaker.linesInSegment(0)).toBe(1);
     expect(speaker.linesInSegment(1)).toBe(1);
   });
 
-  it('traite l arrivee a 180 s dans le dernier segment, sans creer de segment 5', () => {
+  it('traite l arrivee a 60 s dans le dernier segment, sans creer de segment 4', () => {
     const speaker = new Speaker();
-    const decision = speaker.feed(fact('PHOTO_FINISH', 180, 90, [2, 1]));
+    const decision = speaker.feed(fact('PHOTO_FINISH', 60, 90, [2, 1]));
     expect(decision).not.toBeNull();
-    expect(decision?.startedAtS).toBe(180);
-    expect(speaker.segmentIndexAt(180)).toBe(3);
-    expect(speaker.linesInSegment(3)).toBe(1);
-    expect(speaker.policyInUse().segmentCount).toBe(4);
+    expect(decision?.startedAtS).toBe(60);
+    expect(speaker.segmentIndexAt(60)).toBe(2);
+    expect(speaker.linesInSegment(2)).toBe(1);
+    expect(speaker.policyInUse().segmentCount).toBe(3);
   });
 
   it('n oppose aucun cooldown de type a un fait d arrivee, FINISH comme PHOTO_FINISH', () => {
     for (const type of ['FINISH', 'PHOTO_FINISH'] as const) {
       const speaker = new Speaker();
-      const decision = speaker.feed(fact(type, 180, type === 'PHOTO_FINISH' ? 90 : 80, [2, 1]));
+      const decision = speaker.feed(fact(type, 60, type === 'PHOTO_FINISH' ? 90 : 80, [2, 1]));
       expect(decision, type).not.toBeNull();
-      expect(decision?.startedAtS).toBe(180);
-      expect(speaker.linesInSegment(3)).toBe(1);
+      expect(decision?.startedAtS).toBe(60);
+      expect(speaker.linesInSegment(2)).toBe(1);
     }
   });
 });

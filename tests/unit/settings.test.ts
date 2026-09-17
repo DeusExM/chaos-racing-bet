@@ -13,11 +13,12 @@ import {
 } from '../../src/app/settings';
 
 /**
- * P012 — réglages locaux `mute` / `tts`.
+ * Passe corrective — réglages locaux `sound` / `commentator`.
  *
  * Ces tests ne touchent à **aucune** couche de jeu : ils vérifient la lecture, la validation, la
- * persistance et la dégradation d'un module qui ne connaît que des booléens et un stockage. Le
- * stockage est injecté, donc aucune dépendance au DOM ni à un `localStorage` réel.
+ * persistance, la **migration** de l'ancienne forme `{ mute, tts }` et la dégradation d'un module qui
+ * ne connaît que des booléens et un stockage. Le stockage est injecté, donc aucune dépendance au DOM
+ * ni à un `localStorage` réel.
  */
 
 /** Stockage en mémoire, avec la possibilité de faire lever lecture ou écriture. */
@@ -45,21 +46,21 @@ function fakeStorage(
   };
 }
 
-describe('P012 : réglages locaux', () => {
-  it('démarre muet désactivé et TTS désactivé', () => {
-    expect(DEFAULT_SETTINGS).toEqual({ mute: false, tts: false });
-    expect(loadSettings(null)).toEqual({ mute: false, tts: false });
-    expect(parseSettings(null)).toEqual({ mute: false, tts: false });
-    expect(parseSettings('')).toEqual({ mute: false, tts: false });
+describe('passe corrective : réglages locaux', () => {
+  it('démarre avec le son et le commentateur coupés', () => {
+    expect(DEFAULT_SETTINGS).toEqual({ sound: false, commentator: false });
+    expect(loadSettings(null)).toEqual({ sound: false, commentator: false });
+    expect(parseSettings(null)).toEqual({ sound: false, commentator: false });
+    expect(parseSettings('')).toEqual({ sound: false, commentator: false });
   });
 
   it('relit ce qui a été écrit', () => {
     const { storage } = fakeStorage();
-    saveSettings(storage, { mute: true, tts: true });
-    expect(loadSettings(storage)).toEqual({ mute: true, tts: true });
+    saveSettings(storage, { sound: true, commentator: true });
+    expect(loadSettings(storage)).toEqual({ sound: true, commentator: true });
 
-    saveSettings(storage, { mute: false, tts: true });
-    expect(loadSettings(storage)).toEqual({ mute: false, tts: true });
+    saveSettings(storage, { sound: false, commentator: true });
+    expect(loadSettings(storage)).toEqual({ sound: false, commentator: true });
   });
 
   it('écrit réellement sous la clé dédiée, sans toucher au reste de l’origine', () => {
@@ -70,25 +71,70 @@ describe('P012 : réglages locaux', () => {
         seen.push(key);
       },
     };
-    saveSettings(storage, { mute: true, tts: false });
+    saveSettings(storage, { sound: true, commentator: false });
     expect(seen).toEqual([SETTINGS_STORAGE_KEY]);
   });
 
   it('retombe sur les défauts quand la donnée est corrompue', () => {
-    for (const raw of ['{', 'pas du json', 'null', '42', '"texte"', '[]', '{"mute":', '[1,2,3]']) {
-      expect(parseSettings(raw), raw).toEqual({ mute: false, tts: false });
+    for (const raw of ['{', 'pas du json', 'null', '42', '"texte"', '[]', '{"sound":', '[1,2,3]']) {
+      expect(parseSettings(raw), raw).toEqual({ sound: false, commentator: false });
     }
   });
 
   it('ignore un champ invalide sans perdre celui qui est lisible', () => {
-    expect(parseSettings('{"mute":"oui","tts":true}')).toEqual({ mute: false, tts: true });
-    expect(parseSettings('{"mute":true,"tts":0}')).toEqual({ mute: true, tts: false });
-    expect(parseSettings('{"mute":true,"tts":false,"autre":1}')).toEqual({ mute: true, tts: false });
+    expect(parseSettings('{"sound":"oui","commentator":true}')).toEqual({
+      sound: false,
+      commentator: true,
+    });
+    expect(parseSettings('{"sound":true,"commentator":0}')).toEqual({
+      sound: true,
+      commentator: false,
+    });
+    expect(parseSettings('{"sound":true,"commentator":false,"autre":1}')).toEqual({
+      sound: true,
+      commentator: false,
+    });
+  });
+
+  it('migre silencieusement l’ancienne paire `mute` / `tts`', () => {
+    // Le commentateur était audible exactement quand la voix était active sans mode muet.
+    expect(parseSettings('{"mute":false,"tts":true}')).toEqual({ sound: false, commentator: true });
+    expect(parseSettings('{"mute":true,"tts":true}')).toEqual({ sound: false, commentator: false });
+    expect(parseSettings('{"mute":false,"tts":false}')).toEqual({ sound: false, commentator: false });
+    // Aucun effet sonore n'existait : la migration ne peut pas inventer une activation.
+    expect(parseSettings('{"mute":true,"tts":false}')).toEqual({ sound: false, commentator: false });
+    // Ancienne forme partielle : le champ manquant prend sa valeur par défaut, sans lever.
+    expect(parseSettings('{"tts":true}')).toEqual({ sound: false, commentator: true });
+    expect(parseSettings('{"mute":true}')).toEqual({ sound: false, commentator: false });
+  });
+
+  it('préfère la forme nouvelle dès qu’un de ses champs est présent', () => {
+    // Un enregistrement mixte (nouvelle forme partielle + anciens champs) ne doit pas ressusciter
+    // `tts` : seul le champ nouveau fait foi, l'absence retombe sur le défaut.
+    expect(parseSettings('{"sound":false,"tts":true}')).toEqual({
+      sound: false,
+      commentator: false,
+    });
+    expect(parseSettings('{"commentator":true,"mute":true}')).toEqual({
+      sound: false,
+      commentator: true,
+    });
+  });
+
+  it('réécrit la forme nouvelle à la première écriture, sans perte', () => {
+    const { storage, written } = fakeStorage('{"mute":false,"tts":true}');
+    const store = new SettingsStore(storage);
+    expect(store.get()).toEqual({ sound: false, commentator: true });
+
+    store.update({ sound: true });
+    expect(store.get()).toEqual({ sound: true, commentator: true });
+    expect(written()).toBe('{"sound":true,"commentator":true}');
+    expect(loadSettings(storage)).toEqual({ sound: true, commentator: true });
   });
 
   it('accepte un stockage absent sans jamais lever', () => {
     expect(() => {
-      saveSettings(null, { mute: true, tts: true });
+      saveSettings(null, { sound: true, commentator: true });
     }).not.toThrow();
     expect(loadSettings(null)).toEqual(DEFAULT_SETTINGS);
     expect(createSettingsStorage({})).toBeNull();
@@ -96,14 +142,14 @@ describe('P012 : réglages locaux', () => {
   });
 
   it('survit à un stockage qui lève à la lecture', () => {
-    const { storage } = fakeStorage('{"mute":true,"tts":true}', { throwOnRead: true });
+    const { storage } = fakeStorage('{"sound":true,"commentator":true}', { throwOnRead: true });
     expect(loadSettings(storage)).toEqual(DEFAULT_SETTINGS);
   });
 
   it('survit à un stockage qui lève à l’écriture', () => {
     const { storage } = fakeStorage(null, { throwOnWrite: true });
     expect(() => {
-      saveSettings(storage, { mute: true, tts: true });
+      saveSettings(storage, { sound: true, commentator: true });
     }).not.toThrow();
   });
 
@@ -118,43 +164,44 @@ describe('P012 : réglages locaux', () => {
       },
     });
     expect(storage).not.toBeNull();
-    saveSettings(storage, { mute: true, tts: false });
-    expect(loadSettings(storage)).toEqual({ mute: true, tts: false });
+    saveSettings(storage, { sound: true, commentator: false });
+    expect(loadSettings(storage)).toEqual({ sound: true, commentator: false });
   });
 
   it('applique et persiste un changement, puis prévient ses écouteurs', () => {
     const { storage, written } = fakeStorage();
     const store = new SettingsStore(storage);
     const seen: boolean[] = [];
-    const unsubscribe = store.subscribe((settings) => seen.push(settings.mute));
+    const unsubscribe = store.subscribe((settings) => seen.push(settings.sound));
 
-    expect(store.get()).toEqual({ mute: false, tts: false });
-    store.update({ mute: true });
-    expect(store.get().mute).toBe(true);
+    expect(store.get()).toEqual({ sound: false, commentator: false });
+    store.update({ sound: true });
+    expect(store.get().sound).toBe(true);
     expect(loadSettings(storage), 'le changement est réellement persisté').toEqual({
-      mute: true,
-      tts: false,
+      sound: true,
+      commentator: false,
     });
-    expect(written()).toContain('"mute":true');
+    expect(written()).toContain('"sound":true');
 
-    store.update({ tts: true });
+    store.update({ commentator: true });
     expect(seen).toEqual([true, true]);
 
     unsubscribe();
-    store.update({ mute: false });
+    store.update({ sound: false });
     expect(seen, 'un écouteur désabonné ne reçoit plus rien').toEqual([true, true]);
   });
 
   it('démarre sur les réglages persistés plutôt que sur les défauts', () => {
-    const { storage } = fakeStorage('{"mute":true,"tts":true}');
-    expect(new SettingsStore(storage).get()).toEqual({ mute: true, tts: true });
+    const { storage } = fakeStorage('{"sound":true,"commentator":true}');
+    expect(new SettingsStore(storage).get()).toEqual({ sound: true, commentator: true });
     expect(new SettingsStore(fakeStorage('corrompu').storage).get()).toEqual(DEFAULT_SETTINGS);
   });
 
-  it('n’autorise la voix que si le TTS est actif et le mode muet désactivé', () => {
-    expect(allowsVoice({ mute: false, tts: true })).toBe(true);
-    expect(allowsVoice({ mute: true, tts: true })).toBe(false);
-    expect(allowsVoice({ mute: false, tts: false })).toBe(false);
-    expect(allowsVoice({ mute: true, tts: false })).toBe(false);
+  it('n’autorise la voix que si le commentateur est activé', () => {
+    expect(allowsVoice({ sound: false, commentator: true })).toBe(true);
+    expect(allowsVoice({ sound: true, commentator: true })).toBe(true);
+    expect(allowsVoice({ sound: false, commentator: false })).toBe(false);
+    // Les effets sonores n'ont aucun pouvoir sur le commentateur, et réciproquement.
+    expect(allowsVoice({ sound: true, commentator: false })).toBe(false);
   });
 });

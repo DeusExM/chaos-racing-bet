@@ -64,15 +64,19 @@ La course est **entièrement définie par le temps simulé** :
 
 | Segment | Intervalle de temps simulé | Ce qui suit |
 | --- | --- | --- |
-| Segment 1 | `tSim = 0 → 45 s` | checkpoint 1 + pause |
-| Segment 2 | `tSim = 45 → 90 s` | checkpoint 2 + pause |
-| Segment 3 | `tSim = 90 → 135 s` | checkpoint 3 + pause |
-| Segment 4 | `tSim = 135 → 180 s` | **fin de course à `tSim = 180 s`** |
+| Segment 1 | `tSim = 0 → 20 s` | checkpoint 1 + pause |
+| Segment 2 | `tSim = 20 → 40 s` | checkpoint 2 + pause |
+| Segment 3 | `tSim = 40 → 60 s` | **fin de course à `tSim = 60 s`** |
 
-> **Règle fondatrice** : `tSim = 180 s` ⇒ `finished`. Le gagnant est **simplement le personnage qui a
+> **Règle fondatrice** : `tSim = 60 s` ⇒ `finished`. Le gagnant est **simplement le personnage qui a
 > parcouru la plus grande distance** à cet instant. Il n'existe **aucune condition d'arrivée basée sur
-> une distance** : si tous les personnages étaient très lents, la course durerait quand même 180 s de
+> une distance** : si tous les personnages étaient très lents, la course durerait quand même 60 s de
 > temps simulé ; si l'un d'eux était très rapide, la course se terminerait au même instant.
+
+> **Passe corrective (premier test joueur manuel après P013)** : la course durait 180 s, ce que le
+> joueur a jugé **trop long**. La structure est passée à **3 segments de 20 s**, soit **60 s** et
+> **2 checkpoints** (bornes à `20 s` et `40 s`). Aucune autre règle n'a changé : ni le pas fixe, ni
+> le nombre de personnages, ni le catalogue d'événements, ni les constantes de vitesse.
 
 ### 4.1 Constantes
 
@@ -80,12 +84,12 @@ La course est **entièrement définie par le temps simulé** :
 
 | Constante | Valeur | Description |
 | --- | --- | --- |
-| `RACE.SEGMENT_COUNT` | `4` | nombre de segments |
-| `RACE.SEGMENT_DURATION_S` | `45` | durée **simulée** d'un segment |
-| `RACE.TOTAL_SIM_S` | `180` | `SEGMENT_COUNT × SEGMENT_DURATION_S` |
+| `RACE.SEGMENT_COUNT` | `3` | nombre de segments |
+| `RACE.SEGMENT_DURATION_S` | `20` | durée **simulée** d'un segment |
+| `RACE.TOTAL_SIM_S` | `60` | `SEGMENT_COUNT × SEGMENT_DURATION_S` |
 | `RACE.DT_S` | `1/60` | pas fixe de simulation |
-| `RACE.STEPS_PER_SEGMENT` | `2700` | `SEGMENT_DURATION_S / DT_S` |
-| `RACE.TOTAL_STEPS` | `10800` | `TOTAL_SIM_S / DT_S` |
+| `RACE.STEPS_PER_SEGMENT` | `1200` | `SEGMENT_DURATION_S / DT_S` |
+| `RACE.TOTAL_STEPS` | `3600` | `TOTAL_SIM_S / DT_S` |
 
 **b) Temps réel — connu de `RaceSimulation` uniquement (`SIM_CONFIG`)**
 
@@ -95,7 +99,7 @@ La course est **entièrement définie par le temps simulé** :
 | `SIM.CHECKPOINT_PAUSE_REAL_S` | `3.0` | durée **réelle** d'une pause checkpoint (mode ×1) |
 | `SIM.TIME_SCALE` | `1` | mode normal (`20` en mode test `?fast=1`) |
 | `SIM.MAX_STEPS_PER_FRAME` | `5` | garde-fou anti « spiral of death » (×1) |
-| `SIM.TOTAL_REAL_S` | `192` | `180 + 3×3 + 3` en mode ×1 |
+| `SIM.TOTAL_REAL_S` | `72` | `60 + 2×3 + 3` en mode ×1 |
 
 `RaceEngine` **ignore** `SIM_CONFIG` : il ne connaît ni le compte à rebours, ni la durée réelle des
 pauses, ni le `timeScale`. Ces valeurs n'atteignent jamais le noyau.
@@ -107,11 +111,11 @@ pauses, ni le `timeScale`. Ces valeurs n'atteignent jamais le noyau.
 | Temps | **temps simulé** uniquement | **temps réel** uniquement |
 | Horloge | aucune : `step()` ne prend **aucun argument** | lit `performance.now()` via un `realDtMs` fourni par la boucle |
 | Avance | pas fixes `DT` exclusivement | accumulateur : exécute `floor(acc / DT)` pas |
-| Segments | connaît les 4 segments et l'index courant | connaît l'index courant (lecture, pour l'affichage) |
+| Segments | connaît les 3 segments et l'index courant | connaît l'index courant (lecture, pour l'affichage) |
 | `tSim` | le produit et le possède | le lit |
-| Fin | produit `finished` à `tSim = 180 s` | relaie l'état `finished` au rendu |
+| Fin | produit `finished` à `tSim = 60 s` | relaie l'état `finished` au rendu |
 | Countdown | **ne connaît pas** | gère le compte à rebours réel |
-| Pause checkpoint | **ne connaît pas** la durée réelle ; signale seulement l'**instant** (`tSim = 45/90/135`) | décide de la pause, de sa durée, de la reprise automatique |
+| Pause checkpoint | **ne connaît pas** la durée réelle ; signale seulement l'**instant** (`tSim = 20/40`) | décide de la pause, de sa durée, de la reprise automatique |
 | Pause utilisateur | **ne connaît pas** | suspend l'appel à `step()`, reprend ensuite |
 | `timeScale` / mode test | **ne connaît pas** | choisit le **nombre** de pas par frame, jamais leur taille |
 | Événements aléatoires | tirés et appliqués dans `step()`, donc **jamais** pendant une pause | garantit qu'aucun `step()` n'a lieu pendant une pause |
@@ -124,28 +128,28 @@ Conséquences vérifiables :
 
 * `tSim`, `x` et `v` sont **strictement gelés** pendant une pause.
 * Aucune neutralisation, aucun rattrapage, aucun repositionnement pendant une pause.
-* Le nombre total de pas d'une course est **toujours** `TOTAL_STEPS = 10800`, qu'il y ait eu 0, 3 ou
+* Le nombre total de pas d'une course est **toujours** `TOTAL_STEPS = 3600`, qu'il y ait eu 0, 2 ou
   100 pauses (checkpoint ou utilisateur).
 * Le résultat d'une course est identique avec et sans pauses.
 
 **Contrat d'exactitude des bornes.** Le temps simulé doit être dérivé du **numéro de pas** par
 multiplication — `tSim = step × DT` — et **jamais** par accumulation (`tSim += DT`). Avec la
-multiplication, `2700 × DT`, `5400 × DT`, `8100 × DT` et `10800 × DT` valent **exactement** `45`,
-`90`, `135` et `180` : les instants de checkpoint et la fin de course tombent donc pile sur un pas, et
-`track.ts` peut comparer sans la moindre tolérance. En accumulant, on obtient `44.99999999999873` au
-pas 2700 et `180.00000000003539` au pas 10800 — les checkpoints seraient manqués. Cette propriété est
-verrouillée par les tests de `config.ts` et `track.ts`.
+multiplication, `1200 × DT`, `2400 × DT` et `3600 × DT` valent **exactement** `20`, `40` et `60` : les
+instants de checkpoint et la fin de course tombent donc pile sur un pas, et `track.ts` peut comparer
+sans la moindre tolérance. En accumulant, on obtient `19.999999999999436` au pas 1200 et
+`60.000000000011797` au pas 3600 — les checkpoints seraient manqués. Cette propriété est verrouillée
+par les tests de `config.ts` et `track.ts`.
 
 ### 4.3 Déroulement
 
 1. Le MJ clique « Lancer ». `RaceSimulation` gère le compte à rebours réel, puis démarre la boucle.
-2. `SEGMENT k` dure exactement `45 s` de **temps simulé**, soit `2700` pas.
-3. À la fin des segments 1, 2 et 3 (soit à `tSim = 45`, `90` puis `135 s`), `RaceEngine` atteint
-   l'instant de checkpoint : il émet un fait `CHECKPOINT_SPLIT` et **continue** d'être prêt à avancer.
-   C'est `RaceSimulation` qui cesse d'appeler `step()` pendant `3 s` réelles.
+2. `SEGMENT k` dure exactement `20 s` de **temps simulé**, soit `1200` pas.
+3. À la fin des segments 1 et 2 (soit à `tSim = 20` puis `40 s`), `RaceEngine` atteint l'instant de
+   checkpoint : il émet un fait `CHECKPOINT_SPLIT` et **continue** d'être prêt à avancer. C'est
+   `RaceSimulation` qui cesse d'appeler `step()` pendant `3 s` réelles.
 4. La reprise est **automatique** après la pause. Aucune action du MJ n'est requise.
-5. À `tSim = 180 s`, `RaceEngine` passe à `finished` et **plus aucun pas n'est exécuté**. Le
-   classement final est calculé sur les distances gelées à cet instant.
+5. À `tSim = 60 s`, `RaceEngine` passe à `finished` et **plus aucun pas n'est exécuté**. Le classement
+   final est calculé sur les distances gelées à cet instant.
 6. Le MJ peut mettre en pause manuellement (`Espace`) à tout moment : `RaceSimulation` arrête
    d'appeler `step()`, puis reprend. Le nombre de pas reste identique, donc le résultat aussi.
 7. Le redémarrage relance une course **depuis zéro** avec la même seed (rejeu identique) ou une
@@ -153,12 +157,17 @@ verrouillée par les tests de `config.ts` et `track.ts`.
 
 ### 4.4 Checkpoints
 
-* Les checkpoints sont des **instants de temps simulé** : `tSim = 45`, `90` et `135 s`. Ils ne sont
-  **pas** des positions, ni des distances, ni des conditions de fin de segment (la fin d'un segment est
-  toujours `45 s` de temps simulé, quoi qu'il arrive).
+* Les checkpoints sont des **instants de temps simulé** : `tSim = 20` et `40 s`. Ils ne sont **pas**
+  des positions, ni des distances, ni des conditions de fin de segment (la fin d'un segment est
+  toujours `20 s` de temps simulé, quoi qu'il arrive).
+* Le mot employé face au joueur est **`Checkpoint`** (`Checkpoint 1 · 20 s`). Le mot `Pointage`,
+  employé avant la passe corrective, a été retiré : le premier test joueur manuel l'a jugé peu naturel.
+  Les noms techniques internes (`CHECKPOINT_SPLIT`, `checkpointPause`, `checkpoint()`) restent, eux,
+  inchangés.
 * À chaque checkpoint, on fige un « split » (distances + classement + écarts) pour l'affichage et le
-  speaker. Aucun point, aucun bonus, aucune pénalité n'est attribué.
-* `classement final = classement par distance décroissante à tSim = 180 s`. Les splits de checkpoint
+  speaker. Aucun point, aucun bonus, aucune pénalité n'est attribué. L'affichage du checkpoint est un
+  retour **bref et léger** (bandeau du leader figé), pas un tableau permanent.
+* `classement final = classement par distance décroissante à tSim = 60 s`. Les splits de checkpoint
   n'influencent **jamais** le résultat.
 * **Repères visuels de distance** (décor : lignes au sol, arche d'arrivée, fanions) : purement
   facultatifs, définis **uniquement** dans `src/render/` (§5), et **jamais** lus par `src/core/` ni
@@ -170,25 +179,34 @@ verrouillée par les tests de `config.ts` et `track.ts`.
 
 Cette section ne définit **aucune** règle de simulation.
 
-* **Échelle nominale d'affichage** : `VIEW.NOMINAL_SCALE_M = SPEED.BASE × RACE.TOTAL_SIM_S = 2160 m`.
+* **Échelle nominale d'affichage** : `VIEW.NOMINAL_SCALE_M = SPEED.BASE × RACE.TOTAL_SIM_S = 720 m`.
   C'est la longueur qu'aurait la piste si tout le monde courait exactement à `SPEED.BASE`. Elle sert
-  **uniquement** à dimensionner le décor et la mini-carte, et à donner une échelle lisible. Ce n'est
-  **pas** une ligne d'arrivée : un personnage peut parfaitement la dépasser (turbo) ou ne jamais
-  l'atteindre, et cela ne change rien à la fin de la course.
-* Écart typique attendu entre le 1er et le 6e à `tSim = 180 s` : **80 à 260 m** (médiane), avec des
-  extrêmes possibles de ~25 m à ~500 m. C'est cette amplitude qui rend la mini-carte obligatoire.
+  **uniquement** à dimensionner le décor et à donner une échelle lisible. Ce n'est **pas** une ligne
+  d'arrivée : un personnage peut parfaitement la dépasser (turbo) ou ne jamais l'atteindre, et cela ne
+  change rien à la fin de la course.
+* Écart typique attendu entre le 1er et le 6e à `tSim = 60 s` : **93 m** (médiane mesurée sur 1000
+  seeds), 5e percentile 45,8 m, 95e percentile 166,2 m, extrêmes observés de 15,5 m à 291 m.
 * Vue principale : caméra latérale qui suit le **peloton** avec fenêtre adaptative, **bornée à 260 m
   de large** ; au-delà, les personnages hors fenêtre sont signalés par un marqueur de bord.
-* Mini-carte : barre de progression `0 → VIEW.NOMINAL_SCALE_M` avec les 6 marqueurs, toujours visible.
-  Si un personnage dépasse l'échelle nominale, son marqueur est collé au bord avec un indicateur
-  `+xx m` (le rendu ne recadre jamais l'échelle en cours de course).
+* **Mini-carte : retirée du HUD par la passe corrective.** Le premier test joueur manuel a jugé que le
+  HUD masquait trop la course ; la mini-carte était l'un des blocs permanents les plus coûteux en
+  surface. Le modèle qui la calcule (`markers`, `minimap.ts`, `VIEW.NOMINAL_SCALE_M`) est **conservé**
+  comme hook de test et de debug — il est encore vérifié par les tests unitaires et E2E — mais plus
+  aucun élément DOM ne le dessine. La réintroduction éventuelle d'une carte appartient à P014.
 * Le rendu est **lecture seule** : il ne modifie jamais `x`, `v` ni le classement.
+* **Retour visuel des bonus et malus (passe corrective)** : un événement actif affiche un libellé
+  court (`TURBO !`, `CHUTE !`…) **attaché au personnage concerné**, avec son sens (`BONUS !` /
+  `MALUS !`) et une couleur. Ce retour est **temporaire** (il disparaît avec l'événement), **multiple**
+  (plusieurs personnages peuvent en porter un en même temps), **non obscurcissant** (il est posé
+  au-dessus du sprite, sans capturer les clics) et **purement dérivé** des événements réels du noyau :
+  il ne crée, ne modifie et ne consomme rien. La direction artistique définitive (icônes, halo,
+  particules) appartient à P014.
 * **Après `FINISHED` (P013)** : le noyau ne fait **plus aucun pas**. Le rendu peut encore animer, mais
-  uniquement des coordonnées **dérivées** de l'instantané final (`x` et `v` figés à `tSim = 180 s`).
+  uniquement des coordonnées **dérivées** de l'instantané final (`x` et `v` figés à `tSim = 60 s`).
   La courte décélération visuelle ajoute un décalage d'inertie **identique pour les six marcheurs**,
   purement décoratif : elle ne peut donc pas modifier l'ordre du classement figé, ne touche ni `tSim`,
   ni le compteur de pas, ni le RNG, et ne consomme aucun temps simulé.
-* **Classement final et podium** : présentés à partir du classement du noyau à `tSim = 180 s`
+* **Classement final et podium** : présentés à partir du classement du noyau à `tSim = 60 s`
   (`leaderboardOf` / `core/ranking.ts`), avec position, nom, distance finale et écart au vainqueur.
   Aucune ligne d'arrivée dessinée, aucune coordonnée de décor, aucune position de sprite ou d'écran
   n'est jamais un critère de victoire : le podium **présente**, il ne décide pas.
@@ -218,13 +236,93 @@ cette référence ne doit être reproduit. Chaos Race doit avoir son **identité
   événement de gameplay. Aucun moteur physique, aucune collision, aucune interpolation ne peut
   modifier `x`.
 * Les invariants de `AGENTS.md` §5 restent intégralement applicables : pas de téléportation, pas de
-  rubber-banding, fin de course à `tSim = 180 s`, reproductibilité `(seed, config)`, et
+  rubber-banding, fin de course à `tSim = 60 s`, reproductibilité `(seed, config)`, et
   `src/core/**` continue de n'importer **rien** hors de `core/`.
 * Changer de renderer ne doit **jamais** changer le résultat d'une course : la neutralité du rendu
   est déjà testée (le rendu n'écrit rien dans l'état) et devra le rester.
 
 Tant que le **Jalon 3D** de `ROADMAP.md` (P013.5) n'a pas tranché, **aucune dépendance 3D n'est
 installée** et le rendu reste le placeholder 2D de P005.
+
+### 5.2 HUD, retour d'événement, commentaire, son et voix (passe corrective)
+
+Ces règles sont **de présentation**. Elles ne définissent aucune règle de simulation et découlent du
+premier test joueur manuel après P013, qui a relevé un HUD trop envahissant, un speaker qui masquait
+l'action, un retour visuel imperceptible pour les bonus/malus, des nombres bruts illisibles, des
+libellés peu clairs et une voix trop lente.
+
+**Lecture de l'écran — la piste d'abord.** Le HUD n'occupe que des zones **périphériques et basses**
+de l'arène ; la piste doit rester largement visible. Il contient :
+
+* les commandes (Lancer / Pause / Rejouer), le chrono et l'indicateur de segment (`1/3`, `2/3`, `3/3`) ;
+* les réglages, réduits à deux pastilles compactes (voir plus bas) ;
+* le **classement complet** des 6 personnages, en bas à droite, avec l'écart en secondes ;
+* la seed, discrète et copiable ;
+* la bande de commentaire (voir plus bas) et les retours d'événement (voir plus bas).
+
+Ce qui a été **retiré** parce qu'il masquait la course : la **mini-carte** permanente (son modèle reste
+un hook de test) et tout affichage permanent du classement détaillé ailleurs qu'au podium. Le
+classement final complet est présenté **au podium**, à l'arrivée.
+
+**Checkpoint = retour bref, jamais un tableau.** À chaque checkpoint, l'écran affiche un **bandeau
+temporaire** portant le numéro et l'instant atteint (`Checkpoint 1 · 20 s`) ainsi que le **leader figé**
+du split. Ce n'est ni un tableau à six lignes, ni un panneau permanent : le bandeau apparaît puis
+disparaît, et rien n'est attribué (aucun point, aucun bonus, aucune pénalité — §4.4). Le mot affiché
+est **`Checkpoint`** ; `Pointage` a été retiré du vocabulaire visible.
+
+**Commentaire = sous-titre de retransmission.** La réplique du speaker s'affiche dans une **bande
+compacte** placée dans une zone **basse et non critique** de l'arène : largeur et hauteur bornées, deux
+lignes au maximum, texte lisible. Elle porte le **nom du personnage** concerné quand le fait en
+désigne un. Elle ne crée **aucune** file d'attente : la bande affiche la réplique réelle du speaker
+(§9), et une nouvelle réplique **remplace** la précédente. Les textes restent ceux du speaker — le
+rendu ne compose ni ne réécrit aucun commentaire.
+
+**Bonus et malus = retour attaché au personnage.** Un événement actif affiche, **au-dessus du
+personnage concerné** et uniquement pendant sa durée, un libellé court (`TURBO !`, `CHUTE !`, …) et son
+sens (`BONUS !` / `MALUS !`) avec une couleur distincte. Plusieurs personnages peuvent en porter un en
+même temps, aucun retour ne capture les clics, et **tout provient des événements réels du noyau** : le
+retour ne crée, ne modifie et ne consomme rien (aucun tirage, aucune constante).
+
+**Son et commentaire — deux réglages explicites.** Les commandes s'appellent **`Son`** et
+**`Commentateur`**, chacune avec un état explicite (`activé` / `coupé`), à la place des anciens
+`Muet` / `Voix` jugés ambigus. Le choix est **persisté** dans le navigateur, et une valeur corrompue ou
+absente ne doit **jamais** faire échouer le démarrage. Comme tout l'audio de la V1, les deux réglages
+sont **désactivés par défaut**.
+
+* **Activer le son** joue un **court klaxon** de confirmation, synthétisé par l'API Web Audio du
+  navigateur (aucun fichier, aucune dépendance, aucun appel réseau), **directement dans le clic** pour
+  respecter la politique d'autoplay. **Désactiver le son ne joue rien.**
+* **Activer le commentateur** prononce une confirmation très courte (`Let's go!`) via la synthèse
+  vocale locale. Cette confirmation est liée à l'**action du joueur** : elle n'est **jamais** jouée au
+  chargement, **jamais** à la désactivation, ne passe **pas** par le speaker (aucun `RaceFact`, aucune
+  file, aucun cooldown) et n'a **aucun effet** sur la simulation.
+* Le système audio complet (musique, ambiance, mixage) reste hors périmètre : il appartient à P015.
+
+**Voix plus rapide.** Le débit de la synthèse vocale est porté par une **constante de présentation
+centralisée** (`TTS_RATE = 1.6`, soit 1,6× le débit nominal), mesurée comme nettement plus confortable
+par le test joueur sur une voix française. La voix ne peut **jamais** influencer la simulation, la
+seed, le RNG ni l'horloge : elle ne fait que vocaliser un texte déjà choisi par le speaker.
+
+**Nombres lisibles.** Aucun texte affiché au joueur ne montre une valeur brute de la simulation. Un
+module unique de présentation (`src/render/format.ts`) décide de la mise en forme, par **nature** de la
+grandeur :
+
+| Grandeur | Règle | Avant | Après |
+| --- | --- | --- | --- |
+| Pourcentage | entier | `35.9333333333 %` | `36 %` |
+| Durée, chrono | entier de secondes | `6.1333333333 s` | `6 s` |
+| Distance | 1 décimale | `26.033333333333 m` | `26,0 m` |
+| Comptage (places, événements) | entier | `3.0000000000000004` | `3` |
+
+Une **valeur de simulation n'est jamais arrondie** pour autant : l'arrondi n'existe qu'au moment de
+l'affichage, et les valeurs brutes restent disponibles pour les tests et le debug. L'audit couvre
+**tous** les gabarits de texte du speaker, et la virgule décimale française est respectée.
+
+**Durée d'affichage du commentaire.** `VIEW.SUBTITLE_MIN_MS = 800`,
+`VIEW.SUBTITLE_PER_CHAR_MS = 60` et `VIEW.SUBTITLE_MAX_MS = 5800` bornent la durée **réelle**
+d'affichage d'une réplique (mesurée : vitesse de lecture ≤ 20 caractères/s, catalogue de 40 à 110
+caractères, et `SUBTITLE_MAX_MS` strictement inférieur au cooldown global du speaker). C'est une règle
+**d'affichage** uniquement : elle ne touche ni les cooldowns, ni les faits, ni la simulation.
 
 ---
 
@@ -351,7 +449,9 @@ indépendante — elle est **dérivée** dans le code de `INTERVAL_MEAN_S` et `I
 que modifier l'une des deux fait suivre la borne haute sans rien retoucher ailleurs.
 
 Le premier surge d'une course suit **la même loi** : l'attente initiale est tirée comme les
-suivantes, donc le nombre attendu de surges sur `180 s` vaut `180 / 9 = 20`.
+suivantes, donc le nombre attendu de surges sur `60 s` vaut `60 / 9 ≈ 6,67` — mesuré à **6,17 – 6,23**
+selon le personnage sur le corpus canonique de 1000 seeds à 60 s (§13). `SURGE.INTERVAL_MEAN_S = 9 s`
+est un **taux** et n'a pas été touché par la passe corrective.
 
 **Quantification en pas** *(clarification P007)*. Le noyau ne connaît que des pas fixes de
 `DT_S = 1/60 s` : les tirages sont donc faits en **numéros de pas entiers**, jamais par accumulation
@@ -416,7 +516,7 @@ sont :
   buter sur le plafond ;
 * **Interactions avec la dynamique existante** (dérive, surges, événements voisins) : ce que mesure
   §7.2 est le gain **d'un événement isolé**, `drift = surge = 0`, pas le net d'un catalogue complet
-  sur 180 s.
+  sur 60 s.
 
 Mesuré sur 100 seeds, le tableau d'origine (bonus `+1.20 .. +2.50`) ajoutait `+0,90 %` de distance
 moyenne à lui seul. Les magnitudes de **bonus** ont donc été réduites de 35 % (`× 0,65`) ; les
@@ -440,7 +540,7 @@ c'est **le plus grand facteur conforme parmi les valeurs testées**, celles qui 
 Le balayage est **discret** : aucun facteur intermédiaire (par exemple `× 0,70`) n'a été mesuré, donc
 `× 0,65` n'est pas démontré **minimal au sens mathématique** — c'est le plus grand facteur **testé**
 qui soit conforme. La marge est **mince** (0,056 point sur le corpus réduit), et c'est le corpus
-canonique de 1000 seeds qui tranche : `1,258 %` — voir `docs/balance-report.md`.
+canonique de 1000 seeds qui tranche : **`1,277 %` à 60 s** — voir `docs/balance-report.md`.
 
 ### 7.2 Gain de distance réellement produit
 
@@ -479,7 +579,7 @@ tandis qu'un bonus combiné à des modulations positives peut buter sur `SPEED.M
 
 | Constante | Valeur | Rôle |
 | --- | --- | --- |
-| `EVENT.RATE_PER_S` | `1/14` | taux global des **candidats** (Poisson) : ≈ 13 candidats sur 180 s |
+| `EVENT.RATE_PER_S` | `1/14` | taux global des **candidats** (Poisson) : ≈ 4,3 candidats sur 60 s |
 | `EVENT.GLOBAL_COOLDOWN_S` | `4.0` | délai minimum entre deux événements, tous personnages confondus |
 | `EVENT.CHAR_COOLDOWN_S` | `8.0` | délai minimum entre deux événements sur le même personnage |
 | `EVENT.MAX_PER_CHARACTER` | `5` | plafond par course, évite le dogpiling |
@@ -498,11 +598,17 @@ Règles d'application :
   tirage a lieu à chaque pas, cooldown compris : les cooldowns **éclaircissent** (thinning) le
   processus de Poisson, qui garde ainsi son absence de mémoire. Reporter un candidat à la fin du
   cooldown ferait au contraire dépendre le taux réel de l'état des cooldowns. La mesure avec rejet
-  donne `≈ 10,2` événements par course, soit le **bas** de la fourchette `[10 ; 16]` de §13.
+  donne `≈ 3,36` événements par course à 60 s, soit **exactement la cadence** des `≈ 10,2` événements
+  par course de la version 180 s (un événement toutes les 17,9 s dans les deux cas) et le **bas** de la
+  fourchette `[3 ; 6]` de §13.
   `RATE_PER_S` est resté à `1/14` : P010 l'a testé à `1/10` (ce qui donnait `≈ 12,9` événements par
   course et une moyenne de répliques légèrement plus haute), puis est **revenu à `1/14`**, parce que
   la moyenne des répliques de §13 était déjà conforme et qu'être proche d'une borne n'est pas un
-  motif de réglage. Aucun autre réglage de §7.3 n'a changé.
+  motif de réglage. La passe corrective 60 s a de nouveau **mesuré** `1/10` sur le corpus canonique
+  (`4,35` événements par course, biais `1,31 %`, `8,90` répliques : rien d'anormal) puis est revenue à
+  `1/14` : la mesure ne montrait **aucun défaut à corriger**, et `RATE_PER_S` est **un taux** qui n'a
+  aucune raison de suivre la durée de la course. Le corpus canonique de référence reste donc celui de
+  `1/14`. Aucun autre réglage de §7.3 n'a changé.
 * La durée d'un événement se compte en **temps simulé**.
 * Les événements sont tirés **dans `step()`**, donc jamais pendant une pause : `RaceSimulation` ne
   faisant aucun pas, rien n'est tiré, rien n'avance, et un événement en cours reste simplement
@@ -529,7 +635,10 @@ premier événement de chaque course est uniforme sur les 6 personnages.
 
 > La corrélation littérale « nombre d'événements reçus vs position moyenne » ne peut **pas** servir de
 > seuil : elle mesure l'effet causal revendiqué ci-dessus (« un gros bonus vaut 2 à 5 places ») et vaut
-> `−0,13` mesuré sur 1800 couples (course, personnage).
+> `−0,13` mesuré sur 1800 couples (course, personnage) du corpus 180 s de P010. Ce n'est pas un critère
+> de §13 et la passe corrective 60 s ne l'a pas re-mesurée ; le mécanisme qu'elle décrit (le ciblage
+> ignore le rang) est, lui, verrouillé structurellement par les tests de source et par le rejeu sur un
+> monde réordonné.
 
 ---
 
@@ -608,9 +717,9 @@ par l'observateur, il n'a **aucun accès** à l'état du moteur. Il ne peut donc
 | `LEADER_MALUS` | le leader au moment du tirage subit `CHUTE`, `SIESTE` ou `VENT_DE_FACE` | `60`, `+15` si `SIESTE` |
 | `CLOSE_RACE` | écart P1–P3 ≤ 15 m pendant ≥ 5 s consécutives | `40` |
 | `LAST_COMEBACK` | le dernier passe à la 3e place ou mieux, ou gagne ≥ 4 places en ≤ 30 s | `55` |
-| `CHECKPOINT_SPLIT` | instant de checkpoint atteint : `tSim = 45`, `90` ou `135 s` | `38`, `+20` si le leader a changé, `+10` si écart P1–P2 < 20 m |
-| `FINISH` | `tSim = 180 s` atteint | `80` |
-| `PHOTO_FINISH` | écart P1–P2 à `tSim = 180 s` < 5 m | `90` (remplace `FINISH`) |
+| `CHECKPOINT_SPLIT` | instant de checkpoint atteint : `tSim = 20` ou `40 s` | `38`, `+20` si le leader a changé, `+10` si écart P1–P2 < 20 m |
+| `FINISH` | `tSim = 60 s` atteint | `80` |
+| `PHOTO_FINISH` | écart P1–P2 à `tSim = 60 s` < 5 m | `90` (remplace `FINISH`) |
 
 Un fait n'est **jamais** émis sans la variation d'état correspondante. Chaque `RaceFact` porte :
 `type`, `tSim`, `characterIds`, `magnitudes` (valeurs réelles), `importance`, `textKey`.
@@ -653,26 +762,31 @@ il est détecté.
 | `SPEAK.PREEMPT_IMPORTANCE` | `85` | au-delà, peut court-circuiter le cooldown global (jamais le cooldown par type) |
 | `SPEAK.INTERRUPT_DELTA` | `20` | une réplique en cours est coupée si `newImp ≥ currentImp + 20` |
 | `SPEAK.QUEUE_MAX` | `3` | au-delà, on jette la réplique la moins importante |
-| `SPEAK.MAX_LINES_PER_SEGMENT` | `12` | quota dur par segment de 45 s |
+| `SPEAK.MAX_LINES_PER_SEGMENT` | `12` | quota dur par segment de 20 s (structurellement non contraignant : le cooldown global de `6 s` plafonne une course de 60 s à ≈ 10 répliques, quota inclus) |
 | `SPEAK.MIN_WINDOW_AVG_S` | `5.0` | moyenne minimale d'écart sur fenêtre glissante de 30 s |
 
 Cooldowns par type : `LEADER_CHANGE 12 s`, `BIG_COMEBACK 15 s`, `OVERTAKE_STREAK 12 s`,
 `BIG_BONUS 8 s`, `LEADER_MALUS 10 s`, `CLOSE_RACE 25 s`, `LAST_COMEBACK 20 s`,
 `CHECKPOINT_SPLIT 5 s`, `FINISH 0`. Déduplication : un fait identique (même type, mêmes personnages,
-même tranche de magnitude) est supprimé pendant `10 s`.
+même tranche de magnitude) est supprimé pendant `10 s`. **Aucun de ces réglages n'a été touché par la
+passe corrective 60 s** : la fenêtre glissante de `30 s` couvre désormais la moitié d'une course, ce
+qui ne change pas la règle (elle porte sur la densité de parole, pas sur la durée totale) et reste
+mesuré conforme.
 
-**Cible statistique** : **moyenne de 12 à 30 répliques par course sur le corpus d'équilibrage**
-(≈ 1 toutes les 6 à 15 s en moyenne). C'est bien une **moyenne de corpus**, pas une exigence par
+**Cible statistique** : **moyenne de 6 à 14 répliques par course sur le corpus d'équilibrage**
+(≈ 1 toutes les 8,5 à 10 s en moyenne). C'est bien une **moyenne de corpus**, pas une exigence par
 course : la discipline de parole est déterministe mais elle dépend des faits réellement produits, donc
 une course pauvre en faits saillants parle moins. Le quota dur de `12` par segment reste une borne
 **par segment**, jamais un objectif à atteindre : **le speaker ne parle que sur un `RaceFact`**, il
 n'est jamais forcé d'émettre une réplique pour remplir un quota, et il ne parle pas du tout si les
 faits manquent. La distribution est surveillée en entier (min, percentiles, max, nombre de courses
-sous 12, courses muettes).
+sous la cible basse, courses muettes).
 
-Mesuré par P010 sur le corpus canonique de 1000 seeds : **min 7** | moyenne **16,734** | max **29**,
-**93 courses sur 1000 sous 12** répliques, **aucune course muette** (`= 0` : 0 course, `> 30` : 0
-course). Détail dans `docs/balance-report.md` §4.2.
+Mesuré par la passe corrective sur le corpus canonique de 1000 seeds **à 60 s** : **min 5** |
+moyenne **8,906** | max **11**, **2 courses sur 1000 sous 6** répliques, **aucune course muette**
+(`= 0` : 0 course, `> 14` : 0 course). La cible `12 – 30` de P010 était la **cadence** de la course de
+180 s ; la borne haute `14` correspond au plafond mécanique du cooldown global, majoré des
+préemptions. Détail dans `docs/balance-report.md` §4.2.
 
 ### 9.4 Textes
 
@@ -682,9 +796,14 @@ course). Détail dans `docs/balance-report.md` §4.2.
   (dérivé de la seed). **Invariant** : modifier les textes ne doit **jamais** changer le déroulement
   d'une course. Test obligatoire.
 * Les placeholders (`{nom}`, `{places}`, `{metres}`) sont remplis **exclusivement** depuis les champs
-  du fait. Aucune valeur inventée, aucun arrondi trompeur.
+  du fait. Aucune valeur inventée, aucun arrondi trompeur : les nombres passent par le module de
+  présentation (`src/render/format.ts`, §5.2), qui arrondit **à l'affichage** sans jamais toucher la
+  valeur de simulation.
 * Voix optionnelle via `speechSynthesis` (navigateur, local, gratuit), **désactivée par défaut**,
-  comme tout l'audio de la V1 pour le moment.
+  comme tout l'audio de la V1 pour le moment. Elle est commandée par le réglage **`Commentateur`**
+  (§5.2), parle à `TTS_RATE = 1.6`, et ne vocalise que le texte **déjà affiché** : elle ne peut ni le
+  remplacer, ni le retarder, ni influencer la course. Son activation prononce une confirmation courte
+  (`Let's go!`) qui ne passe **pas** par le speaker. Le système audio complet reste en P015.
 
 ---
 
@@ -762,14 +881,22 @@ Le mode test ne touche **jamais** au noyau : il ne modifie que `SIM_CONFIG`.
 | --- | --- | --- |
 | `COUNTDOWN_REAL_S` | 3.0 | 0 |
 | `CHECKPOINT_PAUSE_REAL_S` | 3.0 | 0.2 |
-| `TIME_SCALE` | 1 | 20 (⇒ course en ≈ 9,6 s réelles) |
+| `TIME_SCALE` | 1 | 20 (⇒ course en ≈ 3,2 s réelles) |
 | `MAX_STEPS_PER_FRAME` | 5 | `20 × 5 = 100` |
 | `runToCompletion(seed)` | — | disponible : course instantanée sans rendu |
 
-`runToCompletion` exécute en boucle les `10800` pas du noyau, sans rendu ni pause, et renvoie l'état
+`runToCompletion` exécute en boucle les `3600` pas du noyau, sans rendu ni pause, et renvoie l'état
 final. C'est l'API utilisée par les tests unitaires et par Playwright pour vérifier la reproductibilité
 sans attendre. Le mode `fast=1` sert aux tests d'intégration visibles : il doit produire
 **exactement** le même résultat que ×1 pour la même seed.
+
+> **Conséquence de la passe corrective, à connaître pour lire les tests.** Les durées d'affichage du
+> commentaire (`VIEW.SUBTITLE_*`) sont exprimées en millisecondes **réelles**, alors que la course se
+> mesure en secondes **simulées**. En mode `fast=1`, une course de 60 s dure ≈ 3,2 s réelles : aucune
+> réplique n'a donc le temps d'expirer, et chaque nouvelle réplique **coupe** la précédente. Le
+> comportement est correct (la réplique est remplacée, jamais empilée), mais un test qui veut observer
+> un démarrage *non* préempté doit tourner en mode normal (×1), où les deux horloges coïncident —
+> c'est ce que fait le test E2E de discipline du speaker.
 
 ---
 
@@ -778,7 +905,7 @@ sans attendre. Le mode `fast=1` sert aux tests d'intégration visibles : il doit
 1. Téléporter, recentrer, resynchroniser, aspirer ou « élastiquer » un personnage.
 2. Écrire dans `x` autrement que par `x += v × DT`.
 3. Faire dépendre la **fin de course** d'une distance, d'une ligne, d'une arche ou d'un repère
-   graphique : la course se termine **exclusivement** à `tSim = 180 s`. Aucune `FINISH_DISTANCE`.
+   graphique : la course se termine **exclusivement** à `tSim = 60 s`. Aucune `FINISH_DISTANCE`.
 4. Toute règle dépendant du rang ou de l'écart (rubber-banding, bonus au dernier, malus au leader).
 5. Tout changement de vitesse instantané (saut de `v`), et toute limite d'accélération appliquée
    uniformément aux deux directions.
@@ -795,71 +922,95 @@ sans attendre. Le mode `fast=1` sert aux tests d'intégration visibles : il doit
 
 ## 13. Critères d'équilibrage (à vérifier par le harnais de P010 / P017)
 
-Sur **1000 seeds**, 6 personnages, course complète :
+Sur **1000 seeds**, 6 personnages, course complète (**60 s**) :
 
-| Critère | Plage attendue |
-| --- | --- |
-| Écart P1–P6 à `tSim = 180 s` (médiane) | 80 – 260 m |
-| Écart P1–P6 à `tSim = 180 s` (5e / 95e percentile) | ≥ 25 m / ≤ 500 m |
-| Le leader à `tSim = 135 s` gagne | 55 % – 85 % des courses |
-| Changements de leader par course (moyenne) | 6 – 20 |
-| Dépassements comptés par course (moyenne) | ≥ 25 |
-| Taux de victoire par personnage | 12 % – 22 % chacun |
-| Événements par course (moyenne) | 10 – 16 |
-| Événements par personnage | ≤ 5, part de chacun entre 10 % et 27 % |
-| Surges par personnage | 14 – 26 |
-| Répliques du speaker par course (moyenne) | 12 – 30 |
-| Reproductibilité | 100/100 seeds identiques bit à bit |
-| Nombre de pas par course | exactement `10800`, avec ou sans pauses |
-| Vitesse moyenne finale par personnage | `SPEED.BASE ± 1,5 %` (équivalence) |
+| Critère | Plage attendue | Mesure du corpus canonique |
+| --- | --- | --- |
+| Écart P1–P6 à `tSim = 60 s` (médiane) | 45 – 150 m | 93,00 m |
+| Écart P1–P6 à `tSim = 60 s` (5e / 95e percentile) | ≥ 15 m / ≤ 290 m | 45,83 m / 166,25 m |
+| Le leader à `tSim = 40 s` gagne | 55 % – 85 % des courses | 63,20 % |
+| Changements de leader par course (moyenne) | 6 – 20 | 8,31 |
+| Dépassements comptés par course (moyenne) | ≥ 25 | 27,98 |
+| Taux de victoire par personnage | 12 % – 22 % chacun | 15,30 % – 18,40 % |
+| Événements par course (moyenne) | 3 – 6 | 3,36 |
+| Événements par personnage | ≤ 5, part de chacun entre 10 % et 27 % | 0,54 – 0,58 ; 16,14 % – 17,30 % |
+| Surges par personnage | 4,7 – 8,7 | 6,17 – 6,23 |
+| Répliques du speaker par course (moyenne) | 6 – 14 | 8,91 |
+| Reproductibilité | 100/100 seeds identiques bit à bit | 100/100, distances et classement |
+| Nombre de pas par course | exactement `3600`, avec ou sans pauses | 3600 exactement |
+| Vitesse moyenne finale par personnage | `SPEED.BASE ± 1,5 %` (équivalence) | 1,277 % max |
 
-Ces seuils sont **implémentés comme tests** (P010). Si un réglage change, le document et les seuils
-changent ensemble.
+Ces seuils sont **implémentés comme tests** (P010, `tools/balanceStats.ts`). Si un réglage change, le
+document et les seuils changent ensemble.
 
-> **Biais de vitesse — résolu en P010.** La dérive, les surges et les événements ont chacun une
-> espérance **nette positive**, et leur somme dépassait le seuil `±1,5 %` de §13. P008 avait mesuré
-> **+2,03 %** de `SPEED.BASE` (384 courses). P010 a corrigé la part qui vient du catalogue : les
+> **Passe corrective issue du premier test joueur manuel après P013 — aucune constante de jeu
+> modifiée.** La course est passée de 180 s à 60 s (§4). Les seules lignes de §13 qui **dépendent de la
+> durée** ont été réinterprétées, jamais relâchées pour faire passer une mesure :
+>
+> | Ligne | Avant (180 s) | Après (60 s) | Pourquoi |
+> | --- | --- | --- | --- |
+> | Écart P1–P6 (médiane) | 80 – 260 m | 45 – 150 m | l'écart entre deux personnages est une marche aléatoire à dérive : son écart-type croît comme la **racine** du temps, donc l'échelle est divisée par `√3 ≈ 1,73`, pas par 3 |
+> | Écart P1–P6 (p5 / p95) | ≥ 25 m / ≤ 500 m | ≥ 15 m / ≤ 290 m | même raison |
+> | Leader à `tSim = 135 s` | 55 % – 85 % | **`tSim = 40 s`**, même plage | `135 s` était « début du dernier segment » (`4 × 45 s`) ; la notion est conservée telle quelle : `TOTAL_SIM_S − SEGMENT_DURATION_S = 40 s`. `135 s` n'existe plus dans une course de 60 s |
+> | Événements par course | 10 – 16 | 3 – 6 | `EVENT.RATE_PER_S = 1/14` est un **taux** et n'a pas bougé : la plage est la même **cadence** (un événement toutes les 11 à 20 s) |
+> | Surges par personnage | 14 – 26 | 4,7 – 8,7 | `SURGE.INTERVAL_MEAN_S = 9 s` n'a pas bougé : l'espérance passe de `180/9 = 20` à `60/9 ≈ 6,67`, et la plage reste `± 30 %` |
+> | Répliques du speaker | 12 – 30 | 6 – 14 | la cadence du speaker est bornée par son cooldown global (`6 s`) : `≈ 10` répliques au maximum en 60 s, donc `[12 ; 30]` y est **structurellement inatteignable** (les 200 courses auditées ne violent aucune règle de §9.3) |
+> | Nombre de pas | 10800 | 3600 | `TOTAL_SIM_S / DT_S` |
+>
+> Les lignes qui **ne dépendent pas** de la durée (`Changements de leader 6 – 20`,
+> `Dépassements ≥ 25`, taux de victoire `12 % – 22 %`, part d'événements `10 % – 27 %`, biais de
+> vitesse `± 1,5 %`, reproductibilité `100/100`) ont été **conservées telles quelles** : elles restent
+> conformes sans être touchées. Aucune constante de `SPEED`, `SURGE`, `EVENT`, `DRIFT` ni `OVERTAKE`
+> n'a été modifiée, et `EVENT.RATE_PER_S` vaut toujours `1/14` (une tentative à `1/10` a été mesurée
+> puis **annulée** : elle sortait la cadence des événements de la plage).
+
+> **Biais de vitesse — résolu en P010, revérifié à 60 s.** La dérive, les surges et les événements ont
+> chacun une espérance **nette positive**, et leur somme dépassait le seuil `±1,5 %` de §13. P008 avait
+> mesuré **+2,03 %** de `SPEED.BASE` (384 courses). P010 a corrigé la part qui vient du catalogue : les
 > **magnitudes de bonus du catalogue §7.1 ont été réduites à 65 %** (§7.1 recalculé, malus inchangés),
 > facteur retenu par balayage — le **plus grand facteur conforme parmi les valeurs testées**, et rien
-> de plus. Biais résiduel mesuré sur le corpus canonique de 1000 seeds : **+1,258 %**, mesure par
-> personnage comprise (`docs/balance-report.md` §4). L'invariant d'équivalence §5.6 tient toujours :
+> de plus. Biais résiduel mesuré sur le corpus canonique de 1000 seeds **à 60 s** : **+1,277 %**, mesure
+> par personnage comprise (`docs/balance-report.md` §4). L'invariant d'équivalence §5.6 tient toujours :
 > aucun personnage ne s'écarte durablement de la moyenne des six.
 
-> **Critère du leader — instant remplacé en P010, de 171 s à 135 s.** Le critère s'énonçait « le
-> leader à `tSim = 171 s` gagne 55 % – 85 % des courses ». Mesuré sur le corpus canonique de
-> 1000 seeds, il valait **88,10 %** : **hors plage**, et ce n'était pas un artefact de mesure.
+> **Critère du leader — instant dérivé de la durée.** Le critère s'énonçait « le leader à
+> `tSim = 171 s` gagne 55 % – 85 % des courses ». Mesuré sur le corpus canonique, il valait **88,10 %** :
+> **hors plage**, et ce n'était pas un artefact de mesure.
 >
-> Le remplacement n'a pas été décidé parce que le chiffre arrangeait, mais parce que **135 s est le
-> début du quatrième et dernier segment** (4 × 45 s) : c'est l'instant où le dernier quart de course
-> commence, donc l'instant qui a un sens de game design pour dire « la course est-elle déjà jouée ? ».
-> 9 secondes avant l'arrivée, à l'inverse, l'avance médiane du leader vaut déjà 38,7 m alors que
-> l'écart-type du chemin parcouru par deux personnages sur ces 9 s vaut 22–27 m : le critère mesurait
-> surtout la **persistance mécanique** d'une avance, pas l'intérêt de la course.
+> Le remplacement n'a pas été décidé parce que le chiffre arrangeait, mais parce que **l'instant choisi
+> est le début du dernier segment** — un instant qui a un sens de game design pour dire « la course
+> est-elle déjà jouée ? ». Neuf secondes avant l'arrivée, à l'inverse, l'avance médiane du leader vaut
+> déjà 38,7 m alors que l'écart-type du chemin parcouru par deux personnages sur ces 9 s vaut 22–27 m :
+> le critère mesurait surtout la **persistance mécanique** d'une avance, pas l'intérêt de la course.
+> P010 a donc retenu `135 s` (`4 × 45 s`) ; la passe corrective 60 s conserve la **même notion** et la
+> **dérive** de `RACE_CONFIG` : `LEADER_CHECK_S = TOTAL_SIM_S − SEGMENT_DURATION_S = 40 s`. Une course de
+> 180 s retrouverait mécaniquement 135 s.
 >
 > Le diagnostic complet est dans `docs/balance-report.md` §2. Il a établi, par comparaison **appariée**
 > seed par seed (test de McNemar, 400 seeds), qu'aucune constante **globale, symétrique et indépendante
 > du classement** ne corrigeait l'écart de façon significative : atténuer ou supprimer la dérive ou
 > les surges *augmente* même le taux, et seule la suppression des événements le ferait baisser —
-> au prix de l'écart P1–P6 (181 m → 121 m) et du spectacle de §7. Aucun mécanisme de fin de course,
-> aucun malus du leader, aucun bonus au dernier n'a été introduit : §7.4 et §5.5 l'interdisent.
+> au prix de l'écart P1–P6 et du spectacle de §7. Aucun mécanisme de fin de course, aucun malus du
+> leader, aucun bonus au dernier n'a été introduit : §7.4 et §5.5 l'interdisent.
 >
-> Le critère du leader à 135 s, avec la même plage `55 % – 85 %`, est **conforme**. Deux mesures, deux
-> corpus — la valeur **normative** est celle du corpus canonique :
-> * corpus canonique de **1000 seeds** : **66,90 %** — valeur de référence, celle que cite §13 ;
-> * corpus **réduit de 300 seeds** (préfixe du précédent, mesure de travail) : 66,33 %.
+> Le critère du leader à `40 s`, avec la même plage `55 % – 85 %`, est **conforme** : **63,20 %** sur le
+> corpus canonique de 1000 seeds à 60 s.
 
 ---
 
 ## 14. Glossaire
 
 * **Pas (step)** : une itération de `DT = 1/60 s` du moteur. `step()` ne prend aucun argument.
-* **Segment** : 45 s de temps simulé.
-* **Checkpoint** : instant de temps simulé (`tSim = 45`, `90`, `135 s`). Ce n'est pas une distance.
+* **Segment** : 20 s de temps simulé.
+* **Checkpoint** : instant de temps simulé (`tSim = 20` et `40 s`). Ce n'est pas une distance. Le mot
+  est employé tel quel face au joueur (`Checkpoint 1 · 20 s`) ; `Pointage`, utilisé avant la passe
+  corrective, a été retiré.
 * **Pause checkpoint** : 3 s de temps réel, gérée par `RaceSimulation`, simulation gelée.
-* **`tSim = 180 s`** : seule condition de fin de course. Le gagnant est celui qui a la plus grande
+* **`tSim = 60 s`** : seule condition de fin de course. Le gagnant est celui qui a la plus grande
   distance à cet instant.
-* **Échelle nominale** (`VIEW.NOMINAL_SCALE_M = 2160 m`) : dimensionnement du décor et de la
-  mini-carte. N'affecte aucune règle.
+* **Échelle nominale** (`VIEW.NOMINAL_SCALE_M = 720 m`) : dimensionnement du décor. N'affecte aucune
+  règle. La mini-carte qui s'y référait a été retirée du HUD par la passe corrective ; le modèle qui
+  la calcule reste un hook de test et de debug.
 * **Drift** : dérive permanente de vitesse (OU), ±20 %.
 * **Surge** : petite accélération/ralentissement occasionnel.
 * **Événement** : modulation de vitesse rare et puissante (turbo, chute…).

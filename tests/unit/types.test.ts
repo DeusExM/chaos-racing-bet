@@ -28,8 +28,8 @@ type Equals<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 /** `RacePhase` ne connaît que ces trois situations — aucun état de pause, de countdown ni de reprise. */
 const phaseKindsAreExhaustive: Equals<RacePhase['kind'], 'idle' | 'running' | 'finished'> = true;
 
-/** Le segment d'une phase est un **numéro humain** 1..4, pas un index 0..3. */
-const segmentIsHumanNumber: Equals<Extract<RacePhase, { kind: 'running' }>['segment'], 1 | 2 | 3 | 4> =
+/** Le segment d'une phase est un **numéro humain** 1..3, pas un index 0..2. */
+const segmentIsHumanNumber: Equals<Extract<RacePhase, { kind: 'running' }>['segment'], 1 | 2 | 3> =
   true;
 
 /** La phase en cours porte bien le temps écoulé dans son segment. */
@@ -74,7 +74,7 @@ const raceFactFieldsMatchDesign: Equals<
 > = true;
 
 /** Les segments humains admis par le contrat, dans l'ordre. */
-const HUMAN_SEGMENTS: readonly (1 | 2 | 3 | 4)[] = [1, 2, 3, 4];
+const HUMAN_SEGMENTS: readonly (1 | 2 | 3)[] = [1, 2, 3];
 
 // ---------------------------------------------------------------------------------------------
 // Valeurs de référence, écrites à la main d'après le contrat.
@@ -172,7 +172,7 @@ describe('contrat central (ROADMAP.md §A.4)', () => {
     expect(typeof assertEngineCanAdvanceState).toBe('function');
   });
 
-  it('numérote les segments de 1 à 4, quand track.ts les indexe de 0 à 3', () => {
+  it('numérote les segments de 1 à 3, quand track.ts les indexe de 0 à 2', () => {
     expect(HUMAN_SEGMENTS).toHaveLength(RACE_CONFIG.SEGMENT_COUNT);
     expect(HUMAN_SEGMENTS.at(0)).toBe(1);
     expect(HUMAN_SEGMENTS.at(-1)).toBe(RACE_CONFIG.SEGMENT_COUNT);
@@ -190,6 +190,6 @@ describe('contrat central (ROADMAP.md §A.4)', () => {
     const result: RaceResult = { tSim: RACE_CONFIG.TOTAL_SIM_S, ranking: ['c0'], distances: [0] };
 
     expect(Object.keys(result).sort()).toEqual(['distances', 'ranking', 'tSim']);
-    expect(result.tSim).toBe(180);
+    expect(result.tSim).toBe(60);
   });
 });

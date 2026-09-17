@@ -86,6 +86,20 @@ export interface ChaosRaceViewDebugApi {
    * vérifier que les deux ne peuvent pas diverger.
    */
   finish(): FinishDebugSnapshot | null;
+  /**
+   * Badges de retour d'événement réellement affichés (passe corrective).
+   *
+   * Chaque entrée porte le personnage **et l'occurrence d'événement** (`type@départ`) qui l'a
+   * produite : un test peut donc vérifier qu'un badge correspond à un événement du noyau, et qu'il
+   * disparaît quand cet événement se termine — sans jamais avoir à croire une animation sur parole.
+   */
+  eventFeedback(): readonly EventFeedbackDebugSnapshot[];
+}
+
+/** Occurrence d'événement affichée par la couche de retour visuel. */
+export interface EventFeedbackDebugSnapshot {
+  readonly id: CharacterId;
+  readonly occurrence: string;
 }
 
 declare global {

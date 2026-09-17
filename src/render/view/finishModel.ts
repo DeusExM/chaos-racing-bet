@@ -9,7 +9,7 @@ import { VIEW } from '../viewConfig';
  * ## La règle qui structure tout ce fichier
  *
  * Le classement final et les distances finales viennent **exclusivement** du noyau, à
- * `tSim = RACE_CONFIG.TOTAL_SIM_S` (180 s), au moment où la phase devient `finished`. Rien n'est
+ * `tSim = RACE_CONFIG.TOTAL_SIM_S` (60 s), au moment où la phase devient `finished`. Rien n'est
  * recalculé ici : l'ordre et les écarts sortent de `sim/leaderboard.ts`, qui s'appuie lui-même sur
  * `core/ranking.ts`. Ce module ne trie rien, ne compare aucune distance et ne connaît ni constante de
  * piste, ni repère de décor, ni position d'écran : c'est ce qui rend impossible qu'un podium
@@ -18,8 +18,9 @@ import { VIEW } from '../viewConfig';
  * ## Deux objets, deux rôles
  *
  * * `FinishSnapshot` est la **photographie figée** de l'arrivée : distances, vitesses et classement
- *   du pas `10800`, copiés une fois et gelés. C'est elle, et elle seule, que l'affichage consomme
- *   ensuite — donc les valeurs montrées ne peuvent plus bouger, même si le rendu continue de vivre.
+ *   du pas `TOTAL_STEPS`, copiés une fois et gelés. C'est elle, et elle seule, que l'affichage
+ *   consomme ensuite — donc les valeurs montrées ne peuvent plus bouger, même si le rendu continue de
+ *   vivre.
  * * `FinishModel` est la **présentation** de cette photographie : vainqueur, podium, liste complète,
  *   et la mention `PHOTO_FINISH` lorsqu'elle a réellement eu lieu.
  *
@@ -35,9 +36,9 @@ import { VIEW } from '../viewConfig';
 /** Photographie figée de l'arrivée, prise au pas `TOTAL_STEPS`. */
 export interface FinishSnapshot {
   readonly seed: string;
-  /** Instant simulé de l'arrivée : toujours `180` s, lu dans le noyau. */
+  /** Instant simulé de l'arrivée : toujours `TOTAL_SIM_S` (`60` s), lu dans le noyau. */
   readonly tSim: number;
-  /** Nombre de pas de l'arrivée : toujours `10800`, lu dans le noyau. */
+  /** Nombre de pas de l'arrivée : toujours `TOTAL_STEPS` (`3600`), lu dans le noyau. */
   readonly steps: number;
   /** Distances finales, dans l'ordre du roster. */
   readonly distances: readonly number[];

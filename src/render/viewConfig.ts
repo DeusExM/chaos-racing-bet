@@ -64,7 +64,21 @@ export interface ViewConfig {
   readonly SUBTITLE_TOP_OFFSET_PX: number;
   /** Espace vertical entre le nom mis en avant et la réplique, en pixels de la scène. */
   readonly SUBTITLE_NAME_GAP_PX: number;
-  /** Durée d'affichage minimale d'une réplique, en millisecondes de temps **réel**. */
+  /**
+   * Durée d'affichage minimale d'une réplique, en millisecondes de temps **réel**.
+   *
+   * Les trois constantes de durée ci-dessous ont été **mesurées** sur le catalogue réel (passe
+   * corrective §8) : les 52 répliques françaises font de 46 à 98 caractères, médiane 74. Avec les
+   * anciennes valeurs (`2 000 + 45 × n`, plafond `5 200`), **30 répliques sur 52** étaient écrasées
+   * au plafond : l'adaptation à la longueur ne servait plus à rien, et les plus longues s'affichaient
+   * à ≈ 19 caractères par seconde, au-dessus de la vitesse de lecture confortable.
+   *
+   * Les valeurs retenues (`800 + 60 × n`, plafond `5 800`) donnent 3,56 s pour la plus courte,
+   * 5,24 s pour la médiane et 5,80 s pour la plus longue, soit 13 à 17 caractères par seconde —
+   * sous le plafond usuel de 20 caractères par seconde, et sous les 17 cps des sous-titres destinés
+   * à un large public. La durée reste du **temps réel** : elle ne touche ni un cooldown du speaker,
+   * ni la sélection des lignes, ni `tSim`.
+   */
   readonly SUBTITLE_MIN_MS: number;
   /** Durée d'affichage ajoutée par caractère de la réplique, en millisecondes. */
   readonly SUBTITLE_PER_CHAR_MS: number;
@@ -86,7 +100,7 @@ export interface ViewConfig {
   readonly FINISH_PODIUM_SIZE: number;
 }
 
-/** Constante d'implémentation : `2160 = 12 × 180`, calculée pour ne pas être recopiée à la main. */
+/** Constante d'implémentation : `720 = 12 × 60`, calculée pour ne pas être recopiée à la main. */
 const NOMINAL_SCALE_M = SPEED.BASE * RACE_CONFIG.TOTAL_SIM_S;
 
 export const VIEW: ViewConfig = Object.freeze({
@@ -112,9 +126,9 @@ export const VIEW: ViewConfig = Object.freeze({
   SUBTITLE_MAX_WIDTH_RATIO: 0.5,
   SUBTITLE_TOP_OFFSET_PX: 52,
   SUBTITLE_NAME_GAP_PX: 6,
-  SUBTITLE_MIN_MS: 2000,
-  SUBTITLE_PER_CHAR_MS: 45,
-  SUBTITLE_MAX_MS: 5200,
+  SUBTITLE_MIN_MS: 800,
+  SUBTITLE_PER_CHAR_MS: 60,
+  SUBTITLE_MAX_MS: 5800,
   SUBTITLE_FADE_IN_MS: 160,
   SUBTITLE_FADE_OUT_MS: 220,
   FINISH_DECELERATION_MS: 1200,

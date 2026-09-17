@@ -36,23 +36,35 @@ import { SPEAKER_POLICY, type SpeakerPolicy } from '../src/speaker/policy';
 import { Speaker } from '../src/speaker/Speaker';
 
 /**
- * Instant simulé du leader retenu pour le critère « le leader à `t = 135 s` gagne ».
+ * Instant simulé du leader retenu pour le critère « le leader au début du dernier segment gagne ».
  *
- * **135 s est le début du quatrième et dernier segment** (`SEGMENT.DURATION_S = 45 s`, quatre
- * segments), donc l'instant où le dernier quart de course commence — et non un instant choisi pour
- * arranger une statistique. P010 a d'abord mesuré 171 s (9 s avant l'arrivée) : le critère y était
- * hors plage (`88,10 %` pour une plage `55 % – 85 %`), parce qu'à 171 s l'avance médiane du leader
- * (38,7 m) domine déjà l'écart-type du chemin parcouru sur les 9 s restantes (22–27 m). À 135 s, le
- * résultat est mesuré, pas supposé — voir `docs/balance-report.md`.
+ * P010 avait retenu `135 s` pour la course de 180 s : **135 s est le début du quatrième et dernier
+ * segment** (`4 × 45 s`), donc l'instant où le dernier quart de course commence — et non un instant
+ * choisi pour arranger une statistique. 135 s était d'ailleurs le remplaçant de 171 s (9 s avant
+ * l'arrivée), où le critère sortait de la plage (`88,10 %` pour `55 % – 85 %`), parce qu'à 171 s
+ * l'avance médiane du leader dominait déjà l'écart-type du chemin parcouru sur les 9 s restantes
+ * (voir `docs/balance-report.md`).
+ *
+ * La passe corrective 60 s conserve **la même notion, indépendante de la durée** : le début du dernier
+ * segment, soit `TOTAL_SIM_S − SEGMENT_DURATION_S = 40 s` pour `3 × 20 s`. La valeur est donc
+ * **dérivée** de `RACE_CONFIG` au lieu d'être recopiée : une course de 180 s retrouverait 135 s.
  */
-export const LEADER_CHECK_S = 135;
+export const LEADER_CHECK_S = RACE_CONFIG.TOTAL_SIM_S - RACE_CONFIG.SEGMENT_DURATION_S;
 
 /** Un événement par type du catalogue. */
 export type EventCounts = Readonly<Record<EventId, number>>;
 
-/** Nombre de courses `< 12` et `> 30` répliques (constantes de lecture du rapport, pas des seuils). */
-export const SPEAKER_TARGET_MIN = 12;
-export const SPEAKER_TARGET_MAX = 30;
+/**
+ * Bornes de lecture de la distribution des répliques (constantes de **lecture** du rapport, pas des
+ * seuils de conformité : le critère §13 porte sur la moyenne).
+ *
+ * P010 lisait `< 12` et `> 30` pour la course de 180 s : la cadence du speaker est bornée par son
+ * cooldown global (`SPEAK.GLOBAL_COOLDOWN_S = 6 s`), soit ≈ `durée / 6` répliques au maximum. Pour la
+ * course de 60 s, ces bornes de lecture deviennent `< 6` et `> 14`, ce qui laisse la même notion de
+ * « course pauvre » (une réplique toutes les 10 s) et de « course saturée ».
+ */
+export const SPEAKER_TARGET_MIN = 6;
+export const SPEAKER_TARGET_MAX = 14;
 
 /** Métriques d'une course, telles que mesurées — jamais recalculées depuis autre chose. */
 export interface BalanceRaceObservation {
@@ -61,11 +73,11 @@ export interface BalanceRaceObservation {
   readonly ranking: readonly CharacterId[];
   readonly steps: number;
   readonly tSim: number;
-  /** Écart P1–P6 à `tSim = 180 s`, en mètres. */
+  /** Écart P1–P6 à `tSim = TOTAL_SIM_S`, en mètres. */
   readonly gap1to6: number;
-  /** Écart P1–P2 à `tSim = 180 s`, en mètres. */
+  /** Écart P1–P2 à `tSim = TOTAL_SIM_S`, en mètres. */
   readonly gap1to2: number;
-  /** Leader à `tSim = 135 s`, ou `null` si l'instant n'a pas été observé. */
+  /** Leader à `tSim = LEADER_CHECK_S` (début du dernier segment), ou `null` si l'instant n'a pas été observé. */
   readonly leaderAtCheck: CharacterId | null;
   readonly leaderChanges: number;
   readonly overtakes: number;
@@ -314,7 +326,7 @@ export function observeRace(seed: string, options: BalanceCampaignOptions = {}):
 
     // Le porteur du rang 1 est celui de distance maximale, égalité départagée par index croissant —
     // exactement `RANK.TIE_BREAK = 'ascendingId'`, donc le même leader que `computeRanks` + rang 1,
-    // sans trier six distances à chaque pas (10800 tris par course, ×1000 courses).
+    // sans trier six distances à chaque pas (3600 tris par course, ×1000 courses).
     if (leaderIndex !== previousLeaderIndex) {
       leaderChanges += 1;
     }
@@ -859,9 +871,16 @@ export function balanceCriteria(metrics: BalanceMetrics): readonly BalanceCriter
   const meters = (value: number): string => `${value.toFixed(2)} m`;
 
   const criteria: BalanceCriterion[] = [
-    criterionInRange('gap-p1p6-median', 'Écart P1–P6 (médiane)', metrics.gap1to6.median, 80, 260, meters),
-    criterionAtLeast('gap-p1p6-p5', 'Écart P1–P6 (p5)', metrics.gap1to6.p5, 25, meters),
-    criterionAtMost('gap-p1p6-p95', 'Écart P1–P6 (p95)', metrics.gap1to6.p95, 500, meters),
+    // Les trois lignes d'écart P1–P6 sont les seules à dépendre de la **durée** par un effet de
+    // diffusion : la distance parcourue est une marche aléatoire à dérive, donc l'écart-type de
+    // l'écart entre deux personnages croît comme la **racine** du temps. Passer de 180 s à 60 s
+    // divise donc l'échelle attendue par √3 ≈ 1,73, et non par 3 : `[80 ; 260]` devient
+    // `[45 ; 150]`, `≥ 25` devient `≥ 15`, `≤ 500` devient `≤ 290`. Mesure du corpus canonique de
+    // 1000 seeds à 60 s : médiane 93,00 m, p5 45,83 m, p95 166,25 m — soit des rapports de 0,55 à
+    // 0,53 avec les valeurs de P010 (167,37 / 86,53), cohérents avec 1/√3 = 0,577.
+    criterionInRange('gap-p1p6-median', 'Écart P1–P6 (médiane)', metrics.gap1to6.median, 45, 150, meters),
+    criterionAtLeast('gap-p1p6-p5', 'Écart P1–P6 (p5)', metrics.gap1to6.p5, 15, meters),
+    criterionAtMost('gap-p1p6-p95', 'Écart P1–P6 (p95)', metrics.gap1to6.p95, 290, meters),
     criterionInRange(
       'leader-at-check-wins',
       `Leader à t=${metrics.leaderCheckS} s gagne`,
@@ -879,12 +898,20 @@ export function balanceCriteria(metrics: BalanceMetrics): readonly BalanceCriter
       integer,
     ),
     criterionAtLeast('overtakes-mean', 'Dépassements (moyenne)', metrics.overtakesMean, 25, integer),
-    // §13 : « Répliques du speaker par course (moyenne) | 12 – 30 ». Comme ses deux lignes voisines
-    // (« Événements par course (moyenne) », « Surges par personnage »), la ligne se lit sur la
-    // **moyenne** du corpus : le libellé porte donc le mot « moyenne », pour qu'aucun lecteur ne
-    // puisse croire que chaque course doit tenir dans la plage. La dispersion par course est publiée
-    // à part (et dans le rapport), parce qu'une moyenne dans la plage ne dit rien des courses les plus
-    // pauvres en répliques.
+    // §13 : « Répliques du speaker par course (moyenne) | 12 – 30 » pour la course de 180 s. Comme ses
+    // deux lignes voisines (« Événements par course (moyenne) », « Surges par personnage »), la ligne
+    // se lit sur la **moyenne** du corpus : le libellé porte donc le mot « moyenne », pour qu'aucun
+    // lecteur ne puisse croire que chaque course doit tenir dans la plage. La dispersion par course est
+    // publiée à part (et dans le rapport), parce qu'une moyenne dans la plage ne dit rien des courses
+    // les plus pauvres en répliques.
+    //
+    // Passe corrective 60 s : la cadence du speaker est bornée par sa propre règle, le cooldown global
+    // de `6 s` — une course de 60 s ne peut donc pas dépasser ≈ 10 répliques, et la plage `[12 ; 30]`
+    // y est **structurellement inatteignable** (ce n'est pas une régression de discipline : les 200
+    // courses auditées par `observerSeeds.test.ts`/`speakerSeeds.test.ts` ne violent aucune règle de
+    // §9.3). La ligne est donc réinterprétée en **cadence** : au moins une réplique toutes les 10 s
+    // (soit 6 par course) et au plus le plafond mécanique du cooldown global, avec la marge des
+    // préemptions (14). Mesure à 60 s : moyenne 8,91, min 5, max 11 sur 1000 courses.
     ...(metrics.speakerLines === null
       ? []
       : [
@@ -897,12 +924,17 @@ export function balanceCriteria(metrics: BalanceMetrics): readonly BalanceCriter
             integer,
           ),
         ]),
+    // Passe corrective 60 s : `EVENT.RATE_PER_S` est un **taux** (1/14 par seconde), conservé tel quel.
+    // La course de 60 s produit donc mécaniquement ≈ 3,4 événements, soit **un toutes les 17,9 s** —
+    // exactement la cadence de la course de 180 s (10,07 événements, un toutes les 17,9 s). La plage
+    // `[10 ; 16]` est remplacée par la cadence équivalente : un événement toutes les 11 à 20 secondes,
+    // soit `[3 ; 6]` pour 60 s. Mesure : 3,36.
     criterionInRange(
       'events-per-race-mean',
       'Événements par course (moyenne)',
       metrics.eventsTotalMean,
-      10,
-      16,
+      3,
+      6,
       integer,
     ),
     criterionAtMost(
@@ -912,18 +944,22 @@ export function balanceCriteria(metrics: BalanceMetrics): readonly BalanceCriter
       5,
       integer,
     ),
+    // Passe corrective 60 s : `SURGE.INTERVAL_MEAN_S = 9 s` est également un **taux**, conservé. Le
+    // nombre attendu de surges par personnage vaut donc `TOTAL_SIM_S / 9 ≈ 6,67`, et la plage de P010
+    // était exactement `20 ± 30 %` autour de `180 / 9 = 20`. Elle devient `6,67 ± 30 %`, soit
+    // `[4,7 ; 8,7]`. Mesure du corpus canonique : 6,17 à 6,23 selon le personnage.
     criterionAtLeast(
       'surges-per-character-min',
       'Surges par personnage (min)',
       Math.min(...metrics.surgesPerCharacterMean),
-      14,
+      4.7,
       integer,
     ),
     criterionAtMost(
       'surges-per-character-max',
       'Surges par personnage (max)',
       Math.max(...metrics.surgesPerCharacterMean),
-      26,
+      8.7,
       integer,
     ),
     criterionAtMost(

@@ -50,10 +50,10 @@ import type { ActiveEvent, CharacterId, EventId, RaceFact, RaceFactType } from '
  *   l'état : il faut sortir (écart > 15 m) puis rester 5 s de nouveau sous le seuil pour réémettre.
  * * `LAST_COMEBACK` : le personnage passé dernier dans les 30 s atteint la 3e place ou mieux, **ou**
  *   gagne au moins 4 places en ≤ 30 s.
- * * `CHECKPOINT_SPLIT` : aux instants 45, 90 et 135 s, avec le classement et les distances du moment,
+ * * `CHECKPOINT_SPLIT` : aux instants 20 et 40 s, avec le classement et les distances du moment,
  *   et l'importance `38` augmentée de `+20` si un `LEADER_CHANGE` a été confirmé depuis le checkpoint
  *   précédent, `+10` si l'écart P1–P2 est inférieur à 20 m.
- * * `FINISH` / `PHOTO_FINISH` : à `tSim = 180 s`, exactement l'un des deux — `PHOTO_FINISH` si
+ * * `FINISH` / `PHOTO_FINISH` : à `tSim = 60 s`, exactement l'un des deux — `PHOTO_FINISH` si
  *   l'écart P1–P2 est strictement inférieur à 5 m.
  *
  * ## Un fait par épisode, jamais un par pas
@@ -571,7 +571,7 @@ export class RaceObserver {
   }
 
   /**
-   * `CHECKPOINT_SPLIT` : aux bornes internes de 45, 90 et 135 s.
+   * `CHECKPOINT_SPLIT` : aux bornes internes de 20 et 40 s.
    *
    * Le fait est produit **ici et nulle part ailleurs** : il n'existe pas de seconde source. Les
    * distances publiées sont celles du pas qui atteint la borne, sans décalage.
@@ -615,7 +615,7 @@ export class RaceObserver {
   }
 
   /**
-   * `FINISH` ou `PHOTO_FINISH` : à `tSim = 180 s`, **exactement** l'un des deux.
+   * `FINISH` ou `PHOTO_FINISH` : à `tSim = 60 s`, **exactement** l'un des deux.
    *
    * `PHOTO_FINISH` remplace `FINISH` lorsque l'écart P1–P2 est strictement inférieur à 5 m. Un verrou
    * rend l'émission unique, même si l'observateur était alimenté après la fin de course.

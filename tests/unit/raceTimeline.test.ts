@@ -173,8 +173,8 @@ describe('compte à rebours réel', () => {
 });
 
 describe('pause de checkpoint', () => {
-  it('s’arrête pile sur chaque borne, aux trois checkpoints', () => {
-    for (const checkpoint of [1, 2, 3]) {
+  it('s’arrête pile sur chaque borne, aux deux checkpoints', () => {
+    for (const checkpoint of [1, 2]) {
       const simulation = new RaceSimulation(SEED, BULK);
       reachCheckpoint(simulation, checkpoint);
       expect(simulation.checkpoint).toBe(checkpoint);
@@ -230,8 +230,8 @@ describe('pause de checkpoint', () => {
     simulation.start();
     expect(simulation.phase).toBe('running');
 
-    // 45 s simulées à `timeScale = 20` = 2,25 s réelles ; on dépasse volontairement.
-    simulation.update(2750);
+    // 20 s simulées à `timeScale = 20` = 1 s réelle ; on dépasse volontairement.
+    simulation.update(1500);
     expect(simulation.phase).toBe('checkpointPause');
     expect(simulation.view.steps).toBe(RACE_CONFIG.STEPS_PER_SEGMENT);
 
@@ -286,7 +286,8 @@ describe('aucune dette de simulation', () => {
     const exact = new RaceSimulation(SEED, BULK);
     exact.start();
     exact.update(SIM_CONFIG.countdownRealS * 1000);
-    exact.update(45_000);
+    // Une frame juste suffisante : elle atteint la première borne (20 s) et pas au-delà.
+    exact.update(20_000);
     expect(exact.phase).toBe('checkpointPause');
     exact.update(SIM_CONFIG.checkpointPauseRealS * 1000);
 
@@ -300,9 +301,10 @@ describe('pause utilisateur', () => {
     const simulation = new RaceSimulation(SEED, BULK);
     simulation.start();
     simulation.update(SIM_CONFIG.countdownRealS * 1000);
-    simulation.update(20_000);
+    // 10 s simulées : on est en pleine course, bien avant la première borne (20 s).
+    simulation.update(10_000);
     expect(simulation.phase).toBe('running');
-    expect(simulation.view.steps).toBe(1200);
+    expect(simulation.view.steps).toBe(600);
 
     simulation.toggleUserPause();
     expect(simulation.phase).toBe('userPaused');
@@ -317,7 +319,7 @@ describe('pause utilisateur', () => {
     simulation.toggleUserPause();
     expect(simulation.phase).toBe('running');
     simulation.update(1000);
-    expect(simulation.view.steps).toBe(1200 + 60);
+    expect(simulation.view.steps).toBe(600 + 60);
   });
 
   it('suspend le compte à rebours sans le consommer', () => {
@@ -343,7 +345,7 @@ describe('pause utilisateur', () => {
 
   it('suspend une pause de checkpoint sans la consommer', () => {
     const simulation = new RaceSimulation(SEED, BULK);
-    reachCheckpoint(simulation, 3);
+    reachCheckpoint(simulation, 2);
 
     simulation.toggleUserPause();
     expect(simulation.phase).toBe('userPaused');
@@ -352,7 +354,7 @@ describe('pause utilisateur', () => {
 
     simulation.toggleUserPause();
     expect(simulation.phase).toBe('checkpointPause');
-    expect(simulation.checkpoint).toBe(3);
+    expect(simulation.checkpoint).toBe(2);
 
     // Les 3 s de la pause de checkpoint restent dues en entier.
     simulation.update(2900);
@@ -400,13 +402,11 @@ describe('course complète', () => {
       'running',
       'checkpointPause',
       'running',
-      'checkpointPause',
-      'running',
       'finished',
     ]);
   });
 
-  it('parcourt les quatre segments dans l’ordre, entre les pauses', () => {
+  it('parcourt les trois segments dans l’ordre, entre les pauses', () => {
     const simulation = new RaceSimulation(SEED, BULK);
     const segments: number[] = [];
 
@@ -419,10 +419,10 @@ describe('course complète', () => {
       simulation.update(1000);
     }
 
-    expect(segments).toEqual([1, 2, 3, 4]);
+    expect(segments).toEqual([1, 2, 3]);
   });
 
-  it('atteint exactement 10800 pas et tSim = 180, compte à rebours et pauses compris', () => {
+  it('atteint exactement 3 600 pas et tSim = 60, compte à rebours et pauses compris', () => {
     const simulation = new RaceSimulation(SEED);
     playToEnd(simulation, NOMINAL_FRAME_MS);
 

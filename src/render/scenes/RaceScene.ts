@@ -12,6 +12,7 @@ import { CameraRig } from '../view/CameraRig';
 import { CharacterSprite } from '../view/CharacterSprite';
 import { buildDebugModel } from '../view/debugModel';
 import { DebugPanel } from '../view/DebugPanel';
+import { EventFeedback } from '../view/EventFeedback';
 import { FinishPanel, type FinishActions } from '../view/FinishPanel';
 import {
   buildFinishModel,
@@ -133,6 +134,9 @@ export class RaceScene extends Scene {
 
   private subtitle: SubtitleBanner | null = null;
 
+  /** Retour visuel des événements actifs (passe corrective) : lecture seule, comme le HUD. */
+  private eventFeedback: EventFeedback | null = null;
+
   private finish: FinishPanel | null = null;
 
   /**
@@ -186,6 +190,9 @@ export class RaceScene extends Scene {
         leaderboard: this.options.leaderboard,
         seedValue: this.options.seedValue,
       });
+      // Retour visuel des événements (passe corrective) : il ne lit que l'état déjà calculé et les
+      // positions d'écran des sprites, et vit donc dans l'arène comme le HUD.
+      this.eventFeedback = new EventFeedback(this.options.hudRoot, this.options.text);
     }
 
     if (this.options.debug && this.options.debugPanel !== null) {
@@ -231,6 +238,10 @@ export class RaceScene extends Scene {
         visualDistances: () => this.visualXs,
         // L'écran d'arrivée tel qu'il est réellement présenté, pour comparer le podium au noyau.
         finish: () => this.finish?.snapshot() ?? null,
+        // Retour visuel d'événement : la photographie des badges réellement affichés, avec
+        // l'occurrence d'événement qui les a produits. Elle sert à vérifier qu'un badge vient bien
+        // d'un événement du noyau, et qu'il disparaît quand celui-ci se termine.
+        eventFeedback: () => this.eventFeedback?.snapshot() ?? [],
       });
     }
 
@@ -296,6 +307,18 @@ export class RaceScene extends Scene {
     // le **seul** écrivain, et les lignes viennent de `sim/leaderboard.ts` (source unique du noyau).
     const hudModel = buildHudModel(state, phase, checkpoint);
     this.hud?.update(hudModel);
+
+    // Retour visuel d'événement : il reçoit l'état **déjà lu** de cette frame et les positions des
+    // sprites **déjà posés**, et n'a donc aucun moyen de faire avancer la course d'un pas de plus.
+    this.eventFeedback?.update(
+      state.characters,
+      this.sprites.map((sprite) => ({
+        id: sprite.id,
+        screenX: sprite.screenX,
+        screenY: sprite.screenY,
+      })),
+      { width: this.layoutWidth, height: this.layoutHeight },
+    );
 
     // L'écran d'arrivée lit la photographie figée et le fait d'arrivée **réel** : il ne recalcule ni
     // le classement, ni un seuil de photo finish. Hors arrivée, il est masqué.

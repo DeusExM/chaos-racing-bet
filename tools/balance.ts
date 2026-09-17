@@ -148,7 +148,7 @@ function printMetrics(metrics: BalanceMetrics): void {
 
   const gap = metrics.gap1to6;
   console.log('');
-  console.log('=== Écarts P1–P6 à tSim = 180 s (m) ===');
+  console.log(`=== Écarts P1–P6 à tSim = ${String(RACE_CONFIG.TOTAL_SIM_S)} s (m) ===`);
   console.log(
     `min ${fixed(gap.min)} | p5 ${fixed(gap.p5)} | p25 ${fixed(gap.p25)} | médiane ${fixed(gap.median)} | ` +
       `moyenne ${fixed(gap.mean)} | p75 ${fixed(gap.p75)} | p95 ${fixed(gap.p95)} | max ${fixed(gap.max)}`,

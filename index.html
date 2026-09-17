@@ -19,8 +19,10 @@
       <section class="stage">
         <div id="game" class="game" role="img" aria-label="Zone de jeu (canvas)"></div>
         <!--
-          Racine du HUD : le HUD (P011) y installe la mini-carte, le classement, le chrono et le bloc
-          seed, et y replace l'état et le bandeau de checkpoint déclarés ci-dessous.
+          Racine du HUD : le HUD (P011) y installe le classement, le chrono, le bloc seed et les
+          réglages, et y replace l'état et le bandeau de checkpoint déclarés ci-dessous. La mini-carte
+          qui occupait une bande entière a été retirée par la passe corrective (le HUD masquait la
+          course) ; son modèle reste un hook de test et de debug.
         -->
         <div class="hud" data-testid="hud">
           <p id="race-status" class="hud-status" data-testid="race-status">—</p>
@@ -34,6 +36,11 @@
           <div id="leaderboard" class="hud-panel" data-testid="leaderboard"></div>
           <p class="seed">Seed : <span id="seed-value" data-testid="seed-value">—</span></p>
         </div>
+        <!--
+          Les retours d'événement (bonus/malus attachés aux personnages) et les réglages sont créés
+          par le rendu à l'exécution, pas déclarés ici : aucun bloc vide ne peut donc apparaître avant
+          le démarrage.
+        -->
       </section>
 
       <div class="controls">

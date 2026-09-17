@@ -9,18 +9,19 @@ import type { RaceFact, RacePhase } from '../../src/core/types';
 /**
  * P006, côté **noyau** : les checkpoints.
  *
- * Le noyau ne fait qu'une chose de plus qu'en P004 : il **signale** les instants `tSim = 45`, `90` et
- * `135 s`. Il ne s'arrête pas, ne connaît aucune durée de pause et n'a aucun état de pause. Ces tests
- * vérifient donc deux choses indissociables : les trois faits tombent sur les bonnes bornes, et le
+ * Le noyau ne fait qu'une chose de plus qu'en P004 : il **signale** les instants `tSim = 20` et
+ * `40 s`. Il ne s'arrête pas, ne connaît aucune durée de pause et n'a aucun état de pause. Ces tests
+ * vérifient donc deux choses indissociables : les deux faits tombent sur les bonnes bornes, et le
  * noyau reste un noyau.
  */
 
 const SEED = 'POULET42';
 const DT = RACE_CONFIG.DT_S;
 
-/** Pas exacts des trois bornes internes : 2700, 5400 et 8100. */
-const SPLIT_STEPS: readonly number[] = [1, 2, 3].map(
-  (index) => index * RACE_CONFIG.STEPS_PER_SEGMENT,
+/** Pas exacts des deux bornes internes : 1200 et 2400. */
+const SPLIT_STEPS: readonly number[] = Array.from(
+  { length: RACE_CONFIG.SEGMENT_COUNT - 1 },
+  (_, index) => (index + 1) * RACE_CONFIG.STEPS_PER_SEGMENT,
 );
 
 /** Instants simulés attendus, dans l'ordre. */
@@ -55,7 +56,7 @@ function closedPhaseKind(kind: RacePhase['kind']): 'idle' | 'running' | 'finishe
 }
 
 describe('CHECKPOINT_SPLIT — bornes exactes', () => {
-  it('signale le split 45 au pas 2700, et rien au pas 2699', () => {
+  it('signale le split 20 au pas 1200, et rien au pas 1199', () => {
     const engine = new RaceEngine(SEED);
 
     stepMany(engine, RACE_CONFIG.STEPS_PER_SEGMENT - 1);
@@ -67,11 +68,11 @@ describe('CHECKPOINT_SPLIT — bornes exactes', () => {
     const splits = splitsOf(engine.drainFacts());
     expect(splits).toHaveLength(1);
     expect(splits[0]?.type).toBe('CHECKPOINT_SPLIT');
-    expect(splits[0]?.tSim).toBe(45);
-    expect(engine.getState().tSim).toBe(45);
+    expect(splits[0]?.tSim).toBe(20);
+    expect(engine.getState().tSim).toBe(20);
   });
 
-  it('place les trois splits sur 45, 90 et 135 s, et sur aucune autre borne', () => {
+  it('place les deux splits sur 20 et 40 s, et sur aucune autre borne', () => {
     for (const [index, steps] of SPLIT_STEPS.entries()) {
       const engine = new RaceEngine(SEED);
 
@@ -88,7 +89,7 @@ describe('CHECKPOINT_SPLIT — bornes exactes', () => {
     }
   });
 
-  it('produit exactement trois splits sur une course complète, sans doublon', () => {
+  it('produit exactement deux splits sur une course complète, sans doublon', () => {
     const engine = new RaceEngine(SEED);
     const splitTimes: number[] = [];
 
@@ -99,8 +100,8 @@ describe('CHECKPOINT_SPLIT — bornes exactes', () => {
       }
     }
 
-    expect(splitTimes).toEqual([45, 90, 135]);
-    expect(new Set(splitTimes).size).toBe(3);
+    expect(splitTimes).toEqual([20, 40]);
+    expect(new Set(splitTimes).size).toBe(2);
     expect(engine.getState().steps).toBe(RACE_CONFIG.TOTAL_STEPS);
   });
 
@@ -111,25 +112,25 @@ describe('CHECKPOINT_SPLIT — bornes exactes', () => {
     expect(engine.getState().tSim).toBe(0);
     expect(engine.drainFacts()).toEqual([]);
 
-    // Arrivée : `tSim = 180` n'en est pas un non plus, c'est `finished` (et le fait d'arrivée,
-    // qui porte bien `tSim = 180` mais n'est pas un split).
+    // Arrivée : `tSim = 60` n'en est pas un non plus, c'est `finished` (et le fait d'arrivée,
+    // qui porte bien `tSim = 60` mais n'est pas un split).
     engine.runToCompletion();
     const facts = engine.drainFacts();
     const splits = splitsOf(facts);
     expect(splits.every((fact) => fact.tSim !== 0)).toBe(true);
     expect(splits.every((fact) => fact.tSim !== RACE_CONFIG.TOTAL_SIM_S)).toBe(true);
-    expect(splits.map((fact) => fact.tSim)).toEqual([45, 90, 135]);
+    expect(splits.map((fact) => fact.tSim)).toEqual([20, 40]);
     expect(
       facts.filter((fact) => fact.type === 'FINISH' || fact.type === 'PHOTO_FINISH')[0]?.tSim,
     ).toBe(RACE_CONFIG.TOTAL_SIM_S);
   });
 
-  it('produit les trois mêmes splits via runToCompletion()', () => {
+  it('produit les deux mêmes splits via runToCompletion()', () => {
     const engine = new RaceEngine(SEED);
     const result = engine.runToCompletion();
 
     expect(result.tSim).toBe(RACE_CONFIG.TOTAL_SIM_S);
-    expect(splitsOf(engine.drainFacts()).map((fact) => fact.tSim)).toEqual([45, 90, 135]);
+    expect(splitsOf(engine.drainFacts()).map((fact) => fact.tSim)).toEqual([20, 40]);
   });
 });
 
@@ -150,7 +151,7 @@ describe('CHECKPOINT_SPLIT — contenu mesuré', () => {
     const ids = state.characters.map((character) => character.id);
 
     // Le fait et le noyau décrivent le même instant : les distances publiées sont exactement celles
-    // de `tSim = 45 s`, sans décalage d'un pas.
+    // de `tSim = 20 s`, sans décalage d'un pas.
     expect(fact.magnitudes).toEqual([...distances].sort((a, b) => b - a));
     expect(fact.characterIds).toHaveLength(CHARACTER_IDS.length);
     expect([...fact.characterIds].sort()).toEqual([...CHARACTER_IDS].sort());
@@ -229,7 +230,7 @@ describe('drainFacts — tampon interne', () => {
     expect(engine.getState().steps).toBe(0);
 
     stepMany(engine, RACE_CONFIG.STEPS_PER_SEGMENT);
-    expect(splitsOf(engine.drainFacts()).map((fact) => fact.tSim)).toEqual([45]);
+    expect(splitsOf(engine.drainFacts()).map((fact) => fact.tSim)).toEqual([20]);
   });
 
   it('n’ajoute aucun fait après la fin : step() est un no-op', () => {

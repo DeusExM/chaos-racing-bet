@@ -26,7 +26,7 @@ describe('seeds dorées', () => {
       expect(isCanonicalSeedText(entry.seed), entry.seed).toBe(true);
       expect(entry.distances).toHaveLength(CHARACTER_IDS.length);
       expect(entry.ranking).toHaveLength(CHARACTER_IDS.length);
-      expect(entry.tSim).toBe(180);
+      expect(entry.tSim).toBe(RACE_CONFIG.TOTAL_SIM_S);
     }
   });
 

@@ -82,14 +82,28 @@ body {
 }
 
 /*
- * HUD (P011) : grille à deux colonnes posée **dans** l'arène, donc à l'échelle du canvas.
+ * HUD (P011, allégé par la passe corrective issue du premier test joueur manuel) : grille à deux
+ * colonnes posée **dans** l'arène, donc à l'échelle du canvas.
  *
  * Le HUD ne capture aucun clic (`pointer-events: none`) : seuls ses rares éléments interactifs, comme
  * le bouton de copie de la seed, les réactivent. La course reste donc entièrement cliquable.
  *
- * Répartition : l'état en haut, la mini-carte et la seed en bas, le classement et le chrono dans la
- * colonne de droite. Aucun bloc n'est positionné en coordonnées absolues, ce qui garantit qu'ils ne
- * peuvent pas se chevaucher à une résolution donnée.
+ * ## Objectif de la passe corrective : libérer la piste
+ *
+ * Le premier test joueur a jugé que le HUD masquait trop la course. La grille a donc été réorganisée
+ * en **bandes minces en haut et en bas**, avec une seule grande rangée flexible au milieu (la piste) :
+ *
+ * | rangée | contenu |
+ * |---|---|
+ * | 1 | état de course (gauche) et réglages (droite) |
+ * | 2 | chrono et segment, collés au bord droit |
+ * | 3 (`1fr`) | badge de checkpoint (temporaire, en haut au centre) et classement (bas droite) |
+ * | 4 | bandeau de commentaire, sur toute la largeur |
+ * | 5 | seed, discrète, en bas à gauche |
+ *
+ * Chaque bloc occupe **sa propre cellule** : aucun recouvrement n'est possible par construction, et
+ * la piste n'est jamais traversée par un bloc permanent. La mini-carte, qui occupait une bande
+ * entière, a été retirée : le classement donne déjà l'ordre, et la vue de piste appartient à P014.
  */
 .hud {
   position: absolute;
@@ -97,17 +111,18 @@ body {
   z-index: 2;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
-  gap: 0.25rem 0.4rem;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  gap: 0.2rem 0.35rem;
   align-items: start;
-  padding: 0.4rem 0.5rem;
+  padding: 0.35rem 0.45rem;
   pointer-events: none;
   font-size: clamp(0.58rem, 1.05vw, 0.82rem);
-  --hud-row-font: clamp(0.58rem, 1.05vw, 0.82rem);
+  --hud-row-font: clamp(0.52rem, 0.95vw, 0.74rem);
 }
 
 .hud-status {
-  grid-column: 1 / -1;
+  grid-column: 1;
+  grid-row: 1;
   justify-self: start;
   margin: 0;
   padding: 0.15rem 0.5rem;
@@ -120,19 +135,25 @@ body {
 }
 
 /*
- * Bandeau de checkpoint : centré sur l'arène, visible uniquement pendant la pause réelle.
- * Volontairement sobre — aucune animation, aucun effet : le polish appartient à P014.
+ * Badge de checkpoint : **temporaire**, visible uniquement pendant la pause réelle.
+ *
+ * Il vit dans la grande rangée flexible, aligné en haut au centre : il apparaît donc au-dessus de la
+ * piste, jamais au milieu. Le tableau de six écarts a été supprimé — c'est lui qui masquait la course
+ * pour une information que le classement live porte déjà. Volontairement sobre : aucune animation,
+ * aucun effet, le soin graphique appartient à P014.
  */
 .hud-checkpoint {
   grid-column: 1 / -1;
   grid-row: 3;
+  align-self: start;
   justify-self: center;
-  max-width: min(100%, 22rem);
-  padding: 0.3rem 0.7rem;
+  max-width: min(100%, 26rem);
+  padding: 0.2rem 0.6rem;
   border: 1px solid var(--accent);
-  border-radius: 10px;
+  border-radius: 999px;
   background: #000000cc;
   text-align: center;
+  white-space: nowrap;
 }
 
 .hud-checkpoint[hidden] {
@@ -142,7 +163,7 @@ body {
 .hud-banner {
   margin: 0;
   color: var(--accent);
-  font-size: clamp(0.7rem, 1.8vw, 1.15rem);
+  font-size: clamp(0.68rem, 1.6vw, 1rem);
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -152,42 +173,27 @@ body {
   display: none;
 }
 
-.hud-splits {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0 0.6rem;
-  margin-top: 0.15rem;
-  text-align: left;
-}
-
-.hud-split {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.35rem;
+/* Nom du leader figé à la borne : il vient du classement du noyau, jamais d'un calcul parallèle. */
+.hud-checkpoint-leader {
+  margin-left: 0.5rem;
   color: var(--muted);
-  white-space: nowrap;
+  font-size: 0.9em;
+  letter-spacing: 0.06em;
 }
 
-.hud-split-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.hud-split-gap {
-  font-variant-numeric: tabular-nums;
-}
-
-/* Chrono + segment : cellule haute de la colonne de droite. */
+/* Chrono + segment : bande mince de la rangée 2, collée au bord droit. */
 .hud-time {
   grid-column: 2;
   grid-row: 2;
   justify-self: end;
-  min-width: 7.5rem;
-  padding: 0.3rem 0.5rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.1rem 0.5rem;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 999px;
   background: #05070fcc;
-  text-align: right;
+  white-space: nowrap;
 }
 
 .hud-time-value,
@@ -198,25 +204,32 @@ body {
 }
 
 .hud-time-value {
-  font-size: 1.15em;
+  font-size: 1.1em;
 }
 
 .hud-segment-value {
   color: var(--muted);
+  font-size: 0.9em;
 }
 
-/* Classement : panneau existant, replacé dans la cellule basse de la colonne de droite. */
+/*
+ * Classement : panneau existant, compacté et replacé en bas à droite de la rangée de piste.
+ *
+ * Il garde ses **six lignes** et son écart en secondes : c'est ce que les tests comparent frame par
+ * frame à l'état du noyau, et c'est l'information la plus utile au spectateur. Ce qui disparaît, ce
+ * sont les marges, le titre visible et les gros caractères.
+ */
 .hud-panel {
   grid-column: 2;
-  grid-row: 4;
+  grid-row: 3;
   justify-self: end;
   align-self: end;
-  min-width: 10.5rem;
-  max-width: 15rem;
+  min-width: 9rem;
+  max-width: 11.5rem;
   margin: 0;
-  padding: 0.35rem 0.5rem;
-  border-radius: 10px;
-  background: #05070fcc;
+  padding: 0.2rem 0.4rem;
+  border-radius: 8px;
+  background: #05070fd0;
   border: 1px solid var(--border);
 }
 
@@ -230,10 +243,10 @@ body {
 
 .hud-row {
   display: grid;
-  grid-template-columns: 1.2rem minmax(0, 1fr) auto auto;
-  gap: 0.3rem;
+  grid-template-columns: 1.05rem minmax(0, 1fr) auto auto;
+  gap: 0.25rem;
   align-items: baseline;
-  line-height: 1.3;
+  line-height: 1.25;
   white-space: nowrap;
   /*
    * Taille de police explicite pour les lignes du classement (P011). Elle est **nommée** parce que
@@ -243,19 +256,21 @@ body {
   font-size: var(--hud-row-font);
 }
 
-/* Seed : rangée 1, colonne 1. En haut à gauche, sous le statut, à l'écart du classement. */
+/* Seed : dernière rangée, discrète, en bas à gauche. */
 .hud-seed {
-  grid-column: 1;
-  grid-row: 2;
-  align-self: start;
+  grid-column: 1 / -1;
+  grid-row: 5;
+  align-self: end;
   justify-self: start;
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
   margin: 0;
-  padding: 0.15rem 0.4rem;
+  padding: 0.1rem 0.4rem;
   border-radius: 999px;
   background: #00000080;
+  font-size: 0.9em;
+  opacity: 0.85;
 }
 
 .hud-row.is-leader .hud-name,
@@ -283,70 +298,82 @@ body {
   opacity: 0.8;
 }
 
-/* Mini-carte : première colonne de la rangée basse, à gauche de la seed. */
-.hud-minimap {
-  grid-column: 1;
-  grid-row: 4;
-  align-self: end;
-  min-width: 0;
-}
-
-.hud-track {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.hud-track-bound {
-  color: var(--muted);
-  font-size: 0.85em;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.hud-rail {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 3rem;
-  height: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: #05070fcc;
-}
-
-.hud-markers {
+/*
+ * Retour visuel d'événement (passe corrective §10) : une couche **pleine arène**, sans grille ni
+ * position fixe. Chaque badge est posé en pourcentage de la taille logique du canvas, qui est
+ * exactement celle de l'arène (`Scale.FIT` sur une base 16:9) : le libellé suit donc son personnage
+ * à n'importe quelle résolution, sans calcul de mise en page dans le code.
+ *
+ * La couche ne capture aucun clic et n'est jamais annoncée : c'est une décoration, le commentaire et
+ * le classement restent les sources d'information accessibles.
+ */
+.hud-events {
   position: absolute;
   inset: 0;
-  padding: 0 0.35rem;
+  overflow: hidden;
+  pointer-events: none;
 }
 
-.hud-marker {
+.hud-event {
   position: absolute;
-  top: 50%;
-  width: 0.55rem;
-  height: 0.55rem;
-  margin-left: -0.275rem;
-  border: 1px solid #05070f;
-  border-radius: 50%;
-  transform: translateY(-50%);
-}
-
-.hud-marker[data-overflow='1'] {
-  outline: 2px solid var(--accent);
-}
-
-/* Dépassement de l'échelle : signalé à l'extrémité de la piste, jamais hors de la mini-carte. */
-.hud-overflow {
-  position: absolute;
-  top: -0.9rem;
-  right: 0;
-  color: var(--accent);
-  font-size: 0.85em;
-  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05rem;
+  /* Posé juste au-dessus du sprite, et recentré : le personnage reste visible. */
+  transform: translate(-50%, -160%);
+  font-size: clamp(0.5rem, 1vw, 0.72rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+  text-align: center;
   white-space: nowrap;
+  animation: hud-event-pop 160ms ease-out;
 }
 
-/* Seed : copiable, dans la cellule haute de la colonne de gauche (voir `.hud-seed` plus haut). */.hud-seed-label {
+.hud-event-label {
+  padding: 0.05rem 0.4rem;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  background: #05070fee;
+}
+
+.hud-event-kind {
+  padding: 0.02rem 0.3rem;
+  border-radius: 999px;
+  background: #05070fee;
+  font-size: 0.9em;
+  letter-spacing: 0.1em;
+}
+
+/* Bonus : la couleur ne porte jamais seule l'information, le mot `BONUS !` est toujours écrit. */
+.hud-event.is-bonus {
+  color: #7ee787;
+}
+
+/* Malus : même règle, le mot `MALUS !` accompagne la couleur. */
+.hud-event.is-malus {
+  color: #ff8f8f;
+}
+
+.hud-event[data-kind='neutral'] {
+  color: var(--text);
+}
+
+@keyframes hud-event-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -120%) scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -160%) scale(1);
+  }
+}
+
+/* Seed : copiable et discrète, sur la dernière rangée (voir `.hud-seed` plus haut). */
+.hud-seed-label {
   color: var(--muted);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -386,28 +413,34 @@ body {
 }
 
 /*
- * Bandeau de commentaire (P012).
+ * Bandeau de commentaire (P012, transformé en **sous-titre sportif** par la passe corrective).
  *
- * Il occupe la rangée **souple** de la grille (`1fr`), aligné en bas : il peut donc grandir vers le
- * haut sans déplacer le moindre autre bloc, et il ne peut pas recouvrir le classement, la mini-carte,
- * le chrono ou la seed, qui vivent dans d'autres cellules. Masqué, il ne réserve aucune place
- * (`hidden` = `display: none`), ce qui est sans effet sur la grille puisque sa rangée est flexible.
+ * Le premier test joueur a jugé que le bloc précédent masquait l'action : il occupait une boîte
+ * centrale multiligne. Il est désormais une bande mince sur **sa propre rangée**, sous la piste et
+ * au-dessus de la seed : elle ne peut donc ni traverser la course, ni recouvrir un autre bloc.
+ *
+ * Nom, texte et file sont sur une seule ligne (`flex`), le texte est limité à **deux lignes** par
+ * `line-clamp` : un commentaire long se replie au lieu de pousser l'interface. La largeur est bornée :
+ * une réplique très longue reste lisible sans occuper toute la largeur de l'arène.
  *
  * La taille de police est nommée et exprimée en `clamp` : le commentaire doit rester lisible en
  * 844×390, où une taille fixe deviendrait illisible.
  */
 .hud-subtitle {
   grid-column: 1 / -1;
-  grid-row: 2;
-  align-self: end;
+  grid-row: 4;
   justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   max-width: min(100%, 34rem);
-  padding: 0.35rem 0.6rem;
+  padding: 0.2rem 0.55rem;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
   background: #05070fdd;
-  font-size: clamp(0.6rem, 1.2vw, 0.95rem);
-  text-align: center;
+  font-size: clamp(0.6rem, 1.2vw, 0.9rem);
+  text-align: left;
 }
 
 .hud-subtitle[hidden] {
@@ -417,14 +450,17 @@ body {
 /* Nom du personnage concerné : mis en avant par une pastille pleine, jamais par la seule couleur. */
 .hud-subtitle-name {
   display: inline-block;
-  margin: 0 0 0.25rem;
-  padding: 0.05rem 0.5rem;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.05rem 0.45rem;
   border-radius: 999px;
   background: var(--accent);
   color: #12161f;
+  font-size: 0.85em;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .hud-subtitle-name[hidden] {
@@ -432,17 +468,23 @@ body {
 }
 
 .hud-subtitle-text {
+  display: -webkit-box;
+  overflow: hidden;
   margin: 0;
   color: var(--text);
-  line-height: 1.3;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* File d'attente : une indication légère, jamais un historique. */
 .hud-subtitle-queue {
-  margin: 0.2rem 0 0;
+  flex: 0 0 auto;
+  margin: 0;
   color: var(--muted);
   font-size: 0.85em;
   letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 .hud-subtitle-queue[hidden] {
@@ -450,12 +492,15 @@ body {
 }
 
 /*
- * Réglages locaux (P012) : première rangée de la grille, à droite de l'état de course.
+ * Réglages locaux (P012, compactés par la passe corrective) : rangée 1, colonne de droite.
  *
  * Ils sont placés **dans** la grille plutôt qu'en absolu : la hauteur de la rangée s'ajuste donc à
- * eux, et le chrono de la rangée suivante ne peut pas être recouvert, quelle que soit la résolution.
+ * eux, et le chrono de la rangée suivante ne peut pas les recouvrir, quelle que soit la résolution.
  * Le panneau lui-même ne capture aucun clic (le reste de l'arène doit rester cliquable) : seuls les
  * deux boutons le réactivent.
+ *
+ * Le titre « Réglages » a disparu : il coûtait une ligne pour une information que les deux pastilles
+ * portent déjà (`Son coupé`, `Commentateur coupé`). Il reste un `aria-label` du panneau.
  */
 .hud-settings {
   grid-column: 2;
@@ -463,33 +508,28 @@ body {
   justify-self: end;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.15rem 0.3rem;
+  gap: 0.25rem;
+  padding: 0.1rem 0.25rem;
   border-radius: 999px;
   background: #00000080;
   pointer-events: none;
-}
-
-.hud-settings-title {
-  color: var(--muted);
-  font-size: 0.85em;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.92em;
 }
 
 .hud-settings-toggle {
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.15rem 0.5rem;
+  gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 999px;
   background: #16203c;
   color: var(--text);
   font: inherit;
-  font-size: 0.85em;
+  font-size: 0.9em;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .hud-settings-toggle[data-state='on'] {
@@ -499,6 +539,7 @@ body {
 
 .hud-settings-toggle-state {
   color: var(--muted);
+  letter-spacing: 0.04em;
 }
 
 .hud-settings-toggle:focus-visible {
@@ -507,20 +548,19 @@ body {
 }
 
 /*
- * Écran d'arrivée (P013) : podium, classement final et boutons de rejeu.
+ * Écran d'arrivée (P013, cellule resserrée par la passe corrective).
  *
- * Il occupe les **cellules basses** de la grille (`grid-row: 3 / 5`), celles du bandeau de pointage,
- * de la mini-carte et du classement live — ces deux derniers étant masqués à l'arrivée. Le statut, les
- * réglages, le chrono, la seed et le bandeau de commentaire gardent leurs propres cellules : le
- * recouvrement est donc impossible par construction, à n'importe quelle résolution, et non « évité »
- * par des marges calculées.
+ * Il occupe la **grande rangée de piste** (`grid-row: 3`) : à l'arrivée, le classement live et le
+ * badge de checkpoint sont masqués, la piste n'a plus rien à montrer. Il laisse en revanche visibles
+ * le bandeau de commentaire (la réplique d'arrivée est justement ce qu'il faut lire) et la seed, qui
+ * vivent dans les rangées suivantes.
  *
  * Le panneau ne capture aucun clic (l'arène reste cliquable) : seuls les deux boutons le réactivent.
  * Aucune position absolue n'est utilisée ici : la géométrie vient de la grille et du flux.
  */
 .hud-finish {
   grid-column: 1 / -1;
-  grid-row: 3 / 5;
+  grid-row: 3;
   align-self: stretch;
   display: flex;
   flex-direction: column;
@@ -727,19 +767,24 @@ body {
   }
 
   /*
-   * Le HUD garde ses informations essentielles et abandonne le confort : les bornes chiffrées de la
-   * mini-carte et les titres de bloc disparaissent, la seed se réduit à sa valeur copiable. Rien
-   * d'essentiel — classement, chrono, segment, seed — ne quitte l'écran.
+   * Le HUD garde ses informations essentielles et abandonne le confort : le titre de la seed et les
+   * libellés d'état des réglages disparaissent, la seed se réduit à sa valeur copiable. Rien
+   * d'essentiel — classement, chrono, segment, seed, commentaire — ne quitte l'écran.
    */
   .hud {
     gap: 0.15rem 0.3rem;
     padding: 0.25rem 0.3rem;
     font-size: 0.55rem;
+    /*
+     * Plancher de lisibilité du classement : `0.6rem` = 9,6 px, au-dessus du minimum de 9 px vérifié
+     * par les tests E2E responsive. La passe corrective a d'abord réduit cette ligne à `0.5rem`
+     * (8 px) pour libérer la piste ; la mesure E2E a montré que le texte passait alors sous le
+     * plancher de lisibilité, et c'est le CSS qui a été corrigé — jamais le seuil du test.
+     */
+    --hud-row-font: 0.6rem;
   }
 
-  .hud-minimap .hud-title,
   .hud-time .hud-title,
-  .hud-track-bound,
   .hud-seed-label {
     display: none;
   }
@@ -750,41 +795,50 @@ body {
 
   .hud-time,
   .hud-panel {
-    min-width: 8.5rem;
-    padding: 0.2rem 0.35rem;
+    padding: 0.15rem 0.3rem;
+  }
+
+  .hud-panel {
+    min-width: 7.5rem;
+    max-width: 9rem;
   }
 
   .hud-row {
     grid-template-columns: 0.8rem minmax(0, 1fr) auto auto;
-    gap: 0.25rem;
+    gap: 0.2rem;
+    line-height: 1.2;
   }
 
   /*
-   * Réglages et commentaire en téléphone paysage : on garde les deux boutons et la pastille de nom,
-   * on abandonne le titre du panneau. Le commentaire reste à sa place (rangée souple, aligné en bas)
-   * et continue de grandir vers le haut sans rien déplacer.
+   * Réglages en téléphone paysage : on garde les deux pastilles, dont le libellé d'état devient
+   * inutile puisque la couleur et l'`aria-pressed` portent l'état. Le commentaire reste sur sa propre
+   * rangée et ne peut donc rien recouvrir.
    */
   .hud-settings {
-    gap: 0.2rem;
-    padding: 0.1rem 0.2rem;
+    gap: 0.15rem;
+    padding: 0.05rem 0.15rem;
   }
 
-  .hud-settings-title {
+  .hud-settings-toggle {
+    padding: 0.05rem 0.35rem;
+  }
+
+  .hud-settings-toggle-state {
     display: none;
   }
 
   .hud-subtitle {
-    padding: 0.25rem 0.4rem;
+    gap: 0.3rem;
+    padding: 0.15rem 0.4rem;
   }
 
   .hud-subtitle-name {
-    margin-bottom: 0.15rem;
-    padding: 0.03rem 0.35rem;
+    padding: 0.02rem 0.3rem;
   }
 
   /*
-   * Écran d'arrivée en téléphone paysage : les six résultats et le podium doivent tenir dans une
-   * arène basse. On abandonne les titres de section (le podium se reconnaît à sa colonne et à sa
+   * Écran d'arrivée en téléphone paysage : les six résultats et le podium doivent tenir dans la
+   * rangée de piste. On abandonne les titres de section (le podium se reconnaît à sa colonne et à sa
    * police) et on resserre les gouttières ; ni les lignes ni les boutons ne sont retirés.
    */
   .hud-finish {

@@ -555,18 +555,25 @@ describe('planificateur : tirage forcé', () => {
 describe('planificateur : mécanismes sur 1000 seeds', () => {
   const statistics = measureEvents(1000);
 
-  it('déclenche 10 à 16 événements par course en moyenne', () => {
+  it('déclenche 3 à 6 événements par course de 60 s, soit un toutes les 18 s environ', () => {
     const mean = statistics.events / statistics.races;
 
-    // Attendu théorique : 180 s / 14 s ≈ 12,9 candidats, dont chacun est **rejeté** s'il tombe pendant
-    // un cooldown (thinning, §7.3) : la mesure donne 10,1 événements par course, soit le bas de la
-    // fourchette §13. Aucune constante de tirage n'a été ajustée pour « remonter » ce chiffre.
-    expect(mean).toBeGreaterThanOrEqual(10);
-    expect(mean).toBeLessThanOrEqual(16);
-    // Bornes de vraisemblance d'une loi de Poisson éclaircie de moyenne 10,1 : elles n'ont rien de
-    // seuils de game design, seulement de garde-fous contre un planificateur cassé.
-    expect(Math.min(...statistics.perRaceCounts)).toBeGreaterThanOrEqual(3);
-    expect(Math.max(...statistics.perRaceCounts)).toBeLessThanOrEqual(24);
+    // `EVENT.RATE_PER_S = 1 / 14` est un **taux** — un candidat toutes les 14 s — éclairci par les
+    // cooldowns (§7.3) : le nombre d'événements d'une course suit donc mécaniquement sa durée, et
+    // seul le **nombre par seconde** est une grandeur de game design. La course de 180 s d'avant la
+    // passe corrective en produisait 10,1, soit un toutes les 17,9 s ; celle de 60 s en produit
+    // 3,40, soit un toutes les 17,7 s : même cadence, aucune constante de tirage ajustée.
+    const cadenceS = (RACE_CONFIG.TOTAL_SIM_S * statistics.races) / statistics.events;
+    expect(mean).toBeGreaterThanOrEqual(3);
+    expect(mean).toBeLessThanOrEqual(6);
+    expect(cadenceS).toBeGreaterThan(15);
+    expect(cadenceS).toBeLessThan(22);
+
+    // Bornes de vraisemblance d'une loi de Poisson éclaircie de moyenne 3,4 : garde-fous contre un
+    // planificateur cassé, pas seuils de game design. Mesure : minimum 0, maximum 8 sur 1 000
+    // courses ; la borne haute est posée à `3 ×` la moyenne théorique.
+    expect(Math.min(...statistics.perRaceCounts)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...statistics.perRaceCounts)).toBeLessThanOrEqual(10);
   });
 
   it('ne dépasse jamais 5 événements par personnage', () => {

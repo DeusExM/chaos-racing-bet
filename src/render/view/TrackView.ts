@@ -11,7 +11,7 @@ import type { CameraRig } from './CameraRig';
  * **Décor uniquement.** Ces repères ne conditionnent ni la fin de la course ni le classement, et
  * aucun d'eux n'est lu par `src/core/` ni `src/sim/` : ils sont dessinés à partir du cadrage de la
  * caméra, jamais l'inverse. Il n'existe ici aucune ligne d'arrivée — la course se termine à
- * `tSim = 180 s`, quel que soit l'endroit où se trouve chaque personnage.
+ * `tSim = 60 s`, quel que soit l'endroit où se trouve chaque personnage.
  */
 export class TrackView {
   private readonly lanes: GameObjects.Graphics;

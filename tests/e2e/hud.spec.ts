@@ -1,8 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { CHARACTERS, CHARACTER_IDS } from '../../src/core/characters';
+import { CHARACTER_IDS } from '../../src/core/characters';
 import { RACE_CONFIG, SPEED } from '../../src/core/config';
 import { SIM_CONFIG } from '../../src/sim/config';
+import { UI_TEXT_FR } from '../../src/app/strings.fr';
 import { VIEW } from '../../src/render/viewConfig';
 import { OVERTAKE_SEED } from '../fixtures/seeds';
 import {
@@ -21,7 +22,13 @@ import {
  *
  * Ils tournent contre le build de production. Les comparaisons portent sur des **identifiants** et
  * des nombres, jamais sur un texte approximatif : le classement affiché doit être exactement celui du
- * noyau, et les marqueurs de la mini-carte exactement dans l'ordre des distances.
+ * noyau, et les marqueurs publiés par le modèle exactement dans l'ordre des distances.
+ *
+ * La passe corrective issue du premier test joueur manuel a retiré du HUD la mini-carte et le grand
+ * tableau de checkpoint : le modèle continue de publier ses marqueurs (hook de test et de debug,
+ * utile à P014), mais plus aucun élément DOM ne les dessine. Les tests ci-dessous vérifient donc la
+ * **piste dégagée** autant que la lisibilité : le canvas doit occuper l'arène, et le classement
+ * permanent ne doit pas en manger les quarts.
  *
  * Le mode accéléré (`?fast=1`) est utilisé dès qu'une course entière doit être observée. Il ne change
  * que le temps réel : le résultat de la course reste identique, ce que ces tests exploitent aussi.
@@ -109,21 +116,6 @@ function overlaps(a: Box, b: Box): boolean {
   );
 }
 
-/**
- * Convertit `#rrggbb` en `rgb(r, g, b)`.
- *
- * C'est la forme sous laquelle le navigateur rend `background-color` : comparer cette forme à la
- * couleur du roster prouve que le marqueur porte bien l'identité du personnage, sans passer par une
- * capture visuelle.
- */
-function hexToRgb(hex: string): string {
-  const value = hex.replace('#', '');
-  const red = Number.parseInt(value.slice(0, 2), 16);
-  const green = Number.parseInt(value.slice(2, 4), 16);
-  const blue = Number.parseInt(value.slice(4, 6), 16);
-  return `rgb(${String(red)}, ${String(green)}, ${String(blue)})`;
-}
-
 test('le classement affiché est exactement celui du noyau, frame par frame', async ({ page }) => {
   const watch = watchConsole(page);
   await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
@@ -205,11 +197,13 @@ test('le leader est identifiable dans le classement', async ({ page }) => {
   expectNoErrors(watch);
 });
 
-test('la mini-carte suit les distances du noyau à plusieurs instants', async ({ page }) => {
+test('les marqueurs du modèle suivent les distances du noyau à plusieurs instants', async ({
+  page,
+}) => {
   const watch = watchConsole(page);
   await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
 
-  const targets = [200, 1200, 4500];
+  const targets = [200, 1200, 3400, RACE_CONFIG.TOTAL_STEPS];
   let lastFrame = await readHudFrame(page);
 
   for (const target of targets) {
@@ -222,14 +216,29 @@ test('la mini-carte suit les distances du noyau à plusieurs instants', async ({
     expect(frame.distances).toHaveLength(CHARACTER_IDS.length);
     expect(frame.hudModel.markers.map((marker) => marker.id)).toEqual(CHARACTER_IDS);
 
-    // Ordre strict des marqueurs = ordre des distances du noyau.
-    const byPosition = [...frame.hudModel.markers]
+    // Ordre strict des marqueurs = ordre des distances du noyau, **sous l'échelle nominale**. Au-delà
+    // de `VIEW.NOMINAL_SCALE_M`, `position` sature à 1 : c'est la règle documentée du modèle (le
+    // rendu ne recadre jamais l'échelle en cours de course), donc deux personnages qui dépassent
+    // l'échelle partagent la même position et ne peuvent plus être ordonnés par elle. L'échelle
+    // nominale valant exactement `SPEED.BASE × TOTAL_SIM_S`, la saturation est normale en fin de
+    // course : elle est donc exclue de l'égalité d'ordre, puis vérifiée à part.
+    const belowScale = frame.hudModel.markers.filter((marker) => marker.position < 1);
+    const byPosition = [...belowScale]
       .sort((a, b) => a.position - b.position)
       .map((marker) => marker.id);
-    const byDistance = [...frame.hudModel.markers]
+    const byDistance = [...belowScale]
       .sort((a, b) => a.distance - b.distance)
       .map((marker) => marker.id);
     expect(byPosition, `ordre des marqueurs à ${String(target)} pas`).toEqual(byDistance);
+
+    // Sur l'ensemble, la position reste monotone avec la distance : plus loin ne veut jamais dire
+    // moins avancé sur la piste.
+    const positionsByDistance = [...frame.hudModel.markers]
+      .sort((a, b) => a.distance - b.distance)
+      .map((marker) => marker.position);
+    for (let index = 1; index < positionsByDistance.length; index += 1) {
+      expect(positionsByDistance[index]).toBeGreaterThanOrEqual(positionsByDistance[index - 1] ?? 0);
+    }
 
     for (const marker of frame.hudModel.markers) {
       const index = CHARACTER_IDS.indexOf(marker.id);
@@ -237,17 +246,16 @@ test('la mini-carte suit les distances du noyau à plusieurs instants', async ({
       const previous = lastFrame.hudModel?.markers.find((candidate) => candidate.id === marker.id);
       const previousDistance = previous?.distance ?? distance;
 
-      // La position affichée est, par construction, `distance / NOMINAL_SCALE_M`, bornée à 1 : elle
+      // La position publiée est, par construction, `distance / NOMINAL_SCALE_M`, bornée à 1 : elle
       // est donc toujours dans `[0 ; 1]` et strictement proportionnelle à une distance du noyau.
       expect(marker.position).toBeGreaterThanOrEqual(0);
       expect(marker.position).toBeLessThanOrEqual(1);
-      expect(marker.overflow).toBe(false);
       expect(marker.position).toBeCloseTo(
         Math.min(Math.max(marker.distance / VIEW.NOMINAL_SCALE_M, 0), 1),
         12,
       );
 
-      // La distance affichée appartient à la plage réellement parcourue depuis le relevé précédent :
+      // La distance publiée appartient à la plage réellement parcourue depuis le relevé précédent :
       // elle décrit donc un état du noyau, et jamais une valeur inventée.
       const lowest = Math.min(previousDistance, distance);
       const highest = Math.max(previousDistance, distance);
@@ -259,32 +267,34 @@ test('la mini-carte suit les distances du noyau à plusieurs instants', async ({
       );
     }
 
-    // Les 6 marqueurs réellement dessinés sont présents, dans l'ordre du roster, et portent la même
-    // position que le modèle publié — le premier test compare déjà ce modèle au DOM à chaque frame.
-    const domMarkers = await page.locator('[data-testid="hud-marker"]').evaluateAll((markers) =>
-      markers.map((marker) => ({
-        id: marker.getAttribute('data-character-id') ?? '',
-        position: Number(marker.getAttribute('data-position') ?? '-1'),
-        overflow: marker.getAttribute('data-overflow'),
-        color: getComputedStyle(marker).backgroundColor,
-      })),
-    );
-    expect(domMarkers.map((marker) => marker.id)).toEqual(CHARACTER_IDS);
+    // Le modèle publié correspond bien aux distances du noyau lues dans la même frame.
     for (const marker of frame.hudModel.markers) {
-      const dom = domMarkers.find((candidate) => candidate.id === marker.id);
-      expect(dom?.position, `position DOM du marqueur ${marker.id}`).toBeGreaterThanOrEqual(0);
-      expect(dom?.position, `position DOM du marqueur ${marker.id}`).toBeLessThanOrEqual(1);
-      expect(dom?.overflow, `dépassement du marqueur ${marker.id}`).toBe('0');
-      // La couleur d'identité est celle du roster : `core/characters.ts` reste la seule source.
-      const character = CHARACTERS.find((candidate) => candidate.id === marker.id);
-      expect(dom?.color, `couleur du marqueur ${marker.id}`).toBe(hexToRgb(character?.color ?? ''));
+      const index = CHARACTER_IDS.indexOf(marker.id);
+      expect(marker.distance, `distance du modèle pour ${marker.id}`).toBe(
+        frame.distances[index] ?? -1,
+      );
     }
   }
 
-  // Aucun indicateur de dépassement n'est affiché : personne n'a franchi l'échelle nominale.
-  const maxOverflow = Math.max(...lastFrame.hudModel.markers.map((marker) => marker.overflowM));
-  expect(maxOverflow, 'aucun marqueur au-delà de l’échelle nominale').toBe(0);
-  await expect(page.getByTestId('hud-overflow')).toHaveText('');
+  // Aucun recadrage d'échelle : le modèle **publie** le dépassement au lieu de resserrer la piste.
+  for (const marker of lastFrame.hudModel.markers) {
+    expect(marker.overflowM, `dépassement publié pour ${marker.id}`).toBeCloseTo(
+      Math.max(marker.distance - VIEW.NOMINAL_SCALE_M, 0),
+      9,
+    );
+  }
+
+  // `NOMINAL_SCALE_M = SPEED.BASE × TOTAL_SIM_S` vaut la distance **moyenne** de fin de course :
+  // environ la moitié du peloton la dépasse. En fin de course, la saturation est donc réelle et
+  // vérifiée — c'est ce qui interdit d'ordonner deux marqueurs par leur position au-delà de l'échelle.
+  const saturated = lastFrame.hudModel.markers.filter((marker) => marker.position === 1);
+  expect(
+    saturated.length,
+    'en fin de course, une partie du peloton dépasse l’échelle nominale',
+  ).toBeGreaterThan(0);
+  for (const marker of saturated) {
+    expect(marker.distance).toBeGreaterThanOrEqual(VIEW.NOMINAL_SCALE_M);
+  }
 
   expectNoErrors(watch);
 });
@@ -345,16 +355,16 @@ test('le chrono et le segment suivent le noyau, sans jamais le piloter', async (
     );
   }
 
-  // La course se termine par le temps, jamais par une distance : le chrono s'arrête à 180 s.
+  // La course se termine par le temps, jamais par une distance : le chrono s'arrête à 60 s.
   await expect
     .poll(() => currentSteps(page), { timeout: 60_000 })
     .toBe(RACE_CONFIG.TOTAL_STEPS);
-  await expect.poll(async () => page.getByTestId('hud-sim-time').textContent()).toBe('180,0\u00A0s');
+  await expect.poll(async () => page.getByTestId('hud-sim-time').textContent()).toBe('60,0\u00A0s');
 
   expectNoErrors(watch);
 });
 
-test('le bandeau de pointage apparaît exactement une fois par checkpoint', async ({ page }) => {
+test('le bandeau de checkpoint apparaît exactement une fois par checkpoint', async ({ page }) => {
   const watch = watchConsole(page);
   await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
 
@@ -362,7 +372,7 @@ test('le bandeau de pointage apparaît exactement une fois par checkpoint', asyn
   const last = samples[samples.length - 1];
   expect(last?.phase, 'la course doit être allée au bout').toBe('finished');
 
-  // Une « apparition » = une suite contiguë de frames où le même pointage est visible.
+  // Une « apparition » = une suite contiguë de frames où le même checkpoint est visible.
   const appearances: number[] = [];
   let previous: number | null = null;
   for (const sample of samples) {
@@ -373,7 +383,8 @@ test('le bandeau de pointage apparaît exactement une fois par checkpoint', asyn
     previous = visible;
   }
 
-  expect(appearances, 'exactement trois apparitions, dans l’ordre').toEqual([1, 2, 3]);
+  // Deux checkpoints dans une course de 60 s (bornes à 20 s et 40 s) : ni un de plus, ni un de moins.
+  expect(appearances, 'exactement deux apparitions, dans l’ordre').toEqual([1, 2]);
 
   for (const sample of samples) {
     const inPause = sample.simPhase === 'checkpointPause';
@@ -405,12 +416,12 @@ test('le bandeau de pointage apparaît exactement une fois par checkpoint', asyn
     }
   }
 
-  // Aucune quatrième apparition, et moins d'une frame n'est jamais suffisant pour voir un pointage.
+  // Aucune troisième apparition, et moins d'une frame n'est jamais suffisant pour voir un checkpoint.
   const pauses = samples.filter((sample) => sample.simPhase === 'checkpointPause');
-  for (const number of [1, 2, 3]) {
+  for (const number of [1, 2]) {
     expect(
       pauses.filter((sample) => sample.checkpoint === number).length,
-      `pointage ${String(number)} visible assez longtemps`,
+      `checkpoint ${String(number)} visible assez longtemps`,
     ).toBeGreaterThan(3);
   }
 
@@ -484,15 +495,15 @@ const VIEWPORTS = [
 ] as const;
 
 for (const viewport of VIEWPORTS) {
-  test(`le HUD reste lisible et sans chevauchement critique en ${viewport.name}`, async ({ page }) => {
+  test(`le HUD reste lisible et la piste dégagée en ${viewport.name}`, async ({ page }) => {
     const watch = watchConsole(page);
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    // Mode accéléré et **scrutation armée dès le chargement** : le premier pointage tombe après
-    // ~2,25 s de course, et sa pause (`checkpointPauseRealS`) ne couvre qu'une douzaine de frames.
-    // Attendre le pointage avant de commencer à le chercher le manquerait.
+    // Mode accéléré et **scrutation armée dès le chargement** : le premier checkpoint tombe après
+    // ~1 s de course réelle, et sa pause (`checkpointPauseRealS`) ne couvre qu'une douzaine de
+    // frames. Attendre le checkpoint avant de commencer à le chercher le manquerait.
     await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
 
-    // 6) Le pointage ne recouvre ni le classement ni la mini-carte quand il apparaît.
+    // 6) Le bandeau de checkpoint ne recouvre ni le classement ni la seed quand il apparaît.
     //
     // La scrutation tourne **dans la page**, à la fréquence d'affichage, et la géométrie est figée
     // dans la même tâche que l'observation — sinon elle serait mesurée après la disparition du
@@ -538,11 +549,13 @@ for (const viewport of VIEWPORTS) {
             };
       return {
         arena: rect(arena),
-        checkpoint: rect(read('[data-testid="checkpoint-splits"]')),
+        // Le canvas est la piste : c'est lui qui doit rester largement visible.
+        canvas: rect(read('#game canvas')),
+        checkpoint: rect(read('[data-testid="checkpoint"]')),
         leaderboard: rect(read('[data-testid="leaderboard"]')),
-        minimap: rect(read('[data-testid="hud-minimap"]')),
         seed: rect(read('[data-testid="hud-seed"]')),
-        splits: document.querySelectorAll('[data-testid="checkpoint-split"]').length,
+        settings: rect(read('[data-testid="settings"]')),
+        checkpointLeader: document.querySelector('[data-testid="checkpoint-leader"]')?.textContent ?? '',
       };
     }, 60_000);
 
@@ -550,17 +563,16 @@ for (const viewport of VIEWPORTS) {
     const status = relativeTo(await boxOf(page, 'race-status'), metrics);
     const panel = relativeTo(await boxOf(page, 'leaderboard'), metrics);
     const time = relativeTo(await boxOf(page, 'hud-time'), metrics);
-    const minimap = relativeTo(await boxOf(page, 'hud-minimap'), metrics);
     const seed = relativeTo(await boxOf(page, 'hud-seed'), metrics);
-    const markers = relativeTo(await boxOf(page, 'hud-markers'), metrics);
+    const settings = relativeTo(await boxOf(page, 'settings'), metrics);
 
     // 1) Aucune information essentielle hors de l'arène.
     for (const [name, box] of [
       ['état', status],
       ['classement', panel],
       ['chrono', time],
-      ['mini-carte', minimap],
       ['seed', seed],
+      ['réglages', settings],
     ] as const) {
       expect(box.left, `${name} ne sort pas à gauche`).toBeGreaterThanOrEqual(-1);
       expect(box.top, `${name} ne sort pas en haut`).toBeGreaterThanOrEqual(-1);
@@ -574,11 +586,9 @@ for (const viewport of VIEWPORTS) {
 
     // 2) Aucun chevauchement critique entre les blocs du HUD.
     for (const [aName, a, bName, b] of [
-      ['classement', panel, 'mini-carte', minimap],
       ['classement', panel, 'seed', seed],
-      ['chrono', time, 'mini-carte', minimap],
+      ['chrono', time, 'seed', seed],
       ['état', status, 'chrono', time],
-      ['mini-carte', minimap, 'seed', seed],
     ] as const) {
       expect(overlaps(a, b), `${aName} et ${bName} ne se chevauchent pas`).toBe(false);
     }
@@ -593,10 +603,29 @@ for (const viewport of VIEWPORTS) {
       expect(fontSize, 'le classement doit rester lisible').toBeGreaterThanOrEqual(6);
     }
 
-    // 4) La mini-carte reste lisible : une piste assez large pour séparer 6 marqueurs.
-    expect(markers.right - markers.left).toBeGreaterThan(metrics.remPx * 2);
-    const markerBox = await page.locator('[data-testid="hud-marker"]').first().boundingBox();
-    expect(markerBox?.width ?? 0).toBeGreaterThan(2);
+    // 4) La piste reste largement visible : le canvas remplit l'arène, et le classement permanent
+    // n'en occupe qu'une fraction limitée. C'est l'exigence §4 de la passe corrective : le HUD ne
+    // doit plus manger la course.
+    expect(domRects, 'le bandeau de checkpoint a été observé pendant sa pause').not.toBeNull();
+    if (domRects === null || domRects.arena === null) {
+      throw new Error('checkpoint jamais observé');
+    }
+    const arenaRect: Measured = domRects.arena;
+    const areaFraction = (box: Measured | null): number =>
+      box === null ? 0 : (box.width * box.height) / (arenaRect.width * arenaRect.height);
+
+    const canvas = domRects.canvas;
+    expect(canvas, 'le canvas est présent').not.toBeNull();
+    expect(canvas?.width ?? 0, 'le canvas remplit l’arène en largeur').toBeGreaterThanOrEqual(
+      arenaRect.width * 0.95,
+    );
+    expect(canvas?.height ?? 0, 'le canvas remplit l’arène en hauteur').toBeGreaterThanOrEqual(
+      arenaRect.height * 0.95,
+    );
+    expect(
+      areaFraction(domRects.leaderboard),
+      'le classement permanent ne doit pas occuper plus d’un quart de la piste',
+    ).toBeLessThanOrEqual(0.25);
 
     // 5) Seed et chrono utilisables : visibles, cliquables, et d'une taille exploitable.
     await expect(page.getByTestId('seed-value')).toHaveText(OVERTAKE_SEED);
@@ -605,19 +634,15 @@ for (const viewport of VIEWPORTS) {
     expect(copyBox?.height ?? 0).toBeGreaterThanOrEqual(12);
     expect(copyBox?.width ?? 0).toBeGreaterThanOrEqual(20);
     await expect(page.getByTestId('hud-sim-time')).toBeVisible();
+    const settingsBox = await page.getByTestId('settings-sound').boundingBox();
+    expect(settingsBox?.height ?? 0, 'les réglages restent cliquables').toBeGreaterThanOrEqual(12);
 
-    // 6) Le pointage, observé plus haut pendant sa pause, ne recouvre ni le classement ni la
-    // mini-carte, et reste dans l'arène avec ses 6 splits.
-    expect(domRects, 'le bandeau de pointage a été observé pendant sa pause').not.toBeNull();
-    if (domRects === null || domRects.arena === null) {
-      throw new Error('pointage jamais observé');
-    }
-    const arenaRect: Measured = domRects.arena;
-
+    // 6) Le bandeau de checkpoint, observé plus haut pendant sa pause, ne recouvre ni le classement
+    // ni la seed, reste dans l'arène, reste **léger**, et nomme le leader figé à la borne.
     /** Ramène un rectangle déjà mesuré dans le repère de l'arène, elle-même mesurée en même temps. */
     const inArena = (box: Measured | null): Box => {
       if (box === null) {
-        throw new Error('élément absent pendant le pointage');
+        throw new Error('élément absent pendant le checkpoint');
       }
       return {
         left: box.left - arenaRect.left,
@@ -630,25 +655,205 @@ for (const viewport of VIEWPORTS) {
     const checkpoint = inArena(domRects.checkpoint);
     expect(
       overlaps(checkpoint, inArena(domRects.leaderboard)),
-      'le pointage ne recouvre pas le classement',
-    ).toBe(false);
-    expect(
-      overlaps(checkpoint, inArena(domRects.minimap)),
-      'le pointage ne recouvre pas la mini-carte',
+      'le bandeau de checkpoint ne recouvre pas le classement',
     ).toBe(false);
     expect(
       overlaps(checkpoint, inArena(domRects.seed)),
-      'le pointage ne recouvre pas la seed',
+      'le bandeau de checkpoint ne recouvre pas la seed',
     ).toBe(false);
-    expect(checkpoint.left, 'le pointage reste dans l’arène').toBeGreaterThanOrEqual(-1);
+    expect(
+      overlaps(checkpoint, inArena(domRects.settings)),
+      'le bandeau de checkpoint ne recouvre pas les réglages',
+    ).toBe(false);
+    expect(checkpoint.left, 'le bandeau de checkpoint reste dans l’arène').toBeGreaterThanOrEqual(-1);
     expect(checkpoint.right).toBeLessThanOrEqual(arenaRect.width + 1);
     expect(checkpoint.bottom).toBeLessThanOrEqual(arenaRect.height + 1);
-    // Les splits affichés sont ceux des 6 personnages.
-    expect(domRects.splits).toBe(CHARACTER_IDS.length);
+    expect(
+      areaFraction(domRects.checkpoint),
+      'le checkpoint est un retour bref, pas un tableau',
+    ).toBeLessThanOrEqual(0.1);
+    // Le nom du leader figé est bien affiché : sans lui, le bandeau ne dirait rien de la course.
+    expect(domRects.checkpointLeader.trim().length).toBeGreaterThan(2);
 
     expectNoErrors(watch);
   });
 }
+
+test('les bonus et malus s’affichent sur le bon personnage, puis disparaissent', async ({ page }) => {
+  /**
+   * Exigence §10 de la passe corrective : un bonus ou un malus qui s'applique doit **se voir**, sur
+   * le personnage concerné, et le retour doit venir **exclusivement** d'un événement réel du noyau.
+   *
+   * La preuve est structurelle plutôt que visuelle : à chaque frame, le test lit l'événement actif
+   * du noyau **et** les badges réellement présents dans le DOM, puis compare les deux ensembles. Un
+   * badge qui ne correspondrait à aucun événement actif — ou un événement actif sans badge — ferait
+   * échouer la comparaison.
+   */
+  const watch = watchConsole(page);
+  await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
+
+  const observed = await page.evaluate(async () => {
+    interface BadgeRecord {
+      readonly characterId: string;
+      readonly eventId: string;
+      readonly kind: string;
+      readonly start: string;
+      readonly label: string;
+      readonly kindLabel: string;
+      /** Part du badge réellement posée sur la piste (intersection avec le canvas). */
+      readonly onTrackFraction: number;
+    }
+
+    const badges: BadgeRecord[] = [];
+    const seenBadges = new Set<string>();
+    const coreEvents = new Set<string>();
+    const coreMagnitudes = new Map<string, { magnitude: number; target: string }>();
+    let maxSimultaneous = 0;
+
+    for (let frame = 0; frame < 20_000; frame += 1) {
+      const api = window.__CHAOS_RACE__;
+      if (api === undefined) {
+        throw new Error('hooks absents');
+      }
+      const state = api.state();
+      const canvas = document.querySelector('#game canvas')?.getBoundingClientRect() ?? null;
+
+      // 1) Ce que le noyau déclare **réellement** à cette frame.
+      for (const character of state.characters) {
+        const event = character.activeEvent;
+        if (event === null) {
+          continue;
+        }
+        const occurrence = `${event.id}@${String(event.startSimS)}`;
+        coreEvents.add(`${character.id}:${occurrence}`);
+        coreMagnitudes.set(`${character.id}:${occurrence}`, {
+          magnitude: event.magnitude,
+          target: event.target,
+        });
+      }
+
+      // 2) Ce que le HUD affiche à la même frame.
+      const elements = [...document.querySelectorAll('[data-testid="event-badge"]')];
+      maxSimultaneous = Math.max(maxSimultaneous, elements.length);
+      for (const element of elements) {
+        if (!(element instanceof HTMLElement)) {
+          continue;
+        }
+        const characterId = element.dataset['characterId'] ?? '';
+        const eventId = element.dataset['eventId'] ?? '';
+        const start = element.dataset['eventStart'] ?? '';
+        const key = `${characterId}:${eventId}@${start}`;
+        if (seenBadges.has(key)) {
+          continue;
+        }
+        seenBadges.add(key);
+        const rect = element.getBoundingClientRect();
+        // Le badge est ancré sur le sprite ; près d'un bord, une partie peut sortir de la piste.
+        // Ce qui compte est qu'il soit **posé sur la course**, pas qu'il y tienne entièrement.
+        const overlapWidth = Math.max(
+          0,
+          Math.min(rect.right, canvas?.right ?? rect.right) -
+            Math.max(rect.left, canvas?.left ?? rect.left),
+        );
+        const overlapHeight = Math.max(
+          0,
+          Math.min(rect.bottom, canvas?.bottom ?? rect.bottom) -
+            Math.max(rect.top, canvas?.top ?? rect.top),
+        );
+        const area = rect.width * rect.height;
+        badges.push({
+          characterId,
+          eventId,
+          kind: element.dataset['kind'] ?? '',
+          start,
+          label: element.querySelector('[data-testid="event-label"]')?.textContent ?? '',
+          kindLabel: element.querySelector('[data-testid="event-kind"]')?.textContent ?? '',
+          onTrackFraction: area > 0 ? (overlapWidth * overlapHeight) / area : 0,
+        });
+      }
+
+      if (state.steps >= 3600) {
+        // Quelques frames de plus : un badge ne doit pas survivre à la fin de son événement.
+        for (let extra = 0; extra < 10; extra += 1) {
+          await new Promise((resolve) => {
+            requestAnimationFrame(() => {
+              resolve(null);
+            });
+          });
+        }
+        break;
+      }
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => {
+          resolve(null);
+        });
+      });
+    }
+
+    return {
+      badges,
+      coreEvents: [...coreEvents],
+      coreMagnitudes: [...coreMagnitudes],
+      maxSimultaneous,
+      remaining: document.querySelectorAll('[data-testid="event-badge"]').length,
+      phases: window.__CHAOS_RACE__?.phase() ?? '',
+    };
+  });
+
+  expect(observed.phases).toBe('finished');
+  expect(observed.coreEvents.length, 'la course a réellement produit des événements').toBeGreaterThan(
+    0,
+  );
+  expect(observed.badges.length, 'chaque événement a été affiché au moins une fois').toBe(
+    observed.coreEvents.length,
+  );
+
+  const magnitudes = new Map(observed.coreMagnitudes);
+  for (const badge of observed.badges) {
+    const key = `${badge.characterId}:${badge.eventId}@${badge.start}`;
+    // Le badge désigne une occurrence **réelle** : elle appartient à l'ensemble lu dans le noyau.
+    expect(observed.coreEvents, `badge ${key} adossé à un événement réel`).toContain(key);
+    // La cible publiée par le noyau est bien le personnage qui porte le badge.
+    expect(magnitudes.get(key)?.target, `cible du badge ${key}`).toBe(badge.characterId);
+    // Le libellé principal est celui du catalogue d'événements, jamais un mot inventé par le rendu.
+    expect(UI_TEXT_FR.eventLabels, `libellé du badge ${key}`).toHaveProperty(badge.eventId);
+    expect(badge.label.length, `libellé non vide pour ${key}`).toBeGreaterThan(2);
+    // Le sens du badge vient du **signe de la magnitude** mesurée, pas d'une décision du rendu.
+    const magnitude = magnitudes.get(key)?.magnitude ?? Number.NaN;
+    const expectedKind = magnitude > 0 ? 'bonus' : magnitude < 0 ? 'malus' : 'neutral';
+    expect(badge.kind, `sens du badge ${key}`).toBe(expectedKind);
+    if (expectedKind === 'bonus') {
+      expect(badge.kindLabel).toBe(UI_TEXT_FR.eventFeedback.bonus);
+    }
+    if (expectedKind === 'malus') {
+      expect(badge.kindLabel).toBe(UI_TEXT_FR.eventFeedback.malus);
+    }
+    expect(magnitude, `magnitude non nulle pour ${key}`).not.toBe(0);
+    // Non obscurcissant : le retour est posé sur la piste, au-dessus du personnage concerné.
+    expect(badge.onTrackFraction, `badge ${key} posé sur la piste`).toBeGreaterThanOrEqual(0.5);
+  }
+  // Le retour est **temporaire** : plus aucun badge une fois la course terminée.
+  expect(observed.remaining, 'aucun badge ne survit à la fin de son événement').toBe(0);
+
+  // Preuve d'invariance : cette course truffée de badges donne exactement le résultat du noyau seul.
+  const reference = await referenceResult(page, OVERTAKE_SEED);
+  const final = await page.evaluate(() => {
+    const api = window.__CHAOS_RACE__;
+    if (api === undefined) {
+      throw new Error('hooks absents');
+    }
+    return {
+      distances: api.state().characters.map((character) => character.x),
+      ranking: api.ranks().map((row) => row.id),
+      steps: api.state().steps,
+    };
+  });
+  expect(final.distances, 'les badges ne modifient aucune distance').toEqual(reference.distances);
+  expect(final.ranking, 'les badges ne modifient aucun classement').toEqual(reference.ranking);
+  expect(final.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
+
+  expectNoErrors(watch);
+});
 
 test('?debug=1 affiche un panneau de debug qui reflète le noyau, sans le modifier', async ({
   page,
@@ -705,7 +910,7 @@ test('?debug=1 affiche un panneau de debug qui reflète le noyau, sans le modifi
   expect(compared.text).toContain(compared.tSim.toFixed(3));
   expect(compared.text).toContain(String(compared.steps));
 
-  // --- Preuve d'invariance : mêmes distances finales, même classement, exactement 10800 pas.
+  // --- Preuve d'invariance : mêmes distances finales, même classement, exactement 3 600 pas.
   const withDebug = await referenceResult(page, OVERTAKE_SEED);
   expect(withDebug.distances, 'distances finales strictement identiques').toEqual(
     withoutDebug.distances,

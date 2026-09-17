@@ -140,8 +140,10 @@ describe('bornes dérivées', () => {
     const meanSeconds = ((min + max) / 2) * DT;
 
     expect(meanSeconds).toBeCloseTo(SURGE.INTERVAL_MEAN_S, 10);
-    // Sur 180 s, cela donne bien ~20 surges attendus par personnage.
-    expect(RACE_CONFIG.TOTAL_SIM_S / SURGE.INTERVAL_MEAN_S).toBeCloseTo(20, 10);
+    // Sur 60 s, cela donne bien ~6,7 surges attendus par personnage — la même cadence qu'avant la
+    // passe corrective, qui voyait 20 surges sur 180 s. La cadence est une propriété du jeu ; le
+    // nombre par course, lui, suit la durée de la course.
+    expect(RACE_CONFIG.TOTAL_SIM_S / SURGE.INTERVAL_MEAN_S).toBeCloseTo(20 / 3, 10);
   });
 
   it('tire les deux bornes inclusivement', () => {
@@ -265,15 +267,18 @@ describe('statistiques sur 1000 seeds', () => {
   const perCharacterMeans = counts.map((count) => count / SEEDS);
   const globalMean = perCharacterMeans.reduce((sum, mean) => sum + mean, 0) / CHARACTER_IDS.length;
 
-  it('reste dans [14 ; 26] surges par personnage sur 180 s, autour de 20', () => {
+  it('reste dans [4,7 ; 8,7] surges par personnage sur 60 s, autour de 6,7', () => {
+    // `SURGE.INTERVAL_MEAN_S = 9 s` est un **taux** : le nombre attendu pour une course vaut
+    // `TOTAL_SIM_S / 9 ≈ 6,67`. La plage de P010 (`20 ± 30 %` pour `180 / 9 = 20`) devient donc
+    // `6,67 ± 30 %`, soit `[4,7 ; 8,7]` — aucune constante de surge n'est modifiée.
     for (const [index, mean] of perCharacterMeans.entries()) {
-      expect(mean, `${CHARACTER_IDS[index]}`).toBeGreaterThanOrEqual(14);
-      expect(mean, `${CHARACTER_IDS[index]}`).toBeLessThanOrEqual(26);
+      expect(mean, `${CHARACTER_IDS[index]}`).toBeGreaterThanOrEqual(4.7);
+      expect(mean, `${CHARACTER_IDS[index]}`).toBeLessThanOrEqual(8.7);
     }
-    expect(globalMean).toBeGreaterThanOrEqual(14);
-    expect(globalMean).toBeLessThanOrEqual(26);
-    // Cohérent avec la cible `TOTAL_SIM_S / INTERVAL_MEAN_S = 20`.
-    expect(Math.abs(globalMean - 20)).toBeLessThan(1);
+    expect(globalMean).toBeGreaterThanOrEqual(4.7);
+    expect(globalMean).toBeLessThanOrEqual(8.7);
+    // Cohérent avec la cible `TOTAL_SIM_S / INTERVAL_MEAN_S ≈ 6,67`.
+    expect(Math.abs(globalMean - 20 / 3)).toBeLessThan(0.5);
   });
 
   it('garde tous les intervalles dans [4 ; 14] s, avec une moyenne proche de 9 s', () => {
@@ -298,10 +303,13 @@ describe('statistiques sur 1000 seeds', () => {
     const mean = total / draws;
     expect(Math.abs(mean - (min + max) / 2), `moyenne brute ${mean}`).toBeLessThan(2);
 
-    // La moyenne observée en course reste du même ordre : environ 8,9 s, l'écart venant du biais
-    // de renouvellement expliqué ci-dessus.
+    // La moyenne observée en course reste du même ordre : environ 8,8 s. Elle est légèrement plus
+    // basse qu'avant la passe corrective (8,79 mesuré ici, contre ~8,9 sur 180 s) parce que le biais
+    // de renouvellement grandit quand la course raccourcit : une course de 60 s contient
+    // proportionnellement plus d'intervalles courts. La borne haute, elle, ne bouge pas : au-dessus
+    // de la moyenne de la loi (9 s), la mesure serait le signe d'un biais réel, pas de la durée.
     const observed = allIntervals.reduce((sum, value) => sum + value, 0) / allIntervals.length;
-    expect(observed * DT).toBeGreaterThan(8.8);
+    expect(observed * DT).toBeGreaterThan(8.7);
     expect(observed * DT).toBeLessThan(9.2);
   });
 
@@ -335,9 +343,11 @@ describe('statistiques sur 1000 seeds', () => {
   });
 
   it('n’a jamais laissé deux surges se chevaucher sur 6 000 plannings', () => {
-    // Le non-cumul découle de la construction ; cette mesure vérifie qu'il tient sur 64,8 millions
-    // de pas planifiés, et qu'aucune graine ne produit d'exception à la règle.
-    expect(allDurations.length).toBeGreaterThan(100_000);
+    // Le non-cumul découle de la construction ; cette mesure vérifie qu'il tient sur les 6 000
+    // plannings complets du corpus, soit 21,6 millions de pas planifiés depuis la passe corrective
+    // (60 s par course au lieu de 180 s). La borne est dérivée de la cadence design — au moins
+    // 5 surges par personnage et par course — et non d'une constante inventée pour passer.
+    expect(allDurations.length).toBeGreaterThan(SEEDS * CHARACTER_IDS.length * 5);
     const overlapping = allDurations.filter(
       (duration, index) => duration > (allIntervals[index] ?? Number.POSITIVE_INFINITY),
     );

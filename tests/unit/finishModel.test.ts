@@ -16,10 +16,10 @@ import {
 } from '../../src/render/view/finishModel';
 import { VIEW } from '../../src/render/viewConfig';
 import {
-  OVERTAKE_SEED,
-  OVERTAKE_SEED_ARRIVAL,
   PHOTO_FINISH_SEED,
   PHOTO_FINISH_SEED_EVIDENCE,
+  PLAIN_FINISH_SEED,
+  PLAIN_FINISH_SEED_EVIDENCE,
   arrivalFactOf,
 } from '../fixtures/seeds';
 
@@ -89,19 +89,19 @@ function factLike(overrides: Partial<RaceFact>): RaceFact {
 }
 
 describe('instantané final', () => {
-  it('fige les 10 800 pas et les distances du noyau à 180 s', () => {
-    const { state } = finishedRace(OVERTAKE_SEED);
+  it('fige les 3 600 pas et les distances du noyau à 60 s', () => {
+    const { state } = finishedRace(PLAIN_FINISH_SEED);
     const snapshot = captureFinishSnapshot(state);
 
     expect(snapshot.tSim).toBe(RACE_CONFIG.TOTAL_SIM_S);
     expect(snapshot.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
-    expect(snapshot.seed).toBe(OVERTAKE_SEED);
+    expect(snapshot.seed).toBe(PLAIN_FINISH_SEED);
     expect([...snapshot.distances]).toEqual(state.characters.map((character) => character.x));
     expect([...snapshot.velocities]).toEqual(state.characters.map((character) => character.v));
   });
 
   it('refuse de capturer un classement final avant l’arrivée', () => {
-    const engine = new RaceEngine(OVERTAKE_SEED);
+    const engine = new RaceEngine(PLAIN_FINISH_SEED);
     expect(() => captureFinishSnapshot(engine.getState())).toThrow(RangeError);
 
     engine.step();
@@ -110,7 +110,7 @@ describe('instantané final', () => {
   });
 
   it('est gelé en profondeur : aucune présentation ne peut le modifier', () => {
-    const { state } = finishedRace(OVERTAKE_SEED);
+    const { state } = finishedRace(PLAIN_FINISH_SEED);
     const snapshot = captureFinishSnapshot(state);
     const first = snapshot.rows[0];
     expect(first).toBeDefined();
@@ -133,7 +133,7 @@ describe('instantané final', () => {
 
 describe('classement final, podium et écarts', () => {
   it('suit exactement l’ordre des distances du noyau (les 6, dans l’ordre)', () => {
-    const { state } = finishedRace(OVERTAKE_SEED);
+    const { state } = finishedRace(PLAIN_FINISH_SEED);
     const snapshot = captureFinishSnapshot(state);
     const model = buildFinishModel(snapshot, null);
 
@@ -151,7 +151,7 @@ describe('classement final, podium et écarts', () => {
   });
 
   it('dérive les écarts des seules distances finales, et nuls pour le vainqueur', () => {
-    const { state } = finishedRace(OVERTAKE_SEED);
+    const { state } = finishedRace(PLAIN_FINISH_SEED);
     const snapshot = captureFinishSnapshot(state);
     const model = buildFinishModel(snapshot, null);
 
@@ -165,7 +165,7 @@ describe('classement final, podium et écarts', () => {
   });
 
   it('compose le podium avec le début du classement, jamais une seconde sélection', () => {
-    const { state } = finishedRace(OVERTAKE_SEED);
+    const { state } = finishedRace(PLAIN_FINISH_SEED);
     const snapshot = captureFinishSnapshot(state);
     const model = buildFinishModel(snapshot, null);
 
@@ -194,9 +194,9 @@ describe('classement final, podium et écarts', () => {
 
 describe('photo finish', () => {
   it('n’affiche la mention que si le noyau a réellement produit PHOTO_FINISH', () => {
-    const withoutPhoto = finishedRace(OVERTAKE_SEED);
+    const withoutPhoto = finishedRace(PLAIN_FINISH_SEED);
     const withoutModel = buildFinishModel(captureFinishSnapshot(withoutPhoto.state), withoutPhoto.arrival);
-    expect(withoutPhoto.arrival?.type).toBe(OVERTAKE_SEED_ARRIVAL.type);
+    expect(withoutPhoto.arrival?.type).toBe(PLAIN_FINISH_SEED_EVIDENCE.type);
     expect(withoutModel.photoFinish).toBeNull();
 
     const photo = finishedRace(PHOTO_FINISH_SEED);
@@ -215,9 +215,9 @@ describe('photo finish', () => {
     expect(photo.stepCount).toBe(RACE_CONFIG.TOTAL_STEPS);
     expect(photo.tSim).toBe(RACE_CONFIG.TOTAL_SIM_S);
 
-    const plain = arrivalFactOf(OVERTAKE_SEED);
-    expect(plain.type).toBe(OVERTAKE_SEED_ARRIVAL.type);
-    expect(plain.gapMeters).toBe(OVERTAKE_SEED_ARRIVAL.gapMeters);
+    const plain = arrivalFactOf(PLAIN_FINISH_SEED);
+    expect(plain.type).toBe(PLAIN_FINISH_SEED_EVIDENCE.type);
+    expect(plain.gapMeters).toBe(PLAIN_FINISH_SEED_EVIDENCE.gapMeters);
   });
 
   it('refuse un fait d’arrivée incomplet au lieu d’inventer des valeurs', () => {

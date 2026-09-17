@@ -8,6 +8,7 @@ import {
   SPEAKER_LINES_FR,
   characterNameFr,
 } from '../../src/app/strings.fr';
+import { fact, sampleFact } from '../fixtures/speakerFacts';
 
 /**
  * P009-C — véracité et structure des textes français du speaker.
@@ -15,46 +16,6 @@ import {
  * Ces tests ne figent **aucune** phrase : ils vérifient des propriétés. Une phrase peut donc être
  * réécrite librement, tant qu'elle reste dérivable du fait qui la produit.
  */
-
-/** Fait conforme au contrat de `RaceFact`, fabriqué à la main. */
-function fact(
-  type: RaceFactType,
-  magnitudes: readonly number[],
-  characterIds: readonly CharacterId[] = CHARACTERS.map((character) => character.id),
-): RaceFact {
-  return Object.freeze({
-    type,
-    tSim: 12,
-    characterIds: Object.freeze([...characterIds]),
-    magnitudes: Object.freeze([...magnitudes]),
-    importance: 50,
-    textKey: `fact.${type}`,
-  });
-}
-
-/**
- * Magnitudes **réalistes** par type, dans l'ordre exact documenté par `GAME_DESIGN.md` §9.2.
- *
- * Elles servent à produire une phrase représentative de chaque variante : un test qui ne
- * remplirait pas correctement un placeholder mesurerait la robustesse des erreurs, pas la véracité.
- */
-const SAMPLE_MAGNITUDES: Readonly<Record<RaceFactType, readonly number[]>> = Object.freeze({
-  LEADER_CHANGE: [3.24, 12.0],
-  BIG_COMEBACK: [4, 2],
-  OVERTAKE_STREAK: [5],
-  BIG_BONUS: [1.35, 8, 1],
-  // Magnitude **réellement négative** : c'est ce que publie P009-A (`CHUTE` : `-0.6`, `SIESTE` : `-0.7`).
-  LEADER_MALUS: [-0.6, 3, 1],
-  CLOSE_RACE: [8.42, 5.05],
-  LAST_COMEBACK: [4, 3],
-  CHECKPOINT_SPLIT: [812.4, 809.1, 804.6, 800.2, 798.9, 790.3],
-  FINISH: [12.5, 2160.0, 2147.5],
-  PHOTO_FINISH: [0.42, 2159.9, 2159.5],
-});
-
-function sampleFact(type: RaceFactType): RaceFact {
-  return fact(type, SAMPLE_MAGNITUDES[type]);
-}
 
 /** Valeurs que la phrase a le droit d'écrire, **dérivées** du fait, jamais inventées. */
 function derivableNumbers(source: RaceFact): Set<string> {
@@ -242,6 +203,37 @@ describe('P009-C : catalogue de textes', () => {
     expect(SPEAKER_LINES_FR.OVERTAKE_STREAK[0]?.(streakFact)).toContain('4');
   });
 
+  it('n’écrit jamais un flottant brut dans un message visible', () => {
+    // Magnitudes traînant des décimales de tirage uniforme : c'est ce que le premier test joueur
+    // manuel a vu s'afficher (`6.133333333333333 s`, `35.93333333333333 %`). Aucun message visible
+    // ne doit laisser passer plus d'une décimale, ni le point décimal du moteur.
+    const floatHeavy: Readonly<Record<RaceFactType, readonly number[]>> = Object.freeze({
+      LEADER_CHANGE: [3.2400000000000002, 12.033333333333333],
+      BIG_COMEBACK: [4, 2.6666666666666665],
+      OVERTAKE_STREAK: [5.000000000000001],
+      BIG_BONUS: [1.3500000000000001, 6.133333333333333, 1],
+      LEADER_MALUS: [-0.6000000000000001, 3.0666666666666664, 1],
+      CLOSE_RACE: [8.420000000000002, 5.050000000000001],
+      LAST_COMEBACK: [4, 3.0000000000000004],
+      CHECKPOINT_SPLIT: [
+        812.4000000000001, 809.1000000000001, 804.6000000000001, 800.2000000000001,
+        798.9000000000001, 790.3000000000001,
+      ],
+      FINISH: [12.500000000000002, 2160.0000000000005, 2147.5000000000005],
+      PHOTO_FINISH: [0.42000000000000004, 2159.9000000000005, 2159.5000000000005],
+    });
+
+    for (const type of SPEAKER_FACT_TYPES) {
+      for (const formatter of SPEAKER_LINES_FR[type]) {
+        const line = formatter(fact(type, floatHeavy[type]));
+        expect(line, `« ${line} » (${type})`).not.toMatch(/\d,\d{2,}/);
+        expect(line, `« ${line} » (${type}) ne doit pas porter de point décimal`).not.toMatch(
+          /\d\.\d/,
+        );
+      }
+    }
+  });
+
   it('exprime BIG_COMEBACK en places, jamais en mètres', () => {
     const source = fact('BIG_COMEBACK', [4, 2]);
     const lines = SPEAKER_LINES_FR.BIG_COMEBACK.map((formatter) => formatter(source));
@@ -323,7 +315,7 @@ describe('P009-C : catalogue de textes', () => {
     expect(third).toContain('3e place');
   });
 
-  it('tronque les distances de pointage au mètre, sans jamais les surestimer', () => {
+  it('tronque les distances de checkpoint au mètre, sans jamais les surestimer', () => {
     const splitFact = fact('CHECKPOINT_SPLIT', [812.4, 809.1, 804.6, 800.2, 798.9, 790.3]);
     const line = SPEAKER_LINES_FR.CHECKPOINT_SPLIT[0]?.(splitFact) ?? '';
     expect(line).toContain('812 m');

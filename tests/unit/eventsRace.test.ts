@@ -90,6 +90,8 @@ interface MeasuredGain {
 
 interface GainSample {
   readonly gains: readonly MeasuredGain[];
+  /** Nombre de courses effectivement parcourues : sert à dériver les exigences de corpus. */
+  readonly raceCount: number;
   readonly rampViolations: number;
   readonly boundViolations: number;
   readonly megaTurboSteps: number;
@@ -183,7 +185,7 @@ function measureGains(seedList: readonly string[]): GainSample {
     }
   }
 
-  return { gains, rampViolations, boundViolations, megaTurboSteps };
+  return { gains, raceCount: seedList.length, rampViolations, boundViolations, megaTurboSteps };
 }
 
 const MEASURED = measureGains(seeds(40, 'EVENTR'));
@@ -259,10 +261,11 @@ describe('le moteur applique exactement le planning d’événements', () => {
       }
     }
 
-    // 10 800 pas × 6 personnages comparés à un planning reconstruit à part : au bit près.
+    // 3 600 pas × 6 personnages comparés à un planning reconstruit à part : au bit près.
     expect(mismatches).toBe(0);
-    // La couverture des 7 types est vérifiée sur l'échantillon complet, plus bas.
-    expect(seen.size).toBeGreaterThanOrEqual(3);
+    // La couverture des 7 types est vérifiée sur l'échantillon complet, plus bas. Sur une seule
+    // course de 60 s (3,4 événements en moyenne), au moins deux types distincts : mesure 2.
+    expect(seen.size).toBeGreaterThanOrEqual(2);
   });
 
   it('utilise l’événement du pas courant dans la vitesse cible du même pas', () => {
@@ -318,7 +321,10 @@ describe('le moteur applique exactement le planning d’événements', () => {
 describe('gain réellement produit par chaque événement', () => {
   it('couvre les 7 types du catalogue sur 40 courses', () => {
     const byId = gainsById(MEASURED);
-    expect(MEASURED.gains.length).toBeGreaterThan(300);
+    // La taille du corpus est **dérivée de la cadence design** (au moins 3 événements par course de
+    // 60 s), pas d'un nombre absolu hérité des courses de 180 s : ce qui compte pour la couverture
+    // des 7 types est le nombre d'événements observés, vérifié juste en dessous type par type.
+    expect(MEASURED.gains.length).toBeGreaterThanOrEqual(MEASURED.raceCount * 3);
 
     for (const definition of EVENT_CATALOG) {
       // Y compris les plus rares : `MEGA_TURBO` (4,3 %) et `SIESTE` (6,3 %).
@@ -452,7 +458,7 @@ describe('gain réellement produit par chaque événement', () => {
     expect(comparedSteps).toBeGreaterThan(10_000);
   });
 
-  it('finit toujours à 10800 pas, quel que soit le nombre d’événements', () => {
+  it('finit toujours à 3600 pas, quel que soit le nombre d’événements', () => {
     const counts: number[] = [];
 
     for (const seed of seeds(12, 'EVENTF')) {
@@ -493,9 +499,19 @@ describe('ciblage : aucun rubber-banding', () => {
     let measured = 0;
 
     for (const seed of seeds(RACES, 'EVENTB')) {
-      const first = eventTriggers(seed).reduce((earliest, trigger) =>
-        trigger.step < earliest.step ? trigger : earliest,
+      const first = eventTriggers(seed).reduce<EventTrigger | null>(
+        (earliest, trigger) =>
+          earliest === null || trigger.step < earliest.step ? trigger : earliest,
+        null,
       );
+      if (first === null) {
+        // Une course de 60 s ne contient que 3,4 événements en moyenne : quelques pour cent des
+        // courses n'en ont aucun. Les ignorer est sans effet sur la propriété mesurée — qu'une course
+        // produise un événement ou non ne dépend pas du rang des personnages — et le nombre de
+        // courses réellement mesurées est vérifié en fin de test.
+        continue;
+      }
+
       const engine = new RaceEngine(seed);
       for (let stepNumber = 1; stepNumber < first.step; stepNumber += 1) {
         engine.step();
@@ -514,13 +530,13 @@ describe('ciblage : aucun rubber-banding', () => {
       measured += 1;
     }
 
-    // Une cible uniforme donne un rang moyen de 3,5 (écart-type 0,054 sur 1000 courses) et environ
+    // Une cible uniforme donne un rang moyen de 3,5 (écart-type 0,054 sur 1 000 courses) et environ
     // 167 cibles par rang (écart-type 11,8). Un « bonus au dernier », un « malus au leader » ou un
     // « peloton accéléré » déplacerait ces deux chiffres de plusieurs écarts-types.
-    expect(measured).toBe(RACES);
+    expect(measured).toBeGreaterThanOrEqual(Math.floor(RACES * 0.9));
     expect(Math.abs(rankSum / measured - 3.5)).toBeLessThan(0.2);
     for (const [position, count] of rankCounts.entries()) {
-      expect(Math.abs(count - RACES / 6), `rang ${position + 1}`).toBeLessThan(60);
+      expect(Math.abs(count - measured / 6), `rang ${position + 1}`).toBeLessThan(60);
     }
   });
 });

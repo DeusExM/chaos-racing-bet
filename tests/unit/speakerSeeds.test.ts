@@ -24,8 +24,9 @@ import { Speaker, type SpeakerDecision } from '../../src/speaker/Speaker';
  * les garde-fous (cooldowns, quota, fenêtre) tiennent, et qu'aucun filtre amont ne tarit la parole.
  * Une fois P009-C connu, la même mesure avec de vraies durées ne pourra qu'être **inférieure**.
  *
- * Le cooldown global borne déjà la cadence à `180 / 6 = 30` répliques par course : le plafond de la
- * cible design (30) est donc structurel.
+ * Le cooldown global borne déjà la cadence à `TOTAL_SIM_S / 6` répliques par course — 30 pour la
+ * course de 180 s de P009, **10** pour la course de 60 s de la passe corrective : le plafond mesuré
+ * est donc structurel, et il suit la durée de la course.
  */
 
 const DT = RACE_CONFIG.DT_S;
@@ -227,7 +228,7 @@ describe(`P009-B : discipline de parole sur ${SEED_COUNT} courses réelles`, () 
   const seeds = canonicalSeeds(SEED_COUNT);
 
   // Campagne de 200 courses complètes : la durée dépasse le délai par défaut de Vitest, elle est
-  // donc déclarée explicitement (rejouer 200 × 10 800 pas est un vrai calcul, pas une attente).
+  // donc déclarée explicitement (rejouer 200 × 3 600 pas est un vrai calcul, pas une attente).
   it('n’enfreint aucune règle de §9.3 sur toute la campagne', { timeout: 120_000 }, () => {
     const lineCounts: number[] = [];
     const failures: string[] = [];
@@ -239,38 +240,39 @@ describe(`P009-B : discipline de parole sur ${SEED_COUNT} courses réelles`, () 
     }
 
     const summary = summarize(lineCounts);
-    const belowTarget = lineCounts.filter((value) => value < 12).length;
-    const aboveTarget = lineCounts.filter((value) => value > 30).length;
+    const belowTarget = lineCounts.filter((value) => value < 6).length;
+    const aboveTarget = lineCounts.filter((value) => value > 14).length;
     const report =
       `${SEED_COUNT} seeds — min ${summary.min}, p25 ${summary.p25}, médiane ${summary.median}, ` +
       `moyenne ${summary.mean.toFixed(2)}, p75 ${summary.p75}, max ${summary.max} ; ` +
-      `${belowTarget} courses sous 12 répliques, ${aboveTarget} au-dessus de 30`;
+      `${belowTarget} courses sous 6 répliques, ${aboveTarget} au-dessus de 14`;
 
     // Trace de la campagne : c'est la mesure qui sert à l'arbitrage d'équilibrage (P010).
     console.log(
       [
-        `P009-B — campagne de ${SEED_COUNT} courses de 180 s (cadence maximale)`,
+        `P009-B — campagne de ${SEED_COUNT} courses de 60 s (cadence maximale)`,
         `min=${summary.min} p25=${summary.p25} mediane=${summary.median}`,
         `moyenne=${summary.mean.toFixed(2)} p75=${summary.p75} max=${summary.max}`,
-        `courses=${SEED_COUNT} sous_12=${belowTarget} au_dessus_de_30=${aboveTarget}`,
+        `courses=${SEED_COUNT} sous_6=${belowTarget} au_dessus_de_14=${aboveTarget}`,
         `violations=${failures.length}`,
       ].join('\n'),
     );
 
     expect(failures, failures.slice(0, 20).join('\n')).toEqual([]);
 
-    // Plafond design : jamais plus de 30 répliques (le cooldown global borne déjà la cadence à
-    // `180 / 6 = 30`), et jamais une course muette.
-    expect(summary.max, report).toBeLessThanOrEqual(30);
+    // Plafond structurel : jamais plus de 14 répliques (le cooldown global borne déjà la cadence à
+    // `60 / 6 = 10`, plus la marge des préemptions), et jamais une course muette.
+    expect(summary.max, report).toBeLessThanOrEqual(14);
     expect(summary.min, report).toBeGreaterThan(0);
 
-    // Cible design — 12 à 30 répliques par course. Le **minimum** est mesuré et rapporté, mais il
-    // n'est pas verrouillé ici : il dépend du nombre de faits mesurés que P009-A a réellement
+    // Cible design — 6 à 14 répliques par course de 60 s. Le **minimum** est mesuré et rapporté, mais
+    // il n'est pas verrouillé ici : il dépend du nombre de faits mesurés que P009-A a réellement
     // produits, pas de la discipline de parole. Les garde-fous garantis par P009-B sont le plafond,
     // l'absence de silence total et l'absence de violation ; la borne basse relève de l'arbitrage
     // d'équilibrage (P010). Un effondrement de la moyenne, en revanche, est un vrai échec.
-    expect(summary.mean, report).toBeGreaterThanOrEqual(10);
-    expect(summary.median, report).toBeGreaterThanOrEqual(12);
+    // Mesure à 60 s : min 5, médiane 9, moyenne 8,81, max 11.
+    expect(summary.mean, report).toBeGreaterThanOrEqual(6);
+    expect(summary.median, report).toBeGreaterThanOrEqual(8);
   });
 
   it('nourrit le speaker avec des faits réels : une course produit toujours des faits', { timeout: 30_000 }, () => {

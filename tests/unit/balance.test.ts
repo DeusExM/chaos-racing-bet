@@ -17,7 +17,7 @@
  * Le test vérifie donc trois choses, qui sont les trois choses qu'un corpus réduit peut établir
  * honnêtement :
  *
- * 1. **Les invariants structurels** (§5) : exactement 10800 pas pour chaque course, reproductibilité
+ * 1. **Les invariants structurels** (§5) : exactement 3 600 pas pour chaque course, reproductibilité
  *    bit à bit, indépendance du résultat vis-à-vis d'un rejeu, aucun personnage hors roster.
  * 2. **La forme de la table des critères** : une entrée par ligne de §13, identifiants machine
  *    uniques, seuils identiques à ceux du document.
@@ -81,21 +81,23 @@ describe('critères §13 : forme de la table', () => {
   });
 
   it('reprend le seuil du leader à l’instant documenté', () => {
-    // 135 s = début du quatrième et dernier segment (4 × 45 s). L'instant est une constante du
-    // harnais, et §13 le cite : le test les tient ensemble.
-    expect(LEADER_CHECK_S).toBe(135);
-    expect(metrics.leaderCheckS).toBe(135);
+    // 40 s = début du troisième et dernier segment (3 × 20 s), la notion de P010 (« le leader au début
+    // du dernier segment gagne ») transposée sans changer de sens. L'instant est **dérivé** de
+    // `RACE_CONFIG`, et §13 le cite : le test les tient ensemble.
+    expect(LEADER_CHECK_S).toBe(RACE_CONFIG.TOTAL_SIM_S - RACE_CONFIG.SEGMENT_DURATION_S);
+    expect(LEADER_CHECK_S).toBe(40);
+    expect(metrics.leaderCheckS).toBe(LEADER_CHECK_S);
 
     const leader = balanceCriteria(metrics).find(
       (criterion) => criterion.id === 'leader-at-check-wins',
     );
     expect(leader?.expected).toBe('[55.00 % ; 85.00 %]');
-    expect(leader?.label).toContain('t=135');
+    expect(leader?.label).toContain('t=40');
   });
 });
 
 describe('invariants structurels de la course', () => {
-  it('termine chaque course en exactement 10800 pas', () => {
+  it('termine chaque course en exactement 3 600 pas', () => {
     expect(metrics.exactSteps).toBe(true);
     expect(metrics.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
     for (const observation of campaign.observations) {
@@ -129,7 +131,7 @@ describe('invariants structurels de la course', () => {
 });
 
 describe('reproductibilité', () => {
-  it('rejoue 100 seeds deux fois, bit à bit, en 10800 pas', () => {
+  it('rejoue 100 seeds deux fois, bit à bit, en 3 600 pas', () => {
     // Première passe : les 100 premières courses **déjà mesurées** par la campagne (le harnais ne
     // modifie pas la course, ce que vérifie un autre test de ce fichier). Seconde passe : un moteur
     // neuf par seed. On économise ainsi 100 courses sur 200, sans affaiblir la comparaison : elle
@@ -202,10 +204,13 @@ describe('reproductibilité', () => {
 
 describe('critères §13 : corpus réduit de 100 seeds', () => {
   it('garde l’écart P1–P6 dans la plage du document', () => {
-    expect(metrics.gap1to6.median).toBeGreaterThanOrEqual(80 - MARGIN);
-    expect(metrics.gap1to6.median).toBeLessThanOrEqual(260 + MARGIN);
-    expect(metrics.gap1to6.p5).toBeGreaterThanOrEqual(25 - MARGIN);
-    expect(metrics.gap1to6.p95).toBeLessThanOrEqual(500 + MARGIN);
+    // Plage de §13 pour la course de 60 s : `[45 ; 150]`, `≥ 15`, `≤ 290` (échelle de P010 divisée par
+    // √3, parce que l'écart entre deux personnages croît comme la racine du temps). Mesure du corpus
+    // réduit : médiane 84,98 m, p5 41,88 m, p95 147,09 m.
+    expect(metrics.gap1to6.median).toBeGreaterThanOrEqual(45 - MARGIN);
+    expect(metrics.gap1to6.median).toBeLessThanOrEqual(150 + MARGIN);
+    expect(metrics.gap1to6.p5).toBeGreaterThanOrEqual(15 - MARGIN);
+    expect(metrics.gap1to6.p95).toBeLessThanOrEqual(290 + MARGIN);
     // L'écart P1–P6 est le maximum des retards au leader : il ne peut pas être plus petit que
     // l'écart P1–P2, ni que n'importe quel retard individuel.
     expect(metrics.gap1to6.median).toBeGreaterThanOrEqual(metrics.gap1to2.median);
@@ -232,15 +237,21 @@ describe('critères §13 : corpus réduit de 100 seeds', () => {
   });
 
   it('garde les volumes d’événements, de surges et de répliques dans leurs plages', () => {
-    expect(metrics.eventsTotalMean).toBeGreaterThan(10 - MARGIN * 0.2);
-    expect(metrics.eventsTotalMean).toBeLessThan(16 + MARGIN * 0.2);
+    // Bornes **larges**, justifiées par l'erreur d'échantillonnage du corpus réduit : ≈ 0,2 événement,
+    // ≈ 0,2 surge et ≈ 0,5 réplique sur la moyenne de 100 courses. La tolérance est de **1 point** (et
+    // non de 3 comme avant la passe corrective, où les volumes étaient trois fois plus grands) : sur
+    // une moyenne de 3,4 événements, 3 points ne testeraient plus rien. C'est la table des critères —
+    // et le harnais à 1000 seeds — qui portent le verdict.
+    const TOLERANCE = 1;
+    expect(metrics.eventsTotalMean).toBeGreaterThanOrEqual(3 - TOLERANCE);
+    expect(metrics.eventsTotalMean).toBeLessThanOrEqual(6 + TOLERANCE);
     expect(Math.max(...metrics.eventsPerCharacterMean)).toBeLessThanOrEqual(5 + 1);
-    expect(Math.min(...metrics.surgesPerCharacterMean)).toBeGreaterThanOrEqual(14 - MARGIN * 0.2);
-    expect(Math.max(...metrics.surgesPerCharacterMean)).toBeLessThanOrEqual(26 + MARGIN * 0.2);
+    expect(Math.min(...metrics.surgesPerCharacterMean)).toBeGreaterThanOrEqual(4.7 - TOLERANCE);
+    expect(Math.max(...metrics.surgesPerCharacterMean)).toBeLessThanOrEqual(8.7 + TOLERANCE);
 
     expect(metrics.speakerLines).not.toBeNull();
-    expect(metrics.speakerLines?.mean).toBeGreaterThanOrEqual(12 - MARGIN * 0.2);
-    expect(metrics.speakerLines?.mean).toBeLessThanOrEqual(30 + MARGIN * 0.2);
+    expect(metrics.speakerLines?.mean).toBeGreaterThanOrEqual(6 - TOLERANCE);
+    expect(metrics.speakerLines?.mean).toBeLessThanOrEqual(14 + TOLERANCE);
   });
 
   it('compte les changements de leader et les dépassements du même ordre que le document', () => {
@@ -249,24 +260,23 @@ describe('critères §13 : corpus réduit de 100 seeds', () => {
   });
 
   /**
-   * Le critère du leader est **désormais conforme** : §13 demande que le leader à `tSim = 135 s`
+   * Le critère du leader est **conforme** : §13 demande que le leader au **début du dernier segment**
    * gagne 55 % à 85 % des courses. Trois mesures, trois corpus :
    *
-   * * corpus **canonique de 1000 seeds** : **66,90 %** — valeur normative, celle de §13 ;
-   * * corpus **réduit de 300 seeds** (mesure de travail) : 66,33 % ;
-   * * corpus de ce test, **100 seeds** (préfixe du canonique) : 67,00 %.
+   * * corpus **canonique de 1000 seeds** : **63,20 %** — valeur normative, celle de §13 ;
+   * * corpus de ce test, **100 seeds** (préfixe du canonique) : 65,00 %.
    *
-   * Il a remplacé en P010 un critère mesuré à `tSim = 171 s`, qui valait **88,10 %** sur le corpus
-   * canonique de 1000 seeds — hors plage. L'instant a été déplacé parce que 135 s est le **début du
-   * quatrième et dernier segment**, pas parce que le chiffre arrangeait : `docs/balance-report.md` §2
-   * documente la mesure, le diagnostic (aucune constante globale et symétrique ne corrigeait l'écart
-   * de façon significative) et la raison du remplacement.
+   * P010 avait retenu `tSim = 135 s` pour la course de 180 s (66,90 % sur le canonique) après avoir
+   * écarté `tSim = 171 s` (88,10 %, hors plage) : 135 s est le **début du quatrième et dernier
+   * segment**, documenté dans `docs/balance-report.md` §2. La passe corrective 60 s conserve la même
+   * notion, indépendante de la durée, et donc le même instant relatif : le début du troisième et
+   * dernier segment, soit **40 s** (`TOTAL_SIM_S − SEGMENT_DURATION_S`).
    *
    * L'encadrement reste **large à dessein** : sur 100 seeds, l'erreur d'échantillonnage d'un taux
-   * voisin de 67 % vaut ≈ 4,7 points. Ce test vérifie donc que la course n'est **ni jouée d'avance
+   * voisin de 65 % vaut ≈ 4,7 points. Ce test vérifie donc que la course n'est **ni jouée d'avance
    * ni retournée à l'excès** dans le dernier segment, la valeur canonique étant celle du harnais.
    */
-  it('garde le taux de victoire du leader à 135 s dans la plage de §13', () => {
+  it('garde le taux de victoire du leader à 40 s dans la plage de §13', () => {
     expect(metrics.leaderAtCheckWinRate).toBeGreaterThan(55 - 14);
     expect(metrics.leaderAtCheckWinRate).toBeLessThan(85 + 14);
   });

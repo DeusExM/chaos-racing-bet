@@ -41,9 +41,9 @@ export type RacePhase =
        * Numéro **humain** du segment courant, de `1` à `SEGMENT_COUNT` — et non un index.
        *
        * Attention à ne pas confondre avec `track.segmentIndexAt(tSim)`, qui reste fondé sur zéro
-       * (`0..3`). Le moteur passe de l'un à l'autre par `segmentIndexAt(tSim) + 1`.
+       * (`0..2`). Le moteur passe de l'un à l'autre par `segmentIndexAt(tSim) + 1`.
        */
-      readonly segment: 1 | 2 | 3 | 4;
+      readonly segment: 1 | 2 | 3;
       /** Temps simulé écoulé depuis le début du segment courant, en secondes. */
       readonly segmentElapsedS: number;
     }

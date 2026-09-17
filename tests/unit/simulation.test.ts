@@ -113,10 +113,14 @@ describe('RaceSimulation — temps réel', () => {
 
     expect(simulation.view.steps).toBe(60);
     simulation.setTimeScale(20);
-    simulation.update(1000);
-    // 20 secondes simulées de plus, toujours par pas de DT_S.
-    expect(simulation.view.steps).toBe(60 + 1200);
-    expect(simulation.view.tSim).toBe(1260 * DT);
+    // 200 ms réels à ×20 = 4 s simulées : la course passe de 1 s à 5 s, donc **avant** la première
+    // borne (20 s). Un appui plus long traverserait le checkpoint et s'arrêterait dessus, ce qui est
+    // le comportement voulu mais pas ce que ce test mesure.
+    simulation.update(200);
+    // 4 secondes simulées de plus, toujours par pas de DT_S, exactement (le plafond vaut 20 pas par
+    // frame nominale, 4 s en demandent 240 : le reliquat est conservé, pas perdu).
+    expect(simulation.view.steps).toBe(60 + 240);
+    expect(simulation.view.tSim).toBe((60 + 240) * DT);
   });
 
   it('conserve le reliquat quand le plafond de pas par frame est atteint', () => {
@@ -152,7 +156,7 @@ describe('RaceSimulation — temps réel', () => {
     expect(fast.timeScale).toBe(20);
   });
 
-  it('atteint la fin exactement à 10 800 pas, quel que soit le découpage', () => {
+  it('atteint la fin exactement à 3 600 pas, quel que soit le découpage', () => {
     for (const frameMs of [1, 5, 16.667, 100, 2000]) {
       const distances = playWith(new RaceSimulation(SEED), frameMs);
       expect(distances, `frame de ${frameMs} ms`).toHaveLength(6);
@@ -166,7 +170,7 @@ describe('RaceSimulation — temps réel', () => {
       guard += 1;
     }
     expect(simulation.view.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
-    expect(simulation.view.tSim).toBe(180);
+    expect(simulation.view.tSim).toBe(60);
     expect(simulation.phase).toBe('finished');
   });
 

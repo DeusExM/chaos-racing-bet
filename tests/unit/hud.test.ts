@@ -9,8 +9,6 @@ import {
   formatCheckpointInstant,
   formatGapMeters,
   formatGapSeconds,
-  formatScaleLabel,
-  formatScaleOverflow,
   formatSimTime,
 } from '../../src/render/view/Hud';
 import { VIEW } from '../../src/render/viewConfig';
@@ -21,6 +19,11 @@ import { VIEW } from '../../src/render/viewConfig';
  * C'est ce qui permet de vérifier le cas du dépassement de l'échelle nominale sans jamais toucher au
  * gameplay : une course réelle ne fait presque jamais dépasser `NOMINAL_SCALE_M`, mais la fonction,
  * elle, doit être correcte pour n'importe quelle distance.
+ *
+ * Depuis la passe corrective, la mini-carte n'est **plus affichée** dans l'arène : elle coûtait une
+ * bande de piste pour une information que le classement donne déjà. Le calcul, lui, reste testé ici
+ * et reste exposé par la photographie du HUD (`markers`) : c'est un hook de test et de debug, et le
+ * support naturel d'une future vue de piste (P014).
  */
 
 const SCALE = VIEW.NOMINAL_SCALE_M;
@@ -42,14 +45,17 @@ describe('mini-carte : échelle et ordre', () => {
   });
 
   it('conserve strictement l’ordre des distances', () => {
-    const markers = minimapMarkers(inputs([100, 900, 400, 2160, 12, 1400]), SCALE);
+    // Distances exprimées en fractions de l'échelle : le test reste vrai quelle que soit la durée de
+    // la course, donc quelle que soit `NOMINAL_SCALE_M`.
+    const distances = [0.05, 0.42, 0.19, 0.98, 0.006, 0.65].map((fraction) => fraction * SCALE);
+    const markers = minimapMarkers(inputs(distances), SCALE);
     const ordered = [...markers].sort((a, b) => a.distance - b.distance).map((marker) => marker.id);
     const byPosition = [...markers].sort((a, b) => a.position - b.position).map((marker) => marker.id);
     expect(byPosition).toEqual(ordered);
   });
 
   it('ne signale aucun dépassement tant que l’échelle n’est pas franchie', () => {
-    const markers = minimapMarkers(inputs([SCALE, SCALE - 0.001, 0, 10, 500, 1000]), SCALE);
+    const markers = minimapMarkers(inputs([SCALE, SCALE - 0.001, 0, SCALE * 0.01, SCALE * 0.5, SCALE * 0.9]), SCALE);
     for (const marker of markers) {
       expect(marker.overflow, `dépassement de ${marker.id}`).toBe(false);
       expect(marker.overflowM).toBe(0);
@@ -104,23 +110,17 @@ describe('HUD : formats affichés', () => {
     expect(formatGapSeconds(0.35, 's')).toBe('+0,3\u00A0s');
   });
 
-  it('écrit le temps simulé et les bornes de pointage', () => {
+  it('écrit le temps simulé et les bornes de checkpoint', () => {
     expect(formatSimTime(45, 's')).toBe('45,0\u00A0s');
-    expect(formatSimTime(180, 's')).toBe('180,0\u00A0s');
-    expect(formatCheckpointInstant(135, 's')).toBe('135\u00A0s');
-  });
-
-  it('n’affiche l’indicateur de dépassement que s’il existe', () => {
-    expect(formatScaleOverflow(0, metres)).toBe('');
-    expect(formatScaleOverflow(-3, metres)).toBe('');
-    expect(formatScaleOverflow(12.4, metres)).toBe(`+12${metres}`);
+    expect(formatSimTime(60, 's')).toBe('60,0\u00A0s');
+    expect(formatCheckpointInstant(20, 's')).toBe('20\u00A0s');
+    expect(formatCheckpointInstant(40, 's')).toBe('40\u00A0s');
   });
 
   it('nomme l’échelle nominale avec sa valeur réelle', () => {
-    expect(formatScaleLabel(VIEW.NOMINAL_SCALE_M, 'échelle nominale', metres)).toBe(
-      `échelle nominale ${String(VIEW.NOMINAL_SCALE_M)}${metres}`,
-    );
-    // L'échelle du décor est la distance qu'aurait parcourue un coureur exactement à `SPEED.BASE`.
+    // L'échelle du décor est la distance qu'aurait parcourue un coureur exactement à `SPEED.BASE`
+    // pendant toute la course : elle suit donc la durée de la course, et vaut 720 m à 60 s.
     expect(VIEW.NOMINAL_SCALE_M).toBe(SPEED.BASE * RACE_CONFIG.TOTAL_SIM_S);
+    expect(VIEW.NOMINAL_SCALE_M).toBe(720);
   });
 });

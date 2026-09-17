@@ -32,6 +32,8 @@ export interface VoiceInfo {
 export interface UtteranceLike {
   voice: VoiceInfo | null;
   lang: string;
+  /** Débit relatif : `1` est la vitesse normale du moteur de synthèse. */
+  rate: number;
 }
 
 /** Surface de `speechSynthesis` réellement utilisée. */
@@ -63,6 +65,20 @@ export interface VoiceOutput {
 
 /** Langue demandée par défaut : le jeu est francophone, la voix doit l'être aussi. */
 export const VOICE_LANGUAGE = 'fr-FR';
+
+/**
+ * Débit de la voix, en multiple de la vitesse normale du moteur de synthèse.
+ *
+ * Le premier test joueur manuel a jugé la voix « beaucoup trop lente » : à `1`, un commentateur de
+ * course parle comme une synthèse de navigation d'ascenseur, et la réplique traîne encore quand
+ * l'action est passée. `1,6` est le débit retenu — nettement plus rapide, mais toujours articulé
+ * (au-delà de ≈ 1,8, la plupart des voix françaises deviennent difficiles à suivre).
+ *
+ * C'est une constante de **présentation**, et elle vit ici plutôt que dans `viewConfig.ts` : elle
+ * n'affecte ni la simulation, ni la durée d'affichage des sous-titres, ni le moindre délai du speaker
+ * (invariant §5.10).
+ */
+export const TTS_RATE = 1.6;
 
 /** Vrai si une voix parle français, quel que soit le séparateur (`fr-FR`, `fr_FR`, `fr`). */
 export function isFrenchVoice(voice: VoiceInfo): boolean {
@@ -108,6 +124,9 @@ export function createVoiceOutput(scope: SpeechApiScope): VoiceOutput | null {
       // Sans voix explicite, la langue demandée reste le français : le navigateur choisit alors sa
       // propre voix disponible, ce qui est un repli propre plutôt qu'un silence.
       utterance.lang = voice?.lang ?? VOICE_LANGUAGE;
+      // Débit de commentateur sportif : la voix ne doit jamais être le goulot d'étranglement de
+      // l'action. Le réglage est appliqué à chaque énonciation, donc jamais hérité d'un état global.
+      utterance.rate = TTS_RATE;
 
       // Une seule phrase à la fois : une réplique préemptée est réellement coupée, jamais superposée.
       synthesis.cancel();

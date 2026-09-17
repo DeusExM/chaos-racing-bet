@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CharacterId, RaceFact } from '../../src/core/types';
+import { SPEAKER_FACT_TYPES, SPEAKER_LINES_FR } from '../../src/app/strings.fr';
+import { SPEAKER_POLICY } from '../../src/speaker/policy';
 import type { SpeakerDecision } from '../../src/speaker/Speaker';
 import type { SpeakerLine } from '../../src/render/subtitle';
 import { VIEW } from '../../src/render/viewConfig';
+import { sampleFact } from '../fixtures/speakerFacts';
 import {
   EMPTY_SUBTITLE_MODEL,
   advanceFade,
@@ -88,6 +91,53 @@ describe('P012 : durée d’affichage adaptée à la longueur', () => {
 
   it('est une fonction pure : deux appels identiques donnent la même durée', () => {
     expect(subtitleDurationMs('Même phrase')).toBe(subtitleDurationMs('Même phrase'));
+  });
+
+  it('laisse lire les répliques réelles à une vitesse confortable', () => {
+    // Mesure sur le catalogue **réel** : c'est le seul moyen de savoir si les bornes de `VIEW`
+    // correspondent aux phrases que le joueur voit vraiment. Vitesse de lecture = caractères par
+    // seconde affichée ; 20 cps est le plafond usuel, 17 cps la cible d'un large public.
+    let shortest = Number.POSITIVE_INFINITY;
+    let longest = 0;
+
+    for (const type of SPEAKER_FACT_TYPES) {
+      for (const formatter of SPEAKER_LINES_FR[type]) {
+        const line = formatter(sampleFact(type));
+        const length = line.trim().length;
+        const seconds = subtitleDurationMs(line) / 1000;
+        const cps = length / seconds;
+
+        expect(cps, `« ${line} » à ${cps.toFixed(1)} cps`).toBeLessThanOrEqual(20);
+        shortest = Math.min(shortest, length);
+        longest = Math.max(longest, length);
+      }
+    }
+
+    // Le catalogue est bien celui mesuré lors du choix des constantes : 46 à 98 caractères.
+    expect(shortest).toBeGreaterThanOrEqual(40);
+    expect(longest).toBeLessThanOrEqual(110);
+  });
+
+  it('adapte réellement la durée au lieu d’écraser le catalogue au plafond', () => {
+    // Les anciennes bornes (`2 000 + 45 × n`, plafond `5 200`) saturaient 30 répliques sur 52 :
+    // l'adaptation était nominale. On vérifie ici qu'une large majorité du catalogue n'est pas
+    // au plafond, sans figer une proportion exacte.
+    const durations: number[] = [];
+    for (const type of SPEAKER_FACT_TYPES) {
+      for (const formatter of SPEAKER_LINES_FR[type]) {
+        durations.push(subtitleDurationMs(formatter(sampleFact(type))));
+      }
+    }
+
+    const clamped = durations.filter((value) => value === VIEW.SUBTITLE_MAX_MS).length;
+    expect(durations.length).toBeGreaterThan(40);
+    expect(clamped).toBeLessThan(durations.length / 2);
+  });
+
+  it('garde la durée maximale sous le cooldown global du speaker', () => {
+    // Une réplique ne doit pas être encore à l'écran quand la suivante peut être choisie : au-delà,
+    // chaque nouvelle réplique serait une préemption systématique, pour rien.
+    expect(VIEW.SUBTITLE_MAX_MS).toBeLessThan(SPEAKER_POLICY.globalCooldownS * 1000);
   });
 });
 

@@ -417,7 +417,7 @@ describe('CHECKPOINT_SPLIT', () => {
     const fact = single(perStep[RACE_CONFIG.STEPS_PER_SEGMENT - 1] ?? []);
 
     expect(fact.type).toBe('CHECKPOINT_SPLIT');
-    expect(fact.tSim).toBe(45);
+    expect(fact.tSim).toBe(20);
     expect(fact.characterIds).toEqual(['c0', 'c1', 'c2', 'c3', 'c4', 'c5']);
     expect(fact.magnitudes).toEqual([...xs]);
     // 38 de base, + 10 car l'écart P1–P2 vaut 2 m (< 20 m) et aucun leader n'a changé.
@@ -443,7 +443,7 @@ describe('CHECKPOINT_SPLIT', () => {
     expect(split.importance).toBe(
       FACT.CHECKPOINT_SPLIT_IMPORTANCE + FACT.CHECKPOINT_SPLIT_LEADER_CHANGE_BONUS,
     );
-    expect(split.tSim).toBe(45);
+    expect(split.tSim).toBe(20);
   });
 });
 
@@ -455,14 +455,14 @@ describe('FINISH et PHOTO_FINISH', () => {
     const arrivals = feeder.all.filter((fact) => fact.type === 'FINISH' || fact.type === 'PHOTO_FINISH');
     const arrival = single(arrivals);
     expect(arrival.type).toBe('FINISH');
-    expect(arrival.tSim).toBe(180);
+    expect(arrival.tSim).toBe(60);
     expect(arrival.characterIds).toEqual(['c0', 'c1']);
     expect(arrival.magnitudes).toEqual([8, 0, -8]);
     expect(arrival.importance).toBe(FACT.ARRIVAL_IMPORTANCE);
 
-    // Exactement trois splits et une arrivée : un fait n'existe que s'il est mesuré.
-    expect(feeder.all.filter((fact) => fact.type === 'CHECKPOINT_SPLIT')).toHaveLength(3);
-    expect(feeder.all).toHaveLength(4);
+    // Exactement deux splits et une arrivée : un fait n'existe que s'il est mesuré.
+    expect(feeder.all.filter((fact) => fact.type === 'CHECKPOINT_SPLIT')).toHaveLength(2);
+    expect(feeder.all).toHaveLength(3);
   });
 
   it('remplace FINISH par PHOTO_FINISH quand l’écart P1–P2 est strictement sous 5 m', () => {
@@ -472,7 +472,7 @@ describe('FINISH et PHOTO_FINISH', () => {
     const arrivals = feeder.all.filter((fact) => fact.type === 'FINISH' || fact.type === 'PHOTO_FINISH');
     const arrival = single(arrivals);
     expect(arrival.type).toBe('PHOTO_FINISH');
-    expect(arrival.tSim).toBe(180);
+    expect(arrival.tSim).toBe(60);
     expect(arrival.magnitudes).toEqual([2, 0, -2]);
     expect(arrival.importance).toBe(FACT.PHOTO_ARRIVAL_IMPORTANCE);
   });
@@ -489,8 +489,12 @@ describe('anti-bruit : 3 000 pas d’échanges de rang sous la marge', () => {
       feeder.feed([c0, 10, 100, 90, 5, 0], 1);
     }
 
-    // Le seul fait légitime de ces 3 000 pas est le split de checkpoint à 45 s : aucun bruit.
-    expect(feeder.all).toEqual([expect.objectContaining({ type: 'CHECKPOINT_SPLIT', tSim: 45 })]);
+    // Les seuls faits légitimes de ces 3 000 pas sont les deux splits de checkpoint (20 et 40 s) :
+    // aucun bruit. 3 000 pas couvrent en effet les deux bornes internes de la course de 60 s.
+    expect(feeder.all).toEqual([
+      expect.objectContaining({ type: 'CHECKPOINT_SPLIT', tSim: 20 }),
+      expect.objectContaining({ type: 'CHECKPOINT_SPLIT', tSim: 40 }),
+    ]);
     expect(feeder.all.filter((fact) => fact.type === 'OVERTAKE_STREAK')).toEqual([]);
     expect(feeder.all.filter((fact) => fact.type === 'LEADER_CHANGE')).toEqual([]);
   });
@@ -515,11 +519,11 @@ describe('intégration au moteur : drainFacts()', () => {
     }
     const later = engine.drainFacts();
     // Rien n'est rejoué : tout fait drainé après la borne appartient aux pas suivants.
-    expect(later.every((fact) => fact.tSim > 45)).toBe(true);
+    expect(later.every((fact) => fact.tSim > 20)).toBe(true);
     expect(engine.drainFacts()).toEqual([]);
   });
 
-  it('produit exactement trois splits et une arrivée sur une course complète', () => {
+  it('produit exactement deux splits et une arrivée sur une course complète', () => {
     const engine = new RaceEngine(SEED);
     const facts: RaceFact[] = [];
 
@@ -529,7 +533,7 @@ describe('intégration au moteur : drainFacts()', () => {
     }
 
     const splits = facts.filter((fact) => fact.type === 'CHECKPOINT_SPLIT');
-    expect(splits.map((fact) => fact.tSim)).toEqual([45, 90, 135]);
+    expect(splits.map((fact) => fact.tSim)).toEqual([20, 40]);
     expect(
       facts.filter((fact) => fact.type === 'FINISH' || fact.type === 'PHOTO_FINISH'),
     ).toHaveLength(1);

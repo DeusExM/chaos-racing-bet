@@ -1,5 +1,14 @@
 import { CHARACTERS } from '../core/characters';
 import type { CharacterId, RaceFact, RaceFactType } from '../core/types';
+import {
+  DISPLAY_DECIMALS,
+  formatCountFr as formatCount,
+  formatDecimalFr as formatDecimal,
+  formatMetresFr as formatMetres,
+  formatPercentFr as formatPercent,
+  formatSecondsFr as formatSeconds,
+  formatTruncatedMetresFr as formatTruncatedMetres,
+} from '../render/format';
 import type { SpeakerCatalogue } from '../render/subtitle';
 import type { UiText } from '../render/uiText';
 
@@ -39,11 +48,7 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   debugNoEvent: 'aucun',
   debugSegment: 'segment',
 
-  minimapTitle: 'Piste',
-  minimapStart: '0',
-  minimapEnd: 'échelle nominale',
   timeTitle: 'Chrono',
-  timeLabel: 'temps simulé',
   segmentLabel: 'segment',
   seedLabel: 'Seed',
   copySeedButton: 'Copier',
@@ -51,9 +56,10 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   // Le rendu accole cette unité à l'écart en secondes du classement.
   gapSecondsLabel: 's',
   // Le rendu accole à ces libellés le numéro de checkpoint et l'instant simulé.
-  checkpointTitle: 'Pointage',
+  checkpointTitle: 'Checkpoint',
   checkpointLeaderSplit: 'en tête',
 
+  // Repère décoratif dessiné sur la piste (`TrackView`) : une échelle, pas une règle de jeu.
   nominalScale: 'échelle nominale',
 
   startButton: 'Lancer',
@@ -62,16 +68,34 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   resumeButton: 'Reprendre',
   checkpointBanner: 'CHECKPOINT',
 
-  // Titre du bandeau de commentaire (P009-C) : c'est un libellé d'interface, pas une réplique.
-  speakerBannerTitle: 'MICRO',
-
-  // Réglages locaux (P012). Aucun de ces libellés n'est une réplique : ils décrivent l'interface.
+  // Réglages locaux (P012, libellés revus par la passe corrective) : deux interrupteurs explicites,
+  // nommés par ce qu'ils activent, et non par ce qu'ils coupent. Aucun de ces libellés n'est une
+  // réplique : ils décrivent l'interface.
   queuedLines: '{n} en attente',
   settingsTitle: 'Réglages',
-  muteLabel: 'Muet',
-  ttsLabel: 'Voix',
+  soundLabel: 'Son',
+  commentatorLabel: 'Commentateur',
   settingsOn: 'activé',
   settingsOff: 'coupé',
+
+  // Retour visuel d'événement : un mot, une couleur, jamais une phrase. Les clés sont les `EventId`
+  // du catalogue `src/core/events.ts` ; le rendu les lit, il ne les invente pas.
+  eventLabels: {
+    TURBO: 'TURBO !',
+    CHUTE: 'CHUTE !',
+    VENT_DE_FACE: 'VENT DE FACE !',
+    RACCOURCI: 'RACCOURCI !',
+    POULET: 'POULET !',
+    SIESTE: 'SIESTE !',
+    MEGA_TURBO: 'MEGA TURBO !',
+  },
+  eventFeedback: {
+    bonus: 'BONUS !',
+    malus: 'MALUS !',
+    positive: 'positif',
+    negative: 'négatif',
+  },
+  voiceEnabledConfirmation: "Let's go!",
 
   // Écran d'arrivée (P013). Ces libellés décrivent l'interface ; la seule phrase « parlée » reste une
   // réplique du catalogue, choisie par le speaker à partir d'un fait d'arrivée réel.
@@ -98,15 +122,19 @@ export const UI_TEXT_FR: UiText = Object.freeze({
  *
  * ## Arrondis
  *
+ * Tous les nombres visibles passent par **`src/render/format.ts`**, le module unique de présentation.
  * Deux familles seulement, toutes deux non trompeuses :
  *
- * * les grandeurs **continues** (mètres, secondes) sont écrites avec **une décimale**, format
- *   français (`3,2 m`) ;
- * * les grandeurs **entières** (places, rangs, dépassements, durées entières) sont écrites telles
- *   quelles, sans arrondi du tout.
+ * * les grandeurs **continues** (mètres, écarts) sont écrites avec **une décimale**, format français
+ *   (`3,2 m`) ;
+ * * les grandeurs **entières** (places, rangs, dépassements, durées, pourcentages) sont écrites
+ *   **sans décimale** : `4 dépassements`, `6 s`, `36 %`.
  *
- * Aucune valeur n'est arrondie « vers le haut » pour faire plus spectaculaire : les distances des
- * pointages et des arrivées sont tronquées au mètre (`Math.floor`), jamais arrondies au plus proche.
+ * La passe corrective issue du premier test joueur manuel a corrigé ici même trois fuites de flottant
+ * bruts (`String(magnitudeAt(fact, 1))` pour une durée, `String(magnitudeAt(fact, 0))` pour un
+ * compte) : un joueur pouvait lire `6.133333333333333 s`. Aucune valeur n'est arrondie « vers le
+ * haut » pour faire plus spectaculaire : les distances des checkpoints et des arrivées sont tronquées
+ * au mètre (`Math.floor`), jamais arrondies au plus proche.
  */
 
 /** Valeur mesurée d'un fait, refusée si elle est absente : un placeholder manquant est un bug. */
@@ -143,17 +171,17 @@ function nameAt(fact: RaceFact, index: number): string {
 
 /** Nombre à une décimale, virgule française : `3.24` → `« 3,2 »`. */
 export function formatNumberFr(value: number): string {
-  return value.toFixed(1).replace('.', ',');
+  return formatDecimal(value, DISPLAY_DECIMALS.METRES);
 }
 
 /** Distance en mètres, une décimale, virgule française : `3.24` → `« 3,2 m »`. */
 export function formatMetresFr(value: number): string {
-  return `${formatNumberFr(value)} m`;
+  return formatMetres(value);
 }
 
 /** Distance **tronquée** au mètre : jamais arrondie au plus proche, donc jamais surestimée. */
 export function formatTruncatedMetresFr(value: number): string {
-  return `${String(Math.floor(value))} m`;
+  return formatTruncatedMetres(value);
 }
 
 /**
@@ -164,7 +192,7 @@ export function formatTruncatedMetresFr(value: number): string {
  * valeur (`1 place`, `4 places`).
  */
 export function formatPlacesFr(value: number): string {
-  const places = Math.trunc(value);
+  const places = Math.round(value);
   return `${String(places)} place${Math.abs(places) >= 2 ? 's' : ''}`;
 }
 
@@ -175,7 +203,17 @@ export function formatPlacesFr(value: number): string {
  * valeur absolue n'est prise que pour l'affichage, afin de ne jamais écrire « -60 % en moins ».
  */
 export function formatPenaltyPercentFr(magnitude: number): string {
-  return `${String(Math.round(Math.abs(magnitude) * 100))} % en moins`;
+  return `${formatPercent(Math.abs(magnitude) * 100)} en moins`;
+}
+
+/** Durée d'un événement, en secondes simulées : `6 s`, jamais `6.133333333333333 s`. */
+export function formatEventDurationFr(seconds: number): string {
+  return formatSeconds(seconds);
+}
+
+/** Compte entier d'un fait (dépassements, places) : `4`, jamais `4.000000000000001`. */
+export function formatCountValueFr(value: number): string {
+  return formatCount(value);
 }
 
 /** Rang ordinal **masculin** — « un rang » : `1` → `« 1er »`, `2` → `« 2e »`, `3` → `« 3e »`… */
@@ -237,30 +275,30 @@ export const SPEAKER_LINES_FR: Readonly<Record<RaceFactType, readonly ((fact: Ra
 
     // magnitudes = [dépassements dans la fenêtre]
     OVERTAKE_STREAK: Object.freeze([
-      (fact: RaceFact) => `${nameAt(fact, 0)} enquille ${String(magnitudeAt(fact, 0))} dépassements d'affilée, c'est une moissonneuse !`,
-      (fact: RaceFact) => `${String(magnitudeAt(fact, 0))} dépassements en cinq secondes pour ${nameAt(fact, 0)} : quelqu'un a oublié le frein !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} double tout ce qui bouge : ${String(magnitudeAt(fact, 0))} fois, sans demander la permission !`,
-      (fact: RaceFact) => `Autoroute pour ${nameAt(fact, 0)} : ${String(magnitudeAt(fact, 0))} dépassements, les autres font de la figuration !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} distribue les dépassements : ${String(magnitudeAt(fact, 0))} en un rien de temps !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} enquille ${formatCountValueFr(magnitudeAt(fact, 0))} dépassements d'affilée, c'est une moissonneuse !`,
+      (fact: RaceFact) => `${formatCountValueFr(magnitudeAt(fact, 0))} dépassements en cinq secondes pour ${nameAt(fact, 0)} : quelqu'un a oublié le frein !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} double tout ce qui bouge : ${formatCountValueFr(magnitudeAt(fact, 0))} fois, sans demander la permission !`,
+      (fact: RaceFact) => `Autoroute pour ${nameAt(fact, 0)} : ${formatCountValueFr(magnitudeAt(fact, 0))} dépassements, les autres font de la figuration !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} distribue les dépassements : ${formatCountValueFr(magnitudeAt(fact, 0))} en un rien de temps !`,
     ]),
 
     // magnitudes = [magnitude de l'événement, durée, rang au moment du tirage]
     BIG_BONUS: Object.freeze([
-      (fact: RaceFact) => `${nameAt(fact, 0)} déclenche un bonus de ${String(Math.round(magnitudeAt(fact, 0) * 100))} % pendant ${String(magnitudeAt(fact, 1))} s !`,
-      (fact: RaceFact) => `Coup de boost pour ${nameAt(fact, 0)} : +${String(Math.round(magnitudeAt(fact, 0) * 100))} % pendant ${String(magnitudeAt(fact, 1))} s !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} touche le jackpot : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % de mieux pendant ${String(magnitudeAt(fact, 1))} s !`,
-      (fact: RaceFact) => `Bonus pour ${nameAt(fact, 0)} : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % de vitesse en plus, ${String(magnitudeAt(fact, 1))} s pour en profiter !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} appuie sur le champignon : +${String(Math.round(magnitudeAt(fact, 0) * 100))} % pendant ${String(magnitudeAt(fact, 1))} s, avec le ${rankLabel(magnitudeAt(fact, 2))} rang au tirage !`,
-      (fact: RaceFact) => `Le hasard gâte ${nameAt(fact, 0)} : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % de vitesse en plus, et le ${rankLabel(magnitudeAt(fact, 2))} rang au moment du tirage !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} déclenche un bonus de ${formatPercent(magnitudeAt(fact, 0) * 100)} pendant ${formatEventDurationFr(magnitudeAt(fact, 1))} !`,
+      (fact: RaceFact) => `Coup de boost pour ${nameAt(fact, 0)} : +${formatPercent(magnitudeAt(fact, 0) * 100)} pendant ${formatEventDurationFr(magnitudeAt(fact, 1))} !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} touche le jackpot : ${formatPercent(magnitudeAt(fact, 0) * 100)} de mieux pendant ${formatEventDurationFr(magnitudeAt(fact, 1))} !`,
+      (fact: RaceFact) => `Bonus pour ${nameAt(fact, 0)} : ${formatPercent(magnitudeAt(fact, 0) * 100)} de vitesse en plus, ${formatEventDurationFr(magnitudeAt(fact, 1))} pour en profiter !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} appuie sur le champignon : +${formatPercent(magnitudeAt(fact, 0) * 100)} pendant ${formatEventDurationFr(magnitudeAt(fact, 1))}, avec le ${rankLabel(magnitudeAt(fact, 2))} rang au tirage !`,
+      (fact: RaceFact) => `Le hasard gâte ${nameAt(fact, 0)} : ${formatPercent(magnitudeAt(fact, 0) * 100)} de vitesse en plus, et le ${rankLabel(magnitudeAt(fact, 2))} rang au moment du tirage !`,
     ]),
 
     // magnitudes = [magnitude de l'événement (négative), durée, rang au moment du tirage] ; le rang vaut 1
     LEADER_MALUS: Object.freeze([
-      (fact: RaceFact) => `Aïe pour ${nameAt(fact, 0)} : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${String(magnitudeAt(fact, 1))} s, et c'est le leader qui trinque !`,
-      (fact: RaceFact) => `Coup dur pour ${nameAt(fact, 0)}, leader : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} de vitesse pendant ${String(magnitudeAt(fact, 1))} s !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} était devant, il prend une pénalité de ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${String(magnitudeAt(fact, 1))} s !`,
-      (fact: RaceFact) => `Le sort s'acharne sur ${nameAt(fact, 0)} : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${String(magnitudeAt(fact, 1))} s, juste quand il mène !`,
-      (fact: RaceFact) => `Ça sent le roussi pour ${nameAt(fact, 0)} : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${String(magnitudeAt(fact, 1))} s, en tête de course !`,
+      (fact: RaceFact) => `Aïe pour ${nameAt(fact, 0)} : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${formatEventDurationFr(magnitudeAt(fact, 1))}, et c'est le leader qui trinque !`,
+      (fact: RaceFact) => `Coup dur pour ${nameAt(fact, 0)}, leader : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} de vitesse pendant ${formatEventDurationFr(magnitudeAt(fact, 1))} !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} était devant, il prend une pénalité de ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${formatEventDurationFr(magnitudeAt(fact, 1))} !`,
+      (fact: RaceFact) => `Le sort s'acharne sur ${nameAt(fact, 0)} : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${formatEventDurationFr(magnitudeAt(fact, 1))}, juste quand il mène !`,
+      (fact: RaceFact) => `Ça sent le roussi pour ${nameAt(fact, 0)} : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${formatEventDurationFr(magnitudeAt(fact, 1))}, en tête de course !`,
     ]),
 
     // magnitudes = [écart P1–P3, secondes écoulées]
@@ -283,10 +321,10 @@ export const SPEAKER_LINES_FR: Readonly<Record<RaceFactType, readonly ((fact: Ra
 
     // magnitudes = distances dans l'ordre du classement (P1 → P6), du plus loin au moins loin
     CHECKPOINT_SPLIT: Object.freeze([
-      (fact: RaceFact) => `Pointage : ${formatTruncatedMetresFr(magnitudeAt(fact, 0))} pour ${nameAt(fact, 0)}, ${formatTruncatedMetresFr(magnitudeAt(fact, 1))} pour ${nameAt(fact, 1)}, ${formatTruncatedMetresFr(magnitudeAt(fact, 2))} pour ${nameAt(fact, 2)} !`,
+      (fact: RaceFact) => `Checkpoint : ${formatTruncatedMetresFr(magnitudeAt(fact, 0))} pour ${nameAt(fact, 0)}, ${formatTruncatedMetresFr(magnitudeAt(fact, 1))} pour ${nameAt(fact, 1)}, ${formatTruncatedMetresFr(magnitudeAt(fact, 2))} pour ${nameAt(fact, 2)} !`,
       (fact: RaceFact) => `Les compteurs parlent : ${nameAt(fact, 0)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, ${nameAt(fact, 1)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 1))}, ${nameAt(fact, 2)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 2))} !`,
       (fact: RaceFact) => `Relevé de mi-course : ${nameAt(fact, 0)} mène à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, dernier ${nameAt(fact, 5)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 5))} !`,
-      (fact: RaceFact) => `Pointage officiel : ${nameAt(fact, 0)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, ${nameAt(fact, 5)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 5))}, et tout le monde transpire !`,
+      (fact: RaceFact) => `Checkpoint officiel : ${nameAt(fact, 0)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, ${nameAt(fact, 5)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 5))}, et tout le monde transpire !`,
       (fact: RaceFact) => `Ça se resserre : ${nameAt(fact, 0)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, ${nameAt(fact, 5)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 5))}, et personne ne lâche !`,
     ]),
 

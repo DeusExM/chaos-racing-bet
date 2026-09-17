@@ -547,7 +547,9 @@ function auditSeeds(seeds: readonly string[]): Partial<Record<RaceFactType, numb
 }
 
 describe('véracité des faits sur 200 seeds', () => {
-  it('recompose chaque fait à partir de la seule mesure de la course', () => {
+  // Le test rejoue volontairement 200 courses × 10 800 pas (14 à 18 s) : le délai est donc déclaré
+  // localement, sans toucher au délai par défaut de Vitest ni à SEED_COUNT.
+  it('recompose chaque fait à partir de la seule mesure de la course', { timeout: 60_000 }, () => {
     const seeds = canonicalSeeds(SEED_COUNT);
     expect(new Set(seeds).size).toBe(SEED_COUNT);
     expect(seeds.every((seed) => seed.length === 8)).toBe(true);

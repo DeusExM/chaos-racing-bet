@@ -45,6 +45,8 @@ export interface FrameSample {
   readonly banner: string;
   /** `true` si la bannière est masquée dans cette frame. */
   readonly bannerHidden: boolean;
+  /** Texte réellement dessiné dans le bandeau de commentaire (`''` s'il n'y en a aucun). */
+  readonly subtitle: string;
   readonly distances: readonly number[];
   readonly sprites: readonly SpriteSample[];
   readonly camera: CameraSample;
@@ -179,6 +181,7 @@ export async function collectRace(page: Page, maxFrames = 4000): Promise<FrameSa
           bannerHidden:
             document.querySelector('[data-testid="checkpoint-banner"]')?.hasAttribute('hidden') ??
             true,
+          subtitle: view.subtitle(),
           distances: state.characters.map((character) => character.x),
           sprites: view.sprites().map((sprite) => ({
             id: sprite.id,

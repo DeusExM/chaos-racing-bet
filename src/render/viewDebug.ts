@@ -28,6 +28,13 @@ export interface CameraView {
 export interface ChaosRaceViewDebugApi {
   sprites(): readonly SpriteView[];
   camera(): CameraView;
+  /**
+   * Texte réellement dessiné dans le bandeau de commentaire, `''` quand il est masqué.
+   *
+   * Sans cette lecture, un test ne pourrait prouver qu'une réplique a **vraiment** été affichée :
+   * un canvas n'est pas interrogeable depuis le DOM.
+   */
+  subtitle(): string;
 }
 
 declare global {

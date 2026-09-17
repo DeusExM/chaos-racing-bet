@@ -3,6 +3,7 @@ import { AUTO, Game, Scale } from 'phaser';
 import type { RaceSimulation } from '../sim/RaceSimulation';
 import { BootScene } from './scenes/BootScene';
 import { RaceScene } from './scenes/RaceScene';
+import type { CommentaryView } from './scenes/RaceScene';
 import type { UiText } from './uiText';
 import { VIEW } from './viewConfig';
 
@@ -19,6 +20,8 @@ export interface GameOptions {
   readonly debug: boolean;
   /** Expose les positions écran réelles (dev ou `?e2e=1`), pour les tests E2E. */
   readonly exposeView: boolean;
+  /** Commentaire du speaker, ou `null` : le rendu ne le crée pas, il l'affiche. */
+  readonly commentary: CommentaryView | null;
 }
 
 /**
@@ -40,6 +43,7 @@ export function createGame(options: GameOptions): void {
     debugPanel: options.debugPanel,
     debug: options.debug,
     exposeView: options.exposeView,
+    commentary: options.commentary,
   });
 
   new Game({

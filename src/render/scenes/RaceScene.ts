@@ -4,6 +4,7 @@ import { CHARACTERS } from '../../core/characters';
 import type { RaceSimulation } from '../../sim/RaceSimulation';
 import type { SimPhase } from '../../sim/types';
 import { leaderboardOf } from '../../sim/leaderboard';
+import type { SpeakerLine } from '../subtitle';
 import type { UiText } from '../uiText';
 import { VIEW } from '../viewConfig';
 import { installViewDebug } from '../viewDebug';
@@ -11,7 +12,21 @@ import { CameraRig } from '../view/CameraRig';
 import { CharacterSprite } from '../view/CharacterSprite';
 import { DebugPanel } from '../view/DebugPanel';
 import { LeaderboardView } from '../view/LeaderboardView';
+import { SubtitleBanner } from '../view/SubtitleBanner';
 import { TrackView } from '../view/TrackView';
+
+/**
+ * Réplique en cours de commentaire, telle que le rendu la lit.
+ *
+ * Le rendu ne décide rien : il reçoit la ligne déjà choisie et déjà formatée, et se contente de
+ * l'afficher, puis de la retirer quand la source n'en fournit plus.
+ */
+export interface CommentaryView {
+  /** Avance la montre d'affichage (temps réel) et rend la réplique visible, ou `null`. */
+  update(realDtMs: number): void;
+  /** Réplique à afficher dans cette frame, ou `null`. */
+  currentLine(): SpeakerLine | null;
+}
 
 /** Tout ce dont la scène de course a besoin, fourni par `src/app/`. */
 export interface RaceSceneOptions {
@@ -27,6 +42,8 @@ export interface RaceSceneOptions {
   readonly debug: boolean;
   /** Expose les positions écran réelles pour les tests E2E. */
   readonly exposeView: boolean;
+  /** Commentaire du speaker, ou `null` quand la course n'en a pas (tests unitaires, mode nu). */
+  readonly commentary: CommentaryView | null;
 }
 
 /** Libellé d'état correspondant à une phase temps réel. Exhaustif par construction. */
@@ -71,6 +88,11 @@ export class RaceScene extends Scene {
 
   private debug: DebugPanel | null = null;
 
+  private subtitle: SubtitleBanner | null = null;
+
+  /** Dernier texte poussé au bandeau : évite de redessiner le fond à chaque frame. */
+  private shownSubtitle = '';
+
   private layoutHeight = 0;
 
   private layoutWidth = 0;
@@ -82,6 +104,10 @@ export class RaceScene extends Scene {
 
   create(): void {
     this.track = new TrackView(this, this.options.text);
+
+    if (this.options.commentary !== null) {
+      this.subtitle = new SubtitleBanner(this);
+    }
 
     this.sprites = CHARACTERS.map(
       (character, index) => new CharacterSprite(this, character, index),
@@ -103,6 +129,7 @@ export class RaceScene extends Scene {
             screenY: sprite.screenY,
           })),
         camera: () => ({ leftM: this.rig.left, windowM: this.rig.span }),
+        subtitle: () => this.subtitle?.visibleText() ?? '',
       });
     }
 
@@ -140,8 +167,31 @@ export class RaceScene extends Scene {
     }
 
     this.leaderboard?.update(leaderboardOf(state));
+    this.updateSubtitle(delta);
     this.updateHud();
     this.debug?.update(state, this.options.simulation.phase, this.options.simulation.timeScale);
+  }
+
+  /**
+   * Commentaire : le rendu **lit** la réplique courante et l'affiche telle quelle.
+   *
+   * Aucune règle de parole n'est réécrite ici : la préemption, les cooldowns et la file sont tranchés
+   * par le speaker, dans `src/speaker/`. Le bandeau ne fait que constater — et remplacer
+   * immédiatement un texte par un autre, sans jamais remettre l'ancien.
+   */
+  private updateSubtitle(deltaMs: number): void {
+    const commentary = this.options.commentary;
+    if (commentary === null || this.subtitle === null) {
+      return;
+    }
+
+    commentary.update(deltaMs);
+    const text = commentary.currentLine()?.text ?? '';
+    // Le conteneur redessine son fond : on ne le réécrit que lorsque la réplique change réellement.
+    if (text !== this.shownSubtitle) {
+      this.shownSubtitle = text;
+      this.subtitle.show(text);
+    }
   }
 
   /**
@@ -182,6 +232,7 @@ export class RaceScene extends Scene {
     this.layoutWidth = width;
     this.layoutHeight = height;
     this.track?.layout(width, height);
+    this.subtitle?.layout(width, height);
     for (const sprite of this.sprites) {
       sprite.layout(height);
     }

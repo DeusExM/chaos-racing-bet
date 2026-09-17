@@ -646,7 +646,7 @@ permanente déjà présente (P004).
 
 ---
 
-### P009 — Observateur de faits et speaker `[~]`
+### P009 — Observateur de faits et speaker `[x]`
 
 **Statut : découpée en trois sous-parties, sans renumérotation.**
 * **P009-A ✅ — observateur de faits (terminé)** : `src/core/observer.ts`, l'extension de la section
@@ -665,8 +665,21 @@ permanente déjà présente (P004).
   pas la file), `feedAll` admet **tout** un lot avant de parler (un seul `poll`, donc un fait de 60
   du même pas ne peut pas être devancé par un fait de 50), et aucune durée de péremption arbitraire
   n'existe : la seule borne mémoire est `QUEUE_MAX`.
-* **P009-C ⏳ — textes et affichage** : `src/app/strings.fr.ts` (3 à 6 variantes par type) et
-  `src/render/view/SubtitleBanner.ts`.
+* **P009-C ✅ — textes et affichage (terminé)** : `src/app/strings.fr.ts` (catalogue français,
+  3 à 6 variantes par type, fonction pure `RaceFact → string` par variante), `src/app/RaceCommentary.ts`
+  (faits → `feedAll` → décision → tirage `speaker:lines` → texte, plus la durée d'affichage réelle),
+  `src/render/subtitle.ts` (forme du catalogue et de la ligne), `src/render/view/SubtitleBanner.ts`
+  (affichage minimal) et `RaceSimulation.onFacts()` (transmission des faits par lots d'un même pas).
+  Tests : `tests/unit/speakerTexts.test.ts`, `tests/unit/speakerRng.test.ts`,
+  `tests/unit/commentary.test.ts` et `tests/e2e/speaker.spec.ts`.
+
+  *Note d'intégration* : `RaceSimulation` reste la **seule** à drainer les faits du noyau ; elle les
+  transmet à un auditeur (`onFacts`) par lots d'un même pas. `RaceCommentary` (dans `app/`) possède
+  le speaker, le flux `speaker:lines` et le catalogue, et le rendu ne fait que lire la ligne courante
+  et l'afficher — aucune règle de parole n'est réécrite dans le rendu. La durée d'affichage
+  (`SUBTITLE_DISPLAY_MS = 2600 ms`) est un temps **réel**, côté UI : elle ne change ni les distances,
+  ni les événements, ni le classement, ce qu'un test E2E vérifie en comparant les distances finales
+  d'une course commentée à celles d'une course jouée hors rendu.
 
 **Objectif** : un speaker qui ne dit que des choses vraies et importantes, avec importance + cooldowns.
 
@@ -680,9 +693,10 @@ permanente déjà présente (P004).
 * ✅ (`P009-B`) `src/speaker/policy.ts`, `src/speaker/importance.ts`, `src/speaker/cooldowns.ts`,
   `src/speaker/Speaker.ts` : score, cooldown global + par type, déduplication, quotas, file de 3,
   préemption (`INTERRUPT_DELTA`). Le module n'importe que `core/types`.
-* ⏳ `src/app/strings.fr.ts` : 3 à 6 variantes par type de fait, placeholders, flux `speaker:lines`.
-* ⏳ `src/render/view/SubtitleBanner.ts` : **affichage minimal** des répliques (le soin visuel vient en
-  P012) — mais suffisant pour voir le speaker fonctionner.
+* ✅ (P009-C) `src/app/strings.fr.ts` : 3 à 6 variantes par type de fait, formatters purs, flux
+  `speaker:lines` consommé par `src/app/RaceCommentary.ts`.
+* ✅ (P009-C) `src/render/view/SubtitleBanner.ts` : **affichage minimal** des répliques (le soin
+  visuel vient en P012) — mais suffisant pour voir le speaker fonctionner.
 
 **Tests (DoD)**
 * ✅ (P009-A) Observateur : séquences d'état fabriquées à la main ⇒ faits exactement attendus (un test
@@ -706,9 +720,11 @@ permanente déjà présente (P004).
   borne supérieure, que P009-C ne pourra qu'abaisser. Aucune constante n'a été modifiée par P009-B :
   c'est à P010 de trancher entre assouplir les cooldowns de type, revoir la cible basse, ou accepter
   des courses à faible densité d'événements.
-* ⏳ **Véracité des textes** : les valeurs interpolées correspondent exactement aux champs du fait.
-* ⏳ **Indépendance textes / gameplay** : remplacer tous les textes par des variantes différentes ne
-  change **aucune** distance finale (test paramétré). Invariant clé.
+* ✅ (P009-C) **Véracité des textes** : les valeurs interpolées correspondent exactement aux champs du
+  fait (`tests/unit/speakerTexts.test.ts` : placeholders, valeurs dérivables, noms du roster, arrondis).
+* ✅ (P009-C) **Indépendance textes / gameplay** : remplacer tout le catalogue par un autre ne change
+  **aucune** distance finale (`tests/unit/speakerRng.test.ts`), et le flux `speaker:lines` est
+  indépendant des flux du noyau (100 tirages sans effet mesurable).
 * ✅ (P009-B) Préemption : une réplique d'importance 90 remplace une réplique d'importance 60 en
   cours ; une réplique de 70 ne la remplace pas. Aucune réplique sans fait, jamais.
 * ✅ (P009-B) Le module `speaker/` n'importe que `core/types` (test de frontière).

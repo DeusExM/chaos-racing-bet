@@ -3,7 +3,8 @@ import { createGame } from '../render/Game';
 import { RaceSimulation } from '../sim/RaceSimulation';
 import { SIM_PRESETS } from '../sim/config';
 import { installTestHooks, testHooksEnabled } from '../sim/testHooks';
-import { UI_TEXT_FR } from './strings.fr';
+import { RaceCommentary } from './RaceCommentary';
+import { SPEAKER_CATALOGUE_FR, UI_TEXT_FR } from './strings.fr';
 
 /**
  * Point d'entrée de l'application.
@@ -85,6 +86,14 @@ function bootstrap(): void {
   const preset = params.get(FAST_PARAM) === '1' ? SIM_PRESETS.fast : SIM_PRESETS.normal;
   const simulation = new RaceSimulation(seedText, preset);
 
+  // Le speaker est branché sur le flux de faits du noyau : `RaceSimulation` reste la seule à
+  // drainer les faits, et les lui transmet par lots d'un même pas. Le commentaire ne voit donc
+  // jamais l'état de course — seulement des faits mesurés et gelés.
+  const commentary = new RaceCommentary(simulation.view.seedValue, SPEAKER_CATALOGUE_FR);
+  simulation.onFacts((facts) => {
+    commentary.feedFacts(facts);
+  });
+
   installTestHooks(simulation, testHooksEnabled(window.location.search, import.meta.env.DEV));
 
   const hooksEnabled = testHooksEnabled(window.location.search, import.meta.env.DEV);
@@ -113,6 +122,7 @@ function bootstrap(): void {
     debugPanel: params.get(DEBUG_PARAM) === '1' ? elementById('debug') : null,
     debug: params.get(DEBUG_PARAM) === '1',
     exposeView: hooksEnabled,
+    commentary,
   });
 
   // « Lancer » démarre la course : `RaceSimulation` gère elle-même le compte à rebours réel.
@@ -123,6 +133,7 @@ function bootstrap(): void {
   // « Rejouer » repart de zéro avec exactement la même seed.
   replayButton?.addEventListener('click', () => {
     simulation.restart();
+    commentary.reset(simulation.view.seedValue);
     simulation.start();
   });
 

@@ -44,6 +44,12 @@ export interface ViewConfig {
   readonly TRACK_LABEL_POOL: number;
   /** Marge, en pixels, avant qu'un personnage soit signalé comme hors fenêtre. */
   readonly EDGE_MARGIN_PX: number;
+  /** Hauteur du bandeau de commentaire, en pixels : trois lignes maximum, jamais plus. */
+  readonly SUBTITLE_HEIGHT_PX: number;
+  /** Distance entre le bas du bandeau et le bas de la scène, en pixels. */
+  readonly SUBTITLE_BOTTOM_MARGIN_PX: number;
+  /** Taille de la police du commentaire, en pixels de la scène (le canvas est mis à l'échelle). */
+  readonly SUBTITLE_FONT_PX: number;
 }
 
 /** Constante d'implémentation : `2160 = 12 × 180`, calculée pour ne pas être recopiée à la main. */
@@ -65,6 +71,9 @@ export const VIEW: ViewConfig = Object.freeze({
   TRACK_LABEL_STEP_M: 250,
   TRACK_LABEL_POOL: 4,
   EDGE_MARGIN_PX: 22,
+  SUBTITLE_HEIGHT_PX: 76,
+  SUBTITLE_BOTTOM_MARGIN_PX: 8,
+  SUBTITLE_FONT_PX: 24,
 });
 
 /** Ordonnée écran d'une voie, répartie uniformément entre les deux ratios du décor. */

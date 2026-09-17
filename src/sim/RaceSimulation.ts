@@ -76,6 +76,16 @@ export class RaceSimulation {
    */
   private phaseBeforeUserPause: SimPhase = 'idle';
 
+  /**
+   * Destinataire des faits produits par le noyau, s'il y en a un.
+   *
+   * `RaceSimulation` reste la **seule** couche qui draine les faits du moteur : elle les transmet
+   * ensuite, par lots d'un même pas, à qui veut les commenter (P009-C). Le flux de faits ne peut donc
+   * pas être consommé deux fois, et un auditeur est un **observateur** : il ne reçoit que des faits
+   * gelés, sans aucun accès à l'état de course.
+   */
+  private factsListener: ((facts: readonly RaceFact[]) => void) | null = null;
+
   constructor(seed: string, config: SimConfig = SIM_CONFIG) {
     requireUsableConfig(config);
 
@@ -112,6 +122,17 @@ export class RaceSimulation {
   /** Secondes simulées par seconde réelle. */
   get timeScale(): number {
     return this.config.timeScale;
+  }
+
+  /**
+   * Branche (ou débranche avec `null`) l'observateur de faits.
+   *
+   * Il est appelé **une fois par pas** qui produit au moins un fait, avec le lot complet de ce pas.
+   * Un pas sans fait ne déclenche aucun appel : rien ne circule inutilement, et l'auditeur ne peut
+   * pas confondre « pas silencieux » et « course à l'arrêt ».
+   */
+  onFacts(listener: ((facts: readonly RaceFact[]) => void) | null): void {
+    this.factsListener = listener;
   }
 
   /**
@@ -270,7 +291,15 @@ export class RaceSimulation {
       // Après **chaque** pas, jamais en fin de frame : en mode accéléré une seule frame demande
       // des centaines de pas et peut donc traverser une borne. Tout ce qui suit la borne
       // appartiendrait au segment suivant, or il doit être mis en pause.
-      const checkpoint = checkpointReachedBy(this.engine.drainFacts());
+      const facts = this.engine.drainFacts();
+
+      // Les faits d'un pas partent **en un seul lot** : c'est ce qui permet à l'observateur de
+      // parole de voir tout le pas avant de choisir (P009-C). Aucun lot vide n'est transmis.
+      if (facts.length > 0) {
+        this.factsListener?.(facts);
+      }
+
+      const checkpoint = checkpointReachedBy(facts);
       if (checkpoint !== null) {
         this.enterCheckpointPause(checkpoint);
         return;

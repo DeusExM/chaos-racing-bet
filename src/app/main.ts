@@ -3,8 +3,11 @@ import { createGame } from '../render/Game';
 import { RaceSimulation } from '../sim/RaceSimulation';
 import { SIM_PRESETS } from '../sim/config';
 import { installTestHooks, testHooksEnabled } from '../sim/testHooks';
-import { RaceCommentary } from './RaceCommentary';
+import { RaceCommentary, type CommentaryVoice } from './RaceCommentary';
+import { SettingsPanel } from './SettingsPanel';
+import { allowsVoice, createSettingsStorage, SettingsStore, type SettingsStorage } from './settings';
 import { SPEAKER_CATALOGUE_FR, UI_TEXT_FR } from './strings.fr';
+import { createVoiceOutput, webSpeechScope } from './tts';
 
 /**
  * Point d'entrée de l'application.
@@ -70,6 +73,39 @@ function querySelector(selector: string): HTMLElement | null {
   return element instanceof HTMLElement ? element : null;
 }
 
+/**
+ * Lit `localStorage` sans jamais lever.
+ *
+ * Certains navigateurs refusent l'accès à `localStorage` lui-même (iframe restreinte, réglage de
+ * confidentialité) : le simple fait de le lire peut produire une exception, avant même tout appel.
+ * Sans ce garde-fou, le jeu ne démarrerait pas à cause d'un réglage d'interface facultatif.
+ */
+function readBrowserSettingsStorage(): SettingsStorage | null {
+  try {
+    return createSettingsStorage(window);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Branche la voix sur les réglages.
+ *
+ * La voix n'est qu'une **sortie** : elle lit si une émission est autorisée et vocalise la ligne que
+ * le speaker a déjà choisie. Elle ne décide rien, ne retarde rien, et n'existe pas du tout si le
+ * navigateur n'expose pas le Web Speech API.
+ */
+function createCommentaryVoice(
+  settings: SettingsStore,
+  output: ReturnType<typeof createVoiceOutput>,
+): CommentaryVoice {
+  return {
+    allowsVoice: () => allowsVoice(settings.get()),
+    speak: (text) => output?.speak(text),
+    cancel: () => output?.cancel(),
+  };
+}
+
 function bootstrap(): void {
   const parent = elementById('game');
   if (parent === null) {
@@ -90,10 +126,29 @@ function bootstrap(): void {
   const preset = params.get(FAST_PARAM) === '1' ? SIM_PRESETS.fast : SIM_PRESETS.normal;
   const simulation = new RaceSimulation(seedText, preset);
 
+  // Réglages locaux (P012) : lus une fois au démarrage, persistés à chaque changement. Ils ne
+  // touchent ni la simulation, ni la seed, ni le speaker.
+  const settings = new SettingsStore(readBrowserSettingsStorage());
+  const voiceOutput = createVoiceOutput(webSpeechScope(window));
+
+  const hudRoot = querySelector('.hud');
+
+  // Couper le son coupe réellement l'énonciation en cours : le mode muet ne doit pas laisser une
+  // phrase continuer après avoir été activé.
+  settings.subscribe((current) => {
+    if (!allowsVoice(current)) {
+      voiceOutput?.cancel();
+    }
+  });
+
   // Le speaker est branché sur le flux de faits du noyau : `RaceSimulation` reste la seule à
   // drainer les faits, et les lui transmet par lots d'un même pas. Le commentaire ne voit donc
   // jamais l'état de course — seulement des faits mesurés et gelés.
-  const commentary = new RaceCommentary(simulation.view.seedValue, SPEAKER_CATALOGUE_FR);
+  const commentary = new RaceCommentary(
+    simulation.view.seedValue,
+    SPEAKER_CATALOGUE_FR,
+    createCommentaryVoice(settings, voiceOutput),
+  );
   simulation.onFacts((facts) => {
     commentary.feedFacts(facts);
   });
@@ -115,11 +170,17 @@ function bootstrap(): void {
     replayButton.textContent = UI_TEXT_FR.replayButton;
   }
 
+  // Le panneau de réglages est créé par `app/`, qui possède déjà le DOM et la persistance : le rendu
+  // n'a donc jamais à connaître un réglage.
+  if (hudRoot !== null) {
+    new SettingsPanel(hudRoot, settings, UI_TEXT_FR);
+  }
+
   createGame({
     parent,
     simulation,
     text: UI_TEXT_FR,
-    hudRoot: querySelector('.hud'),
+    hudRoot,
     status: elementById('race-status'),
     banner: elementById('checkpoint-banner'),
     leaderboard: elementById('leaderboard'),

@@ -292,7 +292,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P009 | Observateur de faits + speaker *(P009-A ✅ observateur, P009-B ✅ speaker, P009-C ⏳ textes)* | P008 | commentaires à cooldowns |
 | P010 | Équilibrage statistique + verrouillage des constantes `[x]` *(25/25 critères sur 1000 seeds)* | P009 | `tools/balance.ts` + seuils testés |
 | P011 | HUD complet + panneau debug `[x]` | P010 | mini-carte, classement détaillé, chrono |
-| P012 | Affichage du speaker + réglages | P011 | bannières de commentaires |
+| P012 | Affichage du speaker + réglages `[x]` | P011 | bannières de commentaires |
 | P013 | Arrivée et podium | P012 | course complète jouable |
 | **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
 | P014 | Identité visuelle et animations des 6 personnages | P013.5 | personnages distincts et drôles |
@@ -676,10 +676,12 @@ permanente déjà présente (P004).
   *Note d'intégration* : `RaceSimulation` reste la **seule** à drainer les faits du noyau ; elle les
   transmet à un auditeur (`onFacts`) par lots d'un même pas. `RaceCommentary` (dans `app/`) possède
   le speaker, le flux `speaker:lines` et le catalogue, et le rendu ne fait que lire la ligne courante
-  et l'afficher — aucune règle de parole n'est réécrite dans le rendu. La durée d'affichage
-  (`SUBTITLE_DISPLAY_MS = 2600 ms`) est un temps **réel**, côté UI : elle ne change ni les distances,
-  ni les événements, ni le classement, ce qu'un test E2E vérifie en comparant les distances finales
-  d'une course commentée à celles d'une course jouée hors rendu.
+  et l'afficher — aucune règle de parole n'est réécrite dans le rendu. La durée d'affichage est un
+  temps **réel**, côté UI : elle ne change ni les distances, ni les événements, ni le classement, ce
+  qu'un test E2E vérifie en comparant les distances finales d'une course commentée à celles d'une
+  course jouée hors rendu. P012 a remplacé la constante fixe `SUBTITLE_DISPLAY_MS = 2600 ms` par une
+  durée **adaptée à la longueur de la réplique** (`subtitleDurationMs`, bornée à `[2000 ; 5200] ms`) :
+  même nature — purement visuelle —, mais une phrase longue ne disparaît plus avant d'être lisible.
 
 **Objectif** : un speaker qui ne dit que des choses vraies et importantes, avec importance + cooldowns.
 
@@ -862,6 +864,8 @@ mesures prises à deux instants différents produisait des tests instables.
 
 ### P012 — Affichage du speaker et réglages
 
+**Statut : `[x]`** (terminé — voir le compte rendu ci-dessous)
+
 **Livrables**
 * `SubtitleBanner` soigné : nom du personnage mis en avant, durée adaptée à la longueur, file visible,
   disparition propre.
@@ -874,6 +878,51 @@ mesures prises à deux instants différents produisait des tests instables.
 * Jamais deux bannières en < 6 s (hors préemption, testée).
 * Activer/désactiver TTS et muet ne change aucune distance finale.
 * Si `speechSynthesis` est absent, aucune exception.
+
+**Compte rendu**
+
+Créé : `src/app/settings.ts`, `src/app/tts.ts`, `src/app/SettingsPanel.ts`,
+`src/render/view/subtitleModel.ts`, `tests/unit/settings.test.ts`, `tests/unit/tts.test.ts`,
+`tests/unit/subtitleModel.test.ts`, `tests/e2e/subtitle.spec.ts`, `tests/e2e/settings.spec.ts`.
+Modifié : `src/render/view/SubtitleBanner.ts`, `src/render/subtitle.ts`, `src/app/RaceCommentary.ts`,
+`src/app/main.ts`, `src/app/strings.fr.ts`, `src/render/uiText.ts`, `src/render/viewConfig.ts`,
+`src/render/viewDebug.ts`, `src/render/scenes/RaceScene.ts`, `src/styles.css`, `tests/e2e/helpers.ts`,
+`tests/unit/commentary.test.ts`.
+
+* **Le bandeau est passé du canvas au DOM, dans la grille du HUD.** Motif : le HUD de P011 est en HTML
+  et sa géométrie dépend du viewport (`clamp`/`vw`), pas des unités logiques du canvas — un texte
+  dessiné dans la scène ne pouvait donc pas être *garanti* hors des blocs du HUD à toutes les
+  résolutions. Le bandeau occupe désormais la rangée souple de `.hud`, aligné en bas : il grandit vers
+  le haut sans déplacer un seul bloc, et masqué (`hidden`) il ne réserve aucune place. Il reste
+  lisible en 844×390 (`clamp(0.6rem, 1.2vw, 0.95rem)`) et comparable par le DOM.
+* **Modèle pur** : `subtitleModel.ts` porte la durée adaptée à la longueur (`subtitleDurationMs`,
+  bornée à `[2000 ; 5200] ms`), le personnage mis en avant, l'indicateur de file et la machine à
+  états des transitions (`appear` / `hold` / `replace` / `leave`, opacité avancée par le temps réel).
+* **Personnage mis en avant** : c'est le premier personnage du fait dont le nom **apparaît réellement
+  dans la variante tirée**. Certaines variantes de `CLOSE_RACE` ne citent personne : le bandeau
+  n'affiche alors aucun nom plutôt qu'un nom plaqué.
+* **File visible** : le bandeau lit `Speaker.queuedCount()`, la vraie file du speaker. Aucune queue
+  n'est dupliquée dans le rendu, et un test E2E vérifie que le nombre affiché est exactement celui du
+  modèle de la frame.
+* **Sémantique de `mute`** : « aucune sortie vocale ». Le speaker, les faits, les cooldowns, la file,
+  les préemptions et les **sous-titres texte** continuent à l'identique ; seul `allowsVoice()` change
+  de valeur. Aucune sémantique préexistante n'existait : rien n'a été modifié en silence.
+* **TTS** : `speechSynthesis`/`SpeechSynthesisUtterance` sont **injectés** (`SpeechApiScope`), jamais
+  lus directement. Choix de voix déterministe (première `fr-*`, sinon première disponible, sinon la
+  voix par défaut avec `lang = fr-FR`), aucun tirage consommé. API absente ou incomplète ⇒ `null`,
+  donc aucune exception. Une émission coupe d'abord l'énonciation en cours.
+* **Écart assumé et documenté** : la constante fixe `SUBTITLE_DISPLAY_MS = 2600 ms` disparaît au
+  profit de la durée adaptée à la longueur. La note d'intégration de P009-C a été mise à jour dans le
+  même changement. La nature est inchangée — temps réel d'interface, hors `tSim`, hors cooldowns.
+* **Tests existants adaptés** : `tests/unit/commentary.test.ts` utilisait la constante de durée pour
+  faire expirer une réplique ; il passe désormais par `remainingDisplayMs()`, ce qui le rend
+  indépendant de la longueur du texte produit.
+
+Résultats réels : `npm run verify` **vert** — `typecheck` 0 erreur ; **569 tests unitaires** (36
+fichiers) ; `vite build` OK ; **51 tests E2E** OK, aucune erreur console. Invariance mesurée : pour
+`OVERTAKE_SEED`, quatre courses réelles (défauts, TTS, muet, muet + TTS) donnent des distances et un
+classement **strictement identiques**, et **10 800 pas** exactement dans les quatre cas. Aucun
+blocage.
 
 ---
 

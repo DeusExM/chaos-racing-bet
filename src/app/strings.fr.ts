@@ -64,6 +64,14 @@ export const UI_TEXT_FR: UiText = Object.freeze({
 
   // Titre du bandeau de commentaire (P009-C) : c'est un libellé d'interface, pas une réplique.
   speakerBannerTitle: 'MICRO',
+
+  // Réglages locaux (P012). Aucun de ces libellés n'est une réplique : ils décrivent l'interface.
+  queuedLines: '{n} en attente',
+  settingsTitle: 'Réglages',
+  muteLabel: 'Muet',
+  ttsLabel: 'Voix',
+  settingsOn: 'activé',
+  settingsOff: 'coupé',
 });
 
 // -------------------------------------------------------------------------------------------

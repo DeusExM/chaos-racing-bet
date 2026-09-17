@@ -1,4 +1,4 @@
-import type { RaceFact, RaceFactType } from '../core/types';
+import type { CharacterId, RaceFact, RaceFactType } from '../core/types';
 import type { SpeakerDecision } from '../speaker/Speaker';
 
 /**
@@ -31,4 +31,23 @@ export interface SpeakerLine {
   readonly variantIndex: number;
   /** Texte français déjà formaté, prêt à afficher. */
   readonly text: string;
+  /**
+   * Personnage réellement **nommé par cette phrase**, ou `null`.
+   *
+   * Il n'est pas déduit du type de fait mais du texte : un `CLOSE_RACE` peut citer deux noms comme
+   * n'en citer aucun, selon la variante tirée. Le personnage mis en avant est donc toujours celui que
+   * la phrase prononce, jamais un personnage plaqué à côté d'une réplique qui ne le mentionne pas.
+   */
+  readonly characterId: CharacterId | null;
+  /** Nom affiché de ce personnage, ou `null` : le rendu ne nomme jamais un personnage lui-même. */
+  readonly characterName: string | null;
+  /**
+   * Vrai si cette réplique a **coupé** la précédente (règle `INTERRUPT_DELTA` du speaker).
+   *
+   * L'information vient du speaker, pas du rendu : elle sert à expliquer une transition plus rapide
+   * et à distinguer, dans les tests, une préemption d'un démarrage normal.
+   */
+  readonly preempted: boolean;
+  /** Instant simulé du démarrage effectif de la réplique (celui de la décision). */
+  readonly startedAtS: number;
 }

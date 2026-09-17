@@ -44,12 +44,36 @@ export interface ViewConfig {
   readonly TRACK_LABEL_POOL: number;
   /** Marge, en pixels, avant qu'un personnage soit signalé comme hors fenêtre. */
   readonly EDGE_MARGIN_PX: number;
-  /** Hauteur du bandeau de commentaire, en pixels : trois lignes maximum, jamais plus. */
-  readonly SUBTITLE_HEIGHT_PX: number;
-  /** Distance entre le bas du bandeau et le bas de la scène, en pixels. */
-  readonly SUBTITLE_BOTTOM_MARGIN_PX: number;
-  /** Taille de la police du commentaire, en pixels de la scène (le canvas est mis à l'échelle). */
+  /**
+   * Taille de la police du commentaire, en pixels de la scène (le canvas est mis à l'échelle).
+   *
+   * Le bandeau est **dessiné dans le canvas**, donc solidaire de l'arène : il ne peut pas se
+   * désynchroniser du décor. Sa lisibilité aux petites tailles vient de cette taille de police, pas
+   * d'une mise en page HTML séparée.
+   */
   readonly SUBTITLE_FONT_PX: number;
+  /** Taille de police du nom du personnage mis en avant, en pixels de la scène. */
+  readonly SUBTITLE_NAME_FONT_PX: number;
+  /** Taille de police de l'indicateur de file d'attente, en pixels de la scène. */
+  readonly SUBTITLE_QUEUE_FONT_PX: number;
+  /** Marge intérieure du bandeau, en pixels de la scène. */
+  readonly SUBTITLE_PADDING_PX: number;
+  /** Largeur maximale du bandeau, en fraction de la largeur de la scène. */
+  readonly SUBTITLE_MAX_WIDTH_RATIO: number;
+  /** Distance entre le haut de la scène et le haut du bandeau, en pixels de la scène. */
+  readonly SUBTITLE_TOP_OFFSET_PX: number;
+  /** Espace vertical entre le nom mis en avant et la réplique, en pixels de la scène. */
+  readonly SUBTITLE_NAME_GAP_PX: number;
+  /** Durée d'affichage minimale d'une réplique, en millisecondes de temps **réel**. */
+  readonly SUBTITLE_MIN_MS: number;
+  /** Durée d'affichage ajoutée par caractère de la réplique, en millisecondes. */
+  readonly SUBTITLE_PER_CHAR_MS: number;
+  /** Durée d'affichage maximale d'une réplique, en millisecondes. */
+  readonly SUBTITLE_MAX_MS: number;
+  /** Durée d'apparition du bandeau, en millisecondes réelles. */
+  readonly SUBTITLE_FADE_IN_MS: number;
+  /** Durée de disparition du bandeau, en millisecondes réelles. */
+  readonly SUBTITLE_FADE_OUT_MS: number;
 }
 
 /** Constante d'implémentation : `2160 = 12 × 180`, calculée pour ne pas être recopiée à la main. */
@@ -71,9 +95,18 @@ export const VIEW: ViewConfig = Object.freeze({
   TRACK_LABEL_STEP_M: 250,
   TRACK_LABEL_POOL: 4,
   EDGE_MARGIN_PX: 22,
-  SUBTITLE_HEIGHT_PX: 76,
-  SUBTITLE_BOTTOM_MARGIN_PX: 8,
   SUBTITLE_FONT_PX: 24,
+  SUBTITLE_NAME_FONT_PX: 22,
+  SUBTITLE_QUEUE_FONT_PX: 15,
+  SUBTITLE_PADDING_PX: 12,
+  SUBTITLE_MAX_WIDTH_RATIO: 0.5,
+  SUBTITLE_TOP_OFFSET_PX: 52,
+  SUBTITLE_NAME_GAP_PX: 6,
+  SUBTITLE_MIN_MS: 2000,
+  SUBTITLE_PER_CHAR_MS: 45,
+  SUBTITLE_MAX_MS: 5200,
+  SUBTITLE_FADE_IN_MS: 160,
+  SUBTITLE_FADE_OUT_MS: 220,
 });
 
 /** Ordonnée écran d'une voie, répartie uniformément entre les deux ratios du décor. */

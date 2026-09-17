@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { RaceCommentary, SUBTITLE_DISPLAY_MS } from '../../src/app/RaceCommentary';
-import { SPEAKER_CATALOGUE_FR } from '../../src/app/strings.fr';
+import { RaceCommentary, type CommentaryVoice } from '../../src/app/RaceCommentary';
+import { SPEAKER_CATALOGUE_FR, characterNameFr } from '../../src/app/strings.fr';
 import { forkStream } from '../../src/core/rng';
 import type { CharacterId, RaceFact, RaceFactType } from '../../src/core/types';
 import { RaceSimulation } from '../../src/sim/RaceSimulation';
 import { SIM_FAST_CONFIG } from '../../src/sim/config';
 import type { SpeakerLine } from '../../src/render/subtitle';
+import { subtitleDurationMs } from '../../src/render/view/subtitleModel';
+import { VIEW } from '../../src/render/viewConfig';
 
 /**
  * P009-C — intégration `RaceFact → SpeakerDecision → texte → bandeau`.
@@ -117,7 +119,7 @@ describe('P009-C : intégration visible du speaker', () => {
     expect(commentary.currentLine()?.text).toBe(before?.text);
 
     // À l'expiration, le fait en attente prend la place : il n'a pas été perdu.
-    commentary.update(SUBTITLE_DISPLAY_MS);
+    commentary.update(commentary.remainingDisplayMs() + 1);
     expect(commentary.currentLine()?.decision.fact.type).toBe('BIG_COMEBACK');
   });
 
@@ -132,7 +134,7 @@ describe('P009-C : intégration visible du speaker', () => {
     commentary.feedFacts([fact('LAST_COMEBACK', 30, 70, [4, 2])]);
     expect(commentary.currentLine()?.text).toBe(first?.text);
 
-    commentary.update(SUBTITLE_DISPLAY_MS - 1);
+    commentary.update(commentary.remainingDisplayMs() - 1);
     expect(commentary.currentLine()?.text).toBe(first?.text);
 
     commentary.update(1);
@@ -158,17 +160,17 @@ describe('P009-C : intégration visible du speaker', () => {
     const during = commentary.currentLine();
     if (during?.decision.fact.type === first?.decision.fact.type) {
       // Le fait suivant n'a pas coupé : à l'expiration, la place se libère et l'ancien texte ne revient pas.
-      commentary.update(SUBTITLE_DISPLAY_MS);
+      commentary.update(commentary.remainingDisplayMs() + 1);
       const afterExpiry = commentary.currentLine();
       expect(afterExpiry?.decision.fact.type ?? null).not.toBe(first?.decision.fact.type);
     } else {
       expect(during?.decision.fact.type).toBe(follow?.type);
-      commentary.update(SUBTITLE_DISPLAY_MS);
+      commentary.update(commentary.remainingDisplayMs() + 1);
       expect(commentary.currentLine()?.decision.fact.type ?? null).not.toBe(first?.decision.fact.type);
     }
 
     // Un nouveau fait, une fois la place libre, redémarre réellement le commentaire.
-    commentary.update(SUBTITLE_DISPLAY_MS);
+    commentary.update(commentary.remainingDisplayMs() + 1);
     commentary.feedFacts([fact('FINISH', 40, 80, [4.2, 2160, 2155.8])]);
     expect(commentary.currentLine()?.decision.fact.type).toBe('FINISH');
   });
@@ -220,14 +222,14 @@ describe('P009-C : intégration visible du speaker', () => {
 
     // Plus aucun fait n'arrive ensuite : le seul instant connu du commentaire reste t=2.
     // A expire alors que la course est déjà bien plus loin — un `poll` au temps courant le prouve.
-    commentary.update(SUBTITLE_DISPLAY_MS, 15);
+    commentary.update(commentary.remainingDisplayMs() + 1, 15);
     expect(commentary.currentLine()?.decision.fact.type).toBe('BIG_COMEBACK');
 
     // Preuve du bug corrigé : repoller avec l'ancien instant (t=2) laissait B en file pour toujours.
     const stale = director();
     stale.commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
     stale.commentary.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
-    stale.commentary.update(SUBTITLE_DISPLAY_MS, 2);
+    stale.commentary.update(stale.commentary.remainingDisplayMs() + 1, 2);
     expect(stale.commentary.currentLine()).toBeNull();
   });
 
@@ -239,7 +241,7 @@ describe('P009-C : intégration visible du speaker', () => {
 
     // Pause : `tSim` ne bouge pas, seules les frames réelles défilent. Les cooldowns simulés ne
     // progressent donc pas, et B ne peut pas démarrer, quel que soit le nombre d'appels.
-    commentary.update(SUBTITLE_DISPLAY_MS, 3);
+    commentary.update(commentary.remainingDisplayMs() + 1, 3);
     for (let frame = 0; frame < 600; frame += 1) {
       commentary.update(16, 3);
       expect(commentary.currentLine()).toBeNull();
@@ -260,7 +262,9 @@ describe('P009-C : intégration visible du speaker', () => {
     commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
     commentary.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
 
-    // Beaucoup de polls infructueux (tSim trop tôt, puis pause) : aucun tirage ne doit être consommé.
+    // La première réplique expire (sa durée dépend de la longueur du texte), puis beaucoup de polls
+    // infructueux (tSim trop tôt, puis pause) : aucun tirage ne doit être consommé.
+    commentary.update(commentary.remainingDisplayMs() + 1, 3);
     for (let frame = 0; frame < 200; frame += 1) {
       commentary.update(16, 3);
     }
@@ -277,6 +281,162 @@ describe('P009-C : intégration visible du speaker', () => {
     expect(second?.variantIndex).toBe(secondVariant);
     expect(firstVariant).toBeGreaterThanOrEqual(0);
     expect(firstVariant).toBeLessThan(SPEAKER_CATALOGUE_FR.lines.LEADER_CHANGE.length);
+  });
+});
+
+/**
+ * Faux appareil vocal : il enregistre ce qu'on lui demande de dire, sans jamais synthétiser quoi que
+ * ce soit. Le mode muet n'est ici qu'une question d'**autorisation**, pas de capacités du navigateur.
+ */
+function fakeVoice(allowed: boolean): {
+  voice: CommentaryVoice;
+  spoken: string[];
+  cancels: () => number;
+} {
+  const spoken: string[] = [];
+  let cancels = 0;
+  return {
+    voice: {
+      allowsVoice: () => allowed,
+      speak: (text) => spoken.push(text),
+      cancel: () => {
+        cancels += 1;
+      },
+    },
+    spoken,
+    cancels: () => cancels,
+  };
+}
+
+describe('P012 : voix, muet et durée d’affichage', () => {
+  it('reste totalement silencieux quand aucune voix n’est branchée (défaut de la V1)', () => {
+    const commentary = new RaceCommentary(1, SPEAKER_CATALOGUE_FR);
+    expect(() => {
+      commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+    }).not.toThrow();
+    expect(commentary.currentLine()).not.toBeNull();
+  });
+
+  it('vocalise la réplique exactement telle qu’elle est affichée', () => {
+    const fake = fakeVoice(true);
+    const commentary = new RaceCommentary(1, SPEAKER_CATALOGUE_FR, fake.voice);
+
+    commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+    const line = commentary.currentLine();
+    expect(line).not.toBeNull();
+    expect(fake.spoken).toEqual([line?.text]);
+  });
+
+  it('reste muet sans changer une seule décision du speaker', () => {
+    const muted = fakeVoice(false);
+    const speaking = fakeVoice(true);
+
+    const mutedCommentary = new RaceCommentary(1, SPEAKER_CATALOGUE_FR, muted.voice);
+    const speakingCommentary = new RaceCommentary(1, SPEAKER_CATALOGUE_FR, speaking.voice);
+
+    const feed = [
+      fact('LEADER_CHANGE', 0, 60, [3.24, 12]),
+      fact('LAST_COMEBACK', 30, 80, [4, 2]),
+    ];
+    for (const item of feed) {
+      mutedCommentary.feedFacts([item]);
+      speakingCommentary.feedFacts([item]);
+    }
+
+    // Le muet ne coupe rien : mêmes décisions, même texte, même file, même préemption.
+    expect(muted.spoken).toEqual([]);
+    expect(mutedCommentary.currentLine()?.text).toBe(speakingCommentary.currentLine()?.text);
+    expect(mutedCommentary.currentLine()?.decision.fact.type).toBe(
+      speakingCommentary.currentLine()?.decision.fact.type,
+    );
+    expect(mutedCommentary.currentLine()?.preempted).toBe(
+      speakingCommentary.currentLine()?.preempted,
+    );
+    expect(mutedCommentary.linesStarted()).toBe(speakingCommentary.linesStarted());
+    expect(mutedCommentary.queuedCount()).toBe(speakingCommentary.queuedCount());
+  });
+
+  it('coupe l’énonciation en cours quand la réplique expire', () => {
+    const fake = fakeVoice(true);
+    const commentary = new RaceCommentary(1, SPEAKER_CATALOGUE_FR, fake.voice);
+
+    commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+    expect(fake.cancels()).toBe(0);
+
+    commentary.update(commentary.remainingDisplayMs() + 1);
+    expect(commentary.currentLine()).toBeNull();
+    expect(fake.cancels()).toBe(1);
+  });
+
+  it('signale une préemption et vocalise la nouvelle réplique', () => {
+    const fake = fakeVoice(true);
+    const commentary = new RaceCommentary(1, SPEAKER_CATALOGUE_FR, fake.voice);
+
+    commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+    expect(commentary.currentLine()?.preempted).toBe(false);
+
+    commentary.feedFacts([fact('LAST_COMEBACK', 30, 80, [4, 2])]);
+    const after = commentary.currentLine();
+    expect(after?.preempted).toBe(true);
+    expect(fake.spoken).toHaveLength(2);
+    expect(fake.spoken[1]).toBe(after?.text);
+  });
+
+  it('démarre sans préemption sur un fait qui a attendu son tour', () => {
+    const subordinate = new RaceCommentary(1, SPEAKER_CATALOGUE_FR);
+
+    subordinate.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+    subordinate.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
+    expect(subordinate.currentLine()?.preempted).toBe(false);
+
+    // Le fait suivant a réellement été mis en file : à son propre instant, il est encore retenu par
+    // le cooldown global du speaker, donc il attend au lieu d'être jeté.
+    subordinate.update(subordinate.remainingDisplayMs() + 1, 2);
+    expect(subordinate.currentLine()).toBeNull();
+    expect(subordinate.queuedCount()).toBe(1);
+    subordinate.update(16, 15);
+    const next = subordinate.currentLine();
+    expect(next?.decision.fact.type).toBe('BIG_COMEBACK');
+    // Elle n'a pas coupé : elle a attendu la place.
+    expect(next?.preempted).toBe(false);
+    expect(subordinate.queuedCount()).toBe(0);
+  });
+
+  it('adapte la durée d’affichage à la longueur de la réplique produite', () => {
+    const commentary = new RaceCommentary(1, SPEAKER_CATALOGUE_FR);
+    commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+
+    const line = commentary.currentLine();
+    expect(line).not.toBeNull();
+    expect(commentary.remainingDisplayMs()).toBe(subtitleDurationMs(line?.text ?? ''));
+    // Et la durée reste dans les bornes d'interface, jamais dans les règles du speaker.
+    expect(commentary.remainingDisplayMs()).toBeGreaterThanOrEqual(VIEW.SUBTITLE_MIN_MS);
+    expect(commentary.remainingDisplayMs()).toBeLessThanOrEqual(VIEW.SUBTITLE_MAX_MS);
+  });
+
+  it('met en avant le personnage réellement nommé par la réplique produite', () => {
+    const commentary = new RaceCommentary(1, SPEAKER_CATALOGUE_FR);
+
+    // Fait en lot : le speaker choisit le plus important, et la variante nomme l'un des personnages.
+    commentary.feedFacts([fact('LEADER_MALUS', 0, 70, [-0.6, 3, 1], ['c1'])]);
+    const line = commentary.currentLine();
+    expect(line).not.toBeNull();
+    expect(line?.characterId).toBe('c1');
+    expect(line?.characterName).toBe(characterNameFr('c1'));
+    expect(line?.text).toContain(line?.characterName ?? '');
+  });
+
+  it('n’affiche aucun nom quand la variante tirée ne cite personne', () => {
+    const commentary = new RaceCommentary(1, SPEAKER_CATALOGUE_FR);
+
+    // `CLOSE_RACE` possède des variantes sans aucun nom : le fait porte pourtant deux personnages.
+    const closeRace = fact('CLOSE_RACE', 0, 60, [12.4, 6], ['c0', 'c2']);
+    commentary.feedFacts([closeRace]);
+    const line = commentary.currentLine();
+    expect(line).not.toBeNull();
+
+    const cited = (line?.characterName ?? '') !== '' && (line?.text.includes(line?.characterName ?? ''));
+    expect(line?.characterId === null).toBe(!cited);
   });
 });
 

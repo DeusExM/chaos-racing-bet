@@ -14,6 +14,7 @@ import { DebugPanel } from '../view/DebugPanel';
 import { Hud } from '../view/Hud';
 import { buildHudModel } from '../view/hudModel';
 import { SubtitleBanner } from '../view/SubtitleBanner';
+import { buildSubtitleModel, subtitleLineView } from '../view/subtitleModel';
 import { TrackView } from '../view/TrackView';
 
 /**
@@ -31,6 +32,13 @@ export interface CommentaryView {
   update(realDtMs: number, simNowS?: number): void;
   /** Réplique à afficher dans cette frame, ou `null`. */
   currentLine(): SpeakerLine | null;
+  /**
+   * Nombre de répliques réellement en attente dans la file du speaker.
+   *
+   * Le rendu le **lit** pour l'afficher : il ne tient aucune file de son côté, donc l'indicateur ne
+   * peut pas annoncer un commentaire que le speaker n'a pas.
+   */
+  queuedCount(): number;
 }
 
 /** Tout ce dont la scène de course a besoin, fourni par `src/app/`. */
@@ -103,9 +111,6 @@ export class RaceScene extends Scene {
 
   private subtitle: SubtitleBanner | null = null;
 
-  /** Dernier texte poussé au bandeau : évite de redessiner le fond à chaque frame. */
-  private shownSubtitle = '';
-
   private layoutHeight = 0;
 
   private layoutWidth = 0;
@@ -118,8 +123,10 @@ export class RaceScene extends Scene {
   create(): void {
     this.track = new TrackView(this, this.options.text);
 
-    if (this.options.commentary !== null) {
-      this.subtitle = new SubtitleBanner(this);
+    // Le bandeau de commentaire vit dans l'arène, à côté du HUD (voir `SubtitleBanner`) : il n'est
+    // créé que lorsqu'une course commentée existe, et il partage donc la grille du HUD.
+    if (this.options.commentary !== null && this.options.hudRoot !== null) {
+      this.subtitle = new SubtitleBanner(this.options.hudRoot);
     }
 
     this.sprites = CHARACTERS.map(
@@ -150,6 +157,13 @@ export class RaceScene extends Scene {
           })),
         camera: () => ({ leftM: this.rig.left, windowM: this.rig.span }),
         subtitle: () => this.subtitle?.visibleText() ?? '',
+        // La réplique affichée porte son fait source : un test peut recalculer le texte attendu et
+        // vérifier que ce qui est montré vient bien d'un fait réellement mesuré.
+        subtitleLine: () =>
+          subtitleLineView(
+            this.options.commentary?.currentLine() ?? null,
+            this.options.commentary?.queuedCount() ?? 0,
+          ),
         // La photographie du HUD vient du HUD lui-même : elle décrit ce qu'il vient d'écrire, et non
         // une reconstruction parallèle du modèle de la frame.
         hud: () => this.hud?.snapshot() ?? null,
@@ -219,6 +233,9 @@ export class RaceScene extends Scene {
    * Aucune règle de parole n'est réécrite ici : la préemption, les cooldowns et la file sont tranchés
    * par le speaker, dans `src/speaker/`. Le bandeau ne fait que constater — et remplacer
    * immédiatement un texte par un autre, sans jamais remettre l'ancien.
+   *
+   * Le modèle d'affichage est reconstruit à chaque frame depuis la ligne courante et le nombre réel
+   * de répliques en file : c'est le bandeau qui décide s'il doit réécrire son DOM, pas la scène.
    */
   private updateSubtitle(deltaMs: number, simNowS: number): void {
     const commentary = this.options.commentary;
@@ -227,12 +244,14 @@ export class RaceScene extends Scene {
     }
 
     commentary.update(deltaMs, simNowS);
-    const text = commentary.currentLine()?.text ?? '';
-    // Le conteneur redessine son fond : on ne le réécrit que lorsque la réplique change réellement.
-    if (text !== this.shownSubtitle) {
-      this.shownSubtitle = text;
-      this.subtitle.show(text);
-    }
+    this.subtitle.render(
+      buildSubtitleModel(
+        commentary.currentLine(),
+        commentary.queuedCount(),
+        this.options.text.queuedLines,
+      ),
+      deltaMs,
+    );
   }
 
   /**
@@ -260,7 +279,6 @@ export class RaceScene extends Scene {
     this.layoutWidth = width;
     this.layoutHeight = height;
     this.track?.layout(width, height);
-    this.subtitle?.layout(width, height);
     for (const sprite of this.sprites) {
       sprite.layout(height);
     }

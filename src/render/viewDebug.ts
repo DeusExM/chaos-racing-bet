@@ -1,5 +1,6 @@
 import type { CharacterId } from '../core/types';
 import type { HudDebugSnapshot } from './view/Hud';
+import type { SubtitleLineView } from './view/subtitleModel';
 
 /**
  * Debug du **rendu** : `window.__CHAOS_RACE_VIEW__`.
@@ -20,6 +21,7 @@ export interface SpriteView {
 }
 
 export type { HudDebugSnapshot };
+export type { SubtitleLineView };
 
 export interface CameraView {
   /** Bord gauche de la fenêtre, en mètres. */
@@ -38,6 +40,14 @@ export interface ChaosRaceViewDebugApi {
    * un canvas n'est pas interrogeable depuis le DOM.
    */
   subtitle(): string;
+  /**
+   * Réplique réellement affichée, **avec le fait mesuré qui l'a produite** (P012).
+   *
+   * C'est cette lecture qui rend vérifiable la DoD « le texte correspond à un fait réel » : un test
+   * peut recalculer le texte attendu à partir du fait et de sa variante, au lieu de constater qu'un
+   * texte quelconque est apparu. `null` quand aucune réplique n'est affichée.
+   */
+  subtitleLine(): SubtitleLineView | null;
   /**
    * Modèle réellement affiché par le HUD à la dernière frame.
    *

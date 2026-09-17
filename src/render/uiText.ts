@@ -80,4 +80,21 @@ export interface UiText {
   readonly resumeButton: string;
   /** Début de la bannière de checkpoint ; le rendu y ajoute le numéro (`CHECKPOINT 2`). */
   readonly checkpointBanner: string;
+  /**
+   * Gabarit de l'indicateur de file du bandeau de commentaire (P012).
+   *
+   * Le rendu y remplace `{n}` par le nombre réel de répliques en attente dans la file du speaker, et
+   * n'affiche rien du tout quand cette file est vide.
+   */
+  readonly queuedLines: string;
+  /** Titre du bloc de réglages locaux (P012). */
+  readonly settingsTitle: string;
+  /** Libellé du bouton qui coupe **toutes** les sorties vocales. */
+  readonly muteLabel: string;
+  /** Libellé du bouton qui autorise la vocalisation des répliques. */
+  readonly ttsLabel: string;
+  /** État affiché d'un réglage activé. */
+  readonly settingsOn: string;
+  /** État affiché d'un réglage désactivé. */
+  readonly settingsOff: string;
 }

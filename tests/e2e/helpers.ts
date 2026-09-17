@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
-import type { HudDebugSnapshot } from '../../src/render/viewDebug';
+import { SETTINGS_STORAGE_KEY, type RaceSettings } from '../../src/app/settings';
+import type { HudDebugSnapshot, SubtitleLineView } from '../../src/render/viewDebug';
 
 /**
  * Helpers des tests E2E.
@@ -53,6 +54,12 @@ export interface FrameSample {
   readonly bannerHidden: boolean;
   /** Texte réellement dessiné dans le bandeau de commentaire (`''` s'il n'y en a aucun). */
   readonly subtitle: string;
+  /** Réplique affichée avec son **fait source** (P012), `null` quand rien n'est affiché. */
+  readonly subtitleLine: SubtitleLineView | null;
+  /** Nom mis en avant dans le bandeau (`''` quand la réplique ne cite personne). */
+  readonly subtitleName: string;
+  /** Indicateur de file affiché par le bandeau (`''` quand la file du speaker est vide). */
+  readonly subtitleQueue: string;
   readonly distances: readonly number[];
   readonly sprites: readonly SpriteSample[];
   readonly camera: CameraSample;
@@ -196,6 +203,11 @@ export async function collectRace(page: Page, maxFrames = 4000): Promise<FrameSa
             document.querySelector('[data-testid="checkpoint-banner"]')?.hasAttribute('hidden') ??
             true,
           subtitle: view.subtitle(),
+          subtitleLine: view.subtitleLine(),
+          subtitleName:
+            document.querySelector('[data-testid="subtitle-name"]')?.textContent ?? '',
+          subtitleQueue:
+            document.querySelector('[data-testid="subtitle-queue"]')?.textContent ?? '',
           distances: state.characters.map((character) => character.x),
           sprites: view.sprites().map((sprite) => ({
             id: sprite.id,
@@ -225,8 +237,7 @@ export async function collectRace(page: Page, maxFrames = 4000): Promise<FrameSa
   }, maxFrames);
 }
 
-/** Lit le classement **affiché** dans le DOM, dans l'ordre où il apparaît. */
-export async function readLeaderboard(page: Page): Promise<LeaderboardRowView[]> {
+/** Lit le classement **affiché** dans le DOM, dans l'ordre où il apparaît. */export async function readLeaderboard(page: Page): Promise<LeaderboardRowView[]> {
   return page.locator('[data-testid="leaderboard-row"]').evaluateAll((rows) =>
     rows.map((row) => {
       const gapText = row.querySelector('.hud-gap')?.textContent ?? '';
@@ -330,5 +341,37 @@ export async function readHudFrame(page: Page): Promise<{
       steps: state.steps,
       segment: api.segment(),
     };
+  });
+}
+
+/**
+ * Écrit les réglages P012 **avant** tout script applicatif, pour chaque navigation de la page.
+ *
+ * C'est le seul moyen de vérifier un démarrage sur réglages persistés : une écriture après
+ * chargement testerait un changement à chaud, pas la relecture au démarrage.
+ */
+export function seedSettingsBeforeLoad(page: Page, settings: RaceSettings): void {
+  const raw = JSON.stringify(settings);
+  const key = SETTINGS_STORAGE_KEY;
+  // `addInitScript` s'exécute dans la page avant ses propres scripts, à chaque navigation.
+  void page.addInitScript(
+    (payload: { key: string; raw: string }) => {
+      window.localStorage.setItem(payload.key, payload.raw);
+    },
+    { key, raw },
+  );
+}
+
+/** Réglages réellement présents dans `localStorage`, tels quels (donc éventuellement corrompus). */
+export async function readStoredSettings(page: Page): Promise<string | null> {
+  return page.evaluate((key) => window.localStorage.getItem(key), SETTINGS_STORAGE_KEY);
+}
+
+/** État affiché par les deux boutons de réglages, lu depuis `aria-pressed`. */
+export async function readSettingsButtons(page: Page): Promise<{ mute: boolean; tts: boolean }> {
+  return page.evaluate(() => {
+    const pressed = (testId: string): boolean =>
+      document.querySelector(`[data-testid="${testId}"]`)?.getAttribute('aria-pressed') === 'true';
+    return { mute: pressed('settings-mute'), tts: pressed('settings-tts') };
   });
 }

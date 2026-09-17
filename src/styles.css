@@ -506,6 +506,161 @@ body {
   outline-offset: 1px;
 }
 
+/*
+ * Écran d'arrivée (P013) : podium, classement final et boutons de rejeu.
+ *
+ * Il occupe les **cellules basses** de la grille (`grid-row: 3 / 5`), celles du bandeau de pointage,
+ * de la mini-carte et du classement live — ces deux derniers étant masqués à l'arrivée. Le statut, les
+ * réglages, le chrono, la seed et le bandeau de commentaire gardent leurs propres cellules : le
+ * recouvrement est donc impossible par construction, à n'importe quelle résolution, et non « évité »
+ * par des marges calculées.
+ *
+ * Le panneau ne capture aucun clic (l'arène reste cliquable) : seuls les deux boutons le réactivent.
+ * Aucune position absolue n'est utilisée ici : la géométrie vient de la grille et du flux.
+ */
+.hud-finish {
+  grid-column: 1 / -1;
+  grid-row: 3 / 5;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: #05070fee;
+  font-size: clamp(0.58rem, 1.05vw, 0.85rem);
+  pointer-events: none;
+}
+
+.hud-finish[hidden] {
+  display: none;
+}
+
+.hud-finish-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.5rem;
+}
+
+.hud-finish-title {
+  margin: 0;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hud-finish-winner {
+  margin: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* La mention de photo finish n'apparaît que si le noyau a réellement produit le fait. */
+.hud-finish-photo {
+  margin: 0;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #12161f;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hud-finish-photo[hidden] {
+  display: none;
+}
+
+/* Deux colonnes : le podium à gauche, le classement complet à droite. */
+.hud-finish-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 0.2rem 0.6rem;
+  min-height: 0;
+}
+
+.hud-finish-section {
+  min-width: 0;
+}
+
+.hud-finish-subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hud-finish-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hud-finish-row {
+  display: grid;
+  grid-template-columns: 1.3rem minmax(0, 1fr) auto auto;
+  gap: 0.25rem;
+  align-items: baseline;
+  line-height: 1.3;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-finish-podium .hud-finish-row {
+  font-size: 1.1em;
+}
+
+.hud-finish-row.is-winner,
+.hud-finish-row.is-winner .hud-finish-distance,
+.hud-finish-row.is-winner .hud-finish-gap {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.hud-finish-rank,
+.hud-finish-distance,
+.hud-finish-gap {
+  color: var(--muted);
+}
+
+.hud-finish-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-finish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: auto;
+}
+
+.hud-finish-actions button {
+  pointer-events: auto;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #16203c;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9em;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.hud-finish-actions button:hover {
+  border-color: var(--accent);
+}
+
+.hud-finish-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .controls {
   display: flex;
   gap: 0.5rem;
@@ -625,5 +780,33 @@ body {
   .hud-subtitle-name {
     margin-bottom: 0.15rem;
     padding: 0.03rem 0.35rem;
+  }
+
+  /*
+   * Écran d'arrivée en téléphone paysage : les six résultats et le podium doivent tenir dans une
+   * arène basse. On abandonne les titres de section (le podium se reconnaît à sa colonne et à sa
+   * police) et on resserre les gouttières ; ni les lignes ni les boutons ne sont retirés.
+   */
+  .hud-finish {
+    gap: 0.15rem;
+    padding: 0.2rem 0.35rem;
+  }
+
+  .hud-finish-subtitle {
+    display: none;
+  }
+
+  .hud-finish-body {
+    gap: 0.15rem 0.4rem;
+  }
+
+  .hud-finish-row {
+    grid-template-columns: 0.9rem minmax(0, 1fr) auto auto;
+    gap: 0.2rem;
+    line-height: 1.25;
+  }
+
+  .hud-finish-actions button {
+    padding: 0.15rem 0.5rem;
   }
 }

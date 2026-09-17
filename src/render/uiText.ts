@@ -97,4 +97,18 @@ export interface UiText {
   readonly settingsOn: string;
   /** État affiché d'un réglage désactivé. */
   readonly settingsOff: string;
+  /** Titre de l'écran d'arrivée (P013). */
+  readonly finishTitle: string;
+  /** Étiquette du vainqueur, suivie de son nom et de sa distance. */
+  readonly finishWinnerLabel: string;
+  /** Titre de la section podium (top 3). */
+  readonly finishPodiumTitle: string;
+  /** Titre de la section classement complet (les 6). */
+  readonly finishRankingTitle: string;
+  /** Mention mise en avant quand le noyau a réellement produit `PHOTO_FINISH`. */
+  readonly finishPhotoBadge: string;
+  /** Libellé du bouton qui rejoue **exactement** la même seed. */
+  readonly finishReplaySameSeed: string;
+  /** Libellé du bouton qui tire une nouvelle seed et démarre réellement une nouvelle course. */
+  readonly finishNewRace: string;
 }

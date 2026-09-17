@@ -5,6 +5,7 @@ import { BootScene } from './scenes/BootScene';
 import { RaceScene } from './scenes/RaceScene';
 import type { CommentaryView } from './scenes/RaceScene';
 import type { UiText } from './uiText';
+import type { FinishActions } from './view/FinishPanel';
 import { VIEW } from './viewConfig';
 
 /** Dépendances injectées par `src/app/` : le rendu ne crée ni ne possède la simulation. */
@@ -25,6 +26,8 @@ export interface GameOptions {
   readonly exposeView: boolean;
   /** Commentaire du speaker, ou `null` : le rendu ne le crée pas, il l'affiche. */
   readonly commentary: CommentaryView | null;
+  /** Actions de l'écran d'arrivée (P013), fournies par `app/` : seed, URL et redémarrage. */
+  readonly finishActions: FinishActions;
 }
 
 /**
@@ -49,6 +52,7 @@ export function createGame(options: GameOptions): void {
     debug: options.debug,
     exposeView: options.exposeView,
     commentary: options.commentary,
+    finishActions: options.finishActions,
   });
 
   new Game({

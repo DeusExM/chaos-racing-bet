@@ -93,7 +93,7 @@ function setTextIfChanged(element: HTMLElement | null, label: string): void {
 }
 
 /** Formate un nombre avec une décimale et la virgule française, sans dépendre de la locale du moteur. */
-function formatDecimalFr(value: number): string {
+export function formatDecimalFr(value: number): string {
   return value.toFixed(1).replace('.', ',');
 }
 
@@ -247,6 +247,9 @@ export class Hud {
 
   private readonly segment: HTMLElement;
 
+  /** Mini-carte : masquée à l'arrivée par l'écran de fin (P013), qui prend toute la largeur utile. */
+  private readonly minimapSection: HTMLElement;
+
   private readonly seedValue: HTMLElement;
 
   /** Liste du classement (`#leaderboard`), dont le HUD est propriétaire à l'exécution. */
@@ -272,6 +275,9 @@ export class Hud {
 
   /** Dernier modèle reçu : c'est lui que la photographie de test décrit. */
   private lastModel: HudModel | null = null;
+
+  /** Vrai quand les blocs de course sont masqués au profit de l'écran d'arrivée. */
+  private finished = false;
 
   private copyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -324,6 +330,7 @@ export class Hud {
     const minimap = document.createElement('section');
     minimap.className = 'hud-minimap';
     minimap.dataset['testid'] = 'hud-minimap';
+    this.minimapSection = minimap;
     const minimapTitle = document.createElement('p');
     minimapTitle.className = 'hud-title';
     minimapTitle.textContent = text.minimapTitle;
@@ -397,6 +404,29 @@ export class Hud {
     this.updateMinimap(model.markers);
     this.updateLeaderboard(model.rows);
     this.updateCheckpoint(model.checkpoint);
+    this.applyArrivalState(model.phase === 'finished');
+  }
+
+  /**
+   * À l'arrivée, retire les blocs que l'écran de fin remplace ou rend inutiles (P013).
+   *
+   * Seuls le **classement live** et la **mini-carte** disparaissent : le premier ferait doublon avec
+   * le classement final, la seconde représente une course qui n'avance plus. Le chrono (arrêté à
+   * `180,0 s`), l'état, la seed et les réglages restent : ils sont utiles sur l'écran d'arrivée et ne
+   * recouvrent rien, puisque l'écran de fin occupe d'autres cellules de la grille.
+   *
+   * Les lignes du classement **continuent d'être écrites** avant d'être masquées : ce qui est masqué
+   * est exactement ce que le noyau a calculé au dernier pas, jamais une frame en retard.
+   */
+  private applyArrivalState(finished: boolean): void {
+    if (finished === this.finished) {
+      return;
+    }
+    this.finished = finished;
+    if (this.leaderboard !== null) {
+      this.leaderboard.hidden = finished;
+    }
+    this.minimapSection.hidden = finished;
   }
 
   /** Titre du bandeau : `Pointage 2 · 90 s`, ou vide hors pointage. */

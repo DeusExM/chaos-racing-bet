@@ -1,4 +1,5 @@
 import type { CharacterId } from '../core/types';
+import type { FinishDebugSnapshot } from './view/FinishPanel';
 import type { HudDebugSnapshot } from './view/Hud';
 import type { SubtitleLineView } from './view/subtitleModel';
 
@@ -22,6 +23,7 @@ export interface SpriteView {
 
 export type { HudDebugSnapshot };
 export type { SubtitleLineView };
+export type { FinishDebugSnapshot };
 
 export interface CameraView {
   /** Bord gauche de la fenêtre, en mètres. */
@@ -67,6 +69,23 @@ export interface ChaosRaceViewDebugApi {
   hudCopy(): Promise<boolean>;
   /** Vrai tant que la confirmation de copie est affichée. */
   hudCopyConfirmed(): boolean;
+  /**
+   * Distances **de rendu** réellement utilisées pour placer les sprites.
+   *
+   * En course, ce sont exactement les distances du noyau. Après l'arrivée, le rendu leur ajoute une
+   * courte inertie purement visuelle (`finishModel.ts`) : ce hook permet donc de prouver que
+   * l'animation continue **sans** qu'un seul pas de simulation soit exécuté, et que le noyau, lui,
+   * ne bouge plus.
+   */
+  visualDistances(): readonly number[];
+  /**
+   * Écran d'arrivée réellement affiché (P013), `null` tant que la course n'est pas terminée.
+   *
+   * Il expose le classement final **tel qu'il est présenté** — ordre, distances, écarts, mention de
+   * photo finish — pour qu'un test puisse le comparer au classement du noyau lu au même instant, et
+   * vérifier que les deux ne peuvent pas diverger.
+   */
+  finish(): FinishDebugSnapshot | null;
 }
 
 declare global {

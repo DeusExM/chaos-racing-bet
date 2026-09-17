@@ -37,6 +37,59 @@ export const OVERTAKE_SEED_EVIDENCE = Object.freeze({
   overtakes: 81,
 });
 
+/**
+ * Seed dont l'arrivée est une **photo finish** (P013).
+ *
+ * Mesurée sur le corpus canonique de 600 seeds de `tests/unit/observerSeeds.test.ts` : 49 courses
+ * (≈ 8 %) produisent réellement `PHOTO_FINISH`, et celle-ci a été retenue pour son écart P1–P2 très
+ * serré mais non dégénéré. Aucun gameplay n'a été modifié pour l'obtenir : c'est une course normale
+ * du noyau, et `tests/unit/finishModel.test.ts` revérifie l'évidence ci-dessous à chaque exécution.
+ */
+export const PHOTO_FINISH_SEED = 'SRS47J58';
+
+/** Évidence mesurée pour `PHOTO_FINISH_SEED`, au pas `10800`. */
+export const PHOTO_FINISH_SEED_EVIDENCE = Object.freeze({
+  /** Écart P1–P2, en mètres, tel que l'observateur l'a mesuré. */
+  gapMeters: 0.43817919997081844,
+  /** Vainqueur et deuxième, dans l'ordre du fait d'arrivée. */
+  leader: 'c3',
+  second: 'c4',
+});
+
+/** Évidence mesurée pour `OVERTAKE_SEED` : son arrivée **n'est pas** une photo finish. */
+export const OVERTAKE_SEED_ARRIVAL = Object.freeze({
+  type: 'FINISH',
+  /** Écart P1–P2, en mètres : très au-dessus du seuil de photo finish du design. */
+  gapMeters: 62.93463710859123,
+});
+
+/** Fait d'arrivée (`FINISH` ou `PHOTO_FINISH`) d'une course, mesuré pas à pas par le noyau. */
+export function arrivalFactOf(seed: string): {
+  readonly type: string;
+  readonly gapMeters: number;
+  readonly characterIds: readonly string[];
+  readonly stepCount: number;
+  readonly tSim: number;
+} {
+  const engine = new RaceEngine(seed);
+  const result = engine.runToCompletion();
+  const arrival = engine
+    .drainFacts()
+    .find((fact) => fact.type === 'FINISH' || fact.type === 'PHOTO_FINISH');
+
+  if (arrival === undefined) {
+    throw new Error(`Aucun fait d'arrivée pour la seed ${seed}.`);
+  }
+
+  return {
+    type: arrival.type,
+    gapMeters: arrival.magnitudes[0] ?? Number.NaN,
+    characterIds: arrival.characterIds,
+    stepCount: engine.getState().steps,
+    tSim: result.tSim,
+  };
+}
+
 export interface OvertakeMeasurement {
   readonly steps: number;
   readonly leaderChanges: number;

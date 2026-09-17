@@ -74,6 +74,16 @@ export interface ViewConfig {
   readonly SUBTITLE_FADE_IN_MS: number;
   /** Durée de disparition du bandeau, en millisecondes réelles. */
   readonly SUBTITLE_FADE_OUT_MS: number;
+  /**
+   * Durée de la décélération **visuelle** qui suit l'arrivée, en millisecondes réelles (P013).
+   *
+   * Elle n'existe que dans le rendu : après `FINISHED`, le noyau ne fait plus aucun pas, et cette
+   * durée ne fait que donner l'impression que la meute ralentit puis s'arrête. Elle est volontairement
+   * courte — c'est une transition, pas une seconde course.
+   */
+  readonly FINISH_DECELERATION_MS: number;
+  /** Nombre de marcheurs mis en avant sur le podium (P013) : le top 3. */
+  readonly FINISH_PODIUM_SIZE: number;
 }
 
 /** Constante d'implémentation : `2160 = 12 × 180`, calculée pour ne pas être recopiée à la main. */
@@ -107,6 +117,8 @@ export const VIEW: ViewConfig = Object.freeze({
   SUBTITLE_MAX_MS: 5200,
   SUBTITLE_FADE_IN_MS: 160,
   SUBTITLE_FADE_OUT_MS: 220,
+  FINISH_DECELERATION_MS: 1200,
+  FINISH_PODIUM_SIZE: 3,
 });
 
 /** Ordonnée écran d'une voie, répartie uniformément entre les deux ratios du décor. */

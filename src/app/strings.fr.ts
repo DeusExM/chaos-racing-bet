@@ -72,6 +72,16 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   ttsLabel: 'Voix',
   settingsOn: 'activé',
   settingsOff: 'coupé',
+
+  // Écran d'arrivée (P013). Ces libellés décrivent l'interface ; la seule phrase « parlée » reste une
+  // réplique du catalogue, choisie par le speaker à partir d'un fait d'arrivée réel.
+  finishTitle: 'Arrivée',
+  finishWinnerLabel: 'Vainqueur',
+  finishPodiumTitle: 'Podium',
+  finishRankingTitle: 'Classement final',
+  finishPhotoBadge: 'Photo finish',
+  finishReplaySameSeed: 'Rejouer la même seed',
+  finishNewRace: 'Nouvelle course',
 });
 
 // -------------------------------------------------------------------------------------------

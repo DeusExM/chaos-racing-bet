@@ -183,6 +183,17 @@ Cette section ne définit **aucune** règle de simulation.
   Si un personnage dépasse l'échelle nominale, son marqueur est collé au bord avec un indicateur
   `+xx m` (le rendu ne recadre jamais l'échelle en cours de course).
 * Le rendu est **lecture seule** : il ne modifie jamais `x`, `v` ni le classement.
+* **Après `FINISHED` (P013)** : le noyau ne fait **plus aucun pas**. Le rendu peut encore animer, mais
+  uniquement des coordonnées **dérivées** de l'instantané final (`x` et `v` figés à `tSim = 180 s`).
+  La courte décélération visuelle ajoute un décalage d'inertie **identique pour les six marcheurs**,
+  purement décoratif : elle ne peut donc pas modifier l'ordre du classement figé, ne touche ni `tSim`,
+  ni le compteur de pas, ni le RNG, et ne consomme aucun temps simulé.
+* **Classement final et podium** : présentés à partir du classement du noyau à `tSim = 180 s`
+  (`leaderboardOf` / `core/ranking.ts`), avec position, nom, distance finale et écart au vainqueur.
+  Aucune ligne d'arrivée dessinée, aucune coordonnée de décor, aucune position de sprite ou d'écran
+  n'est jamais un critère de victoire : le podium **présente**, il ne décide pas.
+* **`PHOTO_FINISH`** : la mention n'apparaît que si le fait d'arrivée produit par l'observateur est
+  réellement `PHOTO_FINISH`. Le rendu ne recalcule aucun seuil.
 
 ### 5.1 Direction artistique cible (consignée, **non implémentée**)
 

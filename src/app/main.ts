@@ -55,10 +55,20 @@ function resolveSeedText(): string {
   }
 
   const generated = createRandomSeedText();
-  const params = new URLSearchParams(window.location.search);
-  params.set(SEED_PARAM, generated);
-  window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+  writeSeedToUrl(generated);
   return generated;
+}
+
+/**
+ * Inscrit la seed dans l'URL sans toucher à l'historique.
+ *
+ * Utilisé au démarrage **et** par « Nouvelle course » (P013) : la seed affichée reste donc toujours
+ * celle qui est dans l'URL, et un rechargement de page rejoue la course en cours.
+ */
+function writeSeedToUrl(seedText: string): void {
+  const params = new URLSearchParams(window.location.search);
+  params.set(SEED_PARAM, seedText);
+  window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
 }
 
 /** Récupère un élément par identifiant, ou `null` s'il est absent. */
@@ -190,7 +200,45 @@ function bootstrap(): void {
     debug: params.get(DEBUG_PARAM) === '1',
     exposeView: hooksEnabled,
     commentary,
+    finishActions: {
+      replaySameSeed: () => {
+        startSameSeedRace();
+      },
+      newRace: () => {
+        startNewRace();
+      },
+    },
   });
+
+  /**
+   * Repart de zéro avec **exactement** la seed source (P013).
+   *
+   * C'est la même seed affichée, dans l'URL et dans le HUD : la course rejouée est donc identique au
+   * bit près, podium compris. Aucun nouveau tirage n'a lieu.
+   */
+  function startSameSeedRace(): void {
+    simulation.restart();
+    commentary.reset(simulation.view.seedValue);
+    simulation.start();
+  }
+
+  /**
+   * Tire une **nouvelle** seed, l'inscrit dans l'URL, puis lance réellement la course (P013).
+   *
+   * Le tirage passe par le mécanisme existant de `app/` (`createRandomSeedText`), donc il n'existe
+   * qu'un seul système de seed dans le projet. La seed précédente n'est jamais réutilisée : elle est
+   * remplacée partout à la fois — URL, HUD, moteur, commentaire — avant le départ.
+   */
+  function startNewRace(): void {
+    const nextSeed = createRandomSeedText();
+    writeSeedToUrl(nextSeed);
+    if (seedValue !== null) {
+      seedValue.textContent = nextSeed;
+    }
+    simulation.restart(nextSeed);
+    commentary.reset(simulation.view.seedValue);
+    simulation.start();
+  }
 
   // « Lancer » démarre la course : `RaceSimulation` gère elle-même le compte à rebours réel.
   startButton?.addEventListener('click', () => {
@@ -199,9 +247,7 @@ function bootstrap(): void {
 
   // « Rejouer » repart de zéro avec exactement la même seed.
   replayButton?.addEventListener('click', () => {
-    simulation.restart();
-    commentary.reset(simulation.view.seedValue);
-    simulation.start();
+    startSameSeedRace();
   });
 
   // « Pause / Reprendre » : même commande que la touche Espace, et rien d'autre.

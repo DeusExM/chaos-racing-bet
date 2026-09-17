@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
 import { SETTINGS_STORAGE_KEY, type RaceSettings } from '../../src/app/settings';
-import type { HudDebugSnapshot, SubtitleLineView } from '../../src/render/viewDebug';
+import type { FinishDebugSnapshot, HudDebugSnapshot, SubtitleLineView } from '../../src/render/viewDebug';
 
 /**
  * Helpers des tests E2E.
@@ -373,5 +373,136 @@ export async function readSettingsButtons(page: Page): Promise<{ mute: boolean; 
     const pressed = (testId: string): boolean =>
       document.querySelector(`[data-testid="${testId}"]`)?.getAttribute('aria-pressed') === 'true';
     return { mute: pressed('settings-mute'), tts: pressed('settings-tts') };
+  });
+}
+
+// -------------------------------------------------------------------------------------------
+// P013 — arrivée, podium et rejeu
+// -------------------------------------------------------------------------------------------
+
+/** Une ligne de résultat telle qu'elle est **présentée** sur l'écran d'arrivée. */
+export interface FinishRowSample {
+  readonly id: string;
+  readonly rank: number;
+  readonly name: string;
+  /** Distance finale, relue depuis le **texte affiché** (précision UI : une décimale). */
+  readonly distanceText: number;
+  /** Écart au vainqueur, relu depuis le texte affiché. */
+  readonly gapText: number;
+  /** Valeurs brutes publiées en `data-*` : comparaison exacte avec le noyau. */
+  readonly distanceRaw: number;
+  readonly gapRaw: number;
+}
+
+/** Écran d'arrivée réellement lu dans le DOM. */
+export interface FinishDomSample {
+  readonly hidden: boolean;
+  readonly winnerId: string;
+  readonly winnerText: string;
+  readonly photoVisible: boolean;
+  readonly photoText: string;
+  readonly podium: readonly FinishRowSample[];
+  readonly rows: readonly FinishRowSample[];
+  readonly replayLabel: string;
+  readonly replayEnabled: boolean;
+  readonly newRaceLabel: string;
+  readonly newRaceEnabled: boolean;
+  readonly seedText: string;
+}
+
+/** Résultat final du **noyau** au moment de la lecture, plus le modèle de l'écran d'arrivée. */
+export interface FinishCoreSample {
+  readonly steps: number;
+  readonly tSim: number;
+  readonly seed: string;
+  /** Phase du **noyau** : `idle`, `running` ou `finished`. */
+  readonly phaseKind: string;
+  /** Phase **temps réel** de `RaceSimulation`. */
+  readonly simPhase: string;
+  readonly distances: readonly number[];
+  readonly ranks: readonly {
+    readonly id: string;
+    readonly rank: number;
+    readonly distance: number;
+    readonly gapMeters: number;
+  }[];
+  readonly visualDistances: readonly number[];
+  readonly panel: FinishDebugSnapshot | null;
+}
+
+/** Attend l'arrivée réelle de la course (phase temps réel `finished`). */
+export async function waitForFinished(page: Page, timeoutMs = 90_000): Promise<void> {
+  await waitForHooks(page);
+  await page.waitForFunction(() => window.__CHAOS_RACE__?.phase() === 'finished', null, {
+    timeout: timeoutMs,
+  });
+}
+
+/** Lit, dans un **seul** appel, le noyau figé, les distances de rendu et l'écran d'arrivée. */
+export async function readFinishCore(page: Page): Promise<FinishCoreSample> {
+  await waitForHooks(page);
+  return page.evaluate(() => {
+    const api = window.__CHAOS_RACE__;
+    const view = window.__CHAOS_RACE_VIEW__;
+    if (api === undefined || view === undefined) {
+      throw new Error('hooks absents');
+    }
+    const state = api.state();
+    return {
+      steps: state.steps,
+      tSim: state.tSim,
+      seed: api.seed(),
+      phaseKind: state.phase.kind,
+      simPhase: api.phase(),
+      distances: state.characters.map((character) => character.x),
+      ranks: api.ranks().map((row) => ({
+        id: row.id,
+        rank: row.rank,
+        distance: row.distance,
+        gapMeters: row.gapMeters,
+      })),
+      visualDistances: [...view.visualDistances()],
+      panel: view.finish(),
+    };
+  });
+}
+
+/** Lit l'écran d'arrivée tel qu'il est réellement affiché (textes, `data-*`, états des boutons). */
+export async function readFinishDom(page: Page): Promise<FinishDomSample> {
+  return page.evaluate(() => {
+    const parse = (text: string): number =>
+      Number(text.replace(',', '.').replace(/[^0-9.]/g, ''));
+
+    const rowOf = (element: Element): FinishRowSample => ({
+      id: element.getAttribute('data-character-id') ?? '',
+      rank: Number(element.getAttribute('data-rank') ?? '0'),
+      name: element.querySelector('.hud-finish-name')?.textContent ?? '',
+      distanceText: parse(element.querySelector('.hud-finish-distance')?.textContent ?? ''),
+      gapText: parse(element.querySelector('.hud-finish-gap')?.textContent ?? ''),
+      distanceRaw: Number(element.getAttribute('data-distance') ?? 'NaN'),
+      gapRaw: Number(element.getAttribute('data-gap') ?? 'NaN'),
+    });
+
+    const panel = document.querySelector('[data-testid="finish"]');
+    const photo = document.querySelector('[data-testid="finish-photo"]');
+    const replay = document.querySelector('[data-testid="finish-replay-same"]');
+    const newRace = document.querySelector('[data-testid="finish-new-race"]');
+    const winner = document.querySelector('[data-testid="finish-winner"]');
+
+    return {
+      hidden: panel?.hasAttribute('hidden') ?? true,
+      winnerId: winner?.getAttribute('data-character-id') ?? '',
+      winnerText: winner?.textContent ?? '',
+      photoVisible:
+        photo instanceof HTMLElement && !photo.hasAttribute('hidden') && photo.textContent !== '',
+      photoText: photo?.textContent ?? '',
+      podium: Array.from(document.querySelectorAll('[data-testid="finish-podium-row"]')).map(rowOf),
+      rows: Array.from(document.querySelectorAll('[data-testid="finish-row"]')).map(rowOf),
+      replayLabel: replay?.textContent ?? '',
+      replayEnabled: replay instanceof HTMLButtonElement && !replay.disabled,
+      newRaceLabel: newRace?.textContent ?? '',
+      newRaceEnabled: newRace instanceof HTMLButtonElement && !newRace.disabled,
+      seedText: document.querySelector('[data-testid="seed-value"]')?.textContent ?? '',
+    };
   });
 }

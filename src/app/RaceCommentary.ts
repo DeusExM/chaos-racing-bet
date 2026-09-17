@@ -77,6 +77,15 @@ export class RaceCommentary {
 
   private remainingMs = 0;
 
+  /**
+   * Fait d'arrivée du noyau (`FINISH` ou `PHOTO_FINISH`), conservé tel quel.
+   *
+   * C'est la **seule** source de la mention « photo finish » de l'écran d'arrivée (P013) : l'écran de
+   * fin ne recalcule aucun seuil, il lit ce fait réel. Il est enregistré même si le speaker décide de
+   * ne pas le commenter, parce que c'est un fait mesuré, pas une décision de parole.
+   */
+  private arrival: RaceFact | null = null;
+
   /** Dernier instant simulé observé : le speaker refuse un `poll` antérieur. */
   private lastSimS = 0;
 
@@ -101,7 +110,18 @@ export class RaceCommentary {
     this.voice?.cancel();
     this.line = null;
     this.remainingMs = 0;
+    this.arrival = null;
     this.lastSimS = 0;
+  }
+
+  /**
+   * Fait d'arrivée réellement produit par le noyau, ou `null`.
+   *
+   * Lecture seule : c'est la preuve, pour l'écran d'arrivée, qu'un `PHOTO_FINISH` a bien eu lieu. Le
+   * fait n'est jamais inventé ici — il vient du flux de faits du noyau, transmis par `sim/`.
+   */
+  arrivalFact(): RaceFact | null {
+    return this.arrival;
   }
 
   /**
@@ -120,6 +140,13 @@ export class RaceCommentary {
       return;
     }
     this.lastSimS = instant;
+    // Le fait d'arrivée est retenu indépendamment de la décision du speaker : c'est le noyau, et lui
+    // seul, qui décide si la course s'est terminée sur une photo finish.
+    for (const fact of facts) {
+      if (fact.type === 'FINISH' || fact.type === 'PHOTO_FINISH') {
+        this.arrival = fact;
+      }
+    }
     const wasSpeaking = this.speaker.isSpeaking();
     this.take(this.speaker.feedAll(facts), wasSpeaking);
   }

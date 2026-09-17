@@ -1,6 +1,7 @@
 import { Scene } from 'phaser';
 
 import { CHARACTERS } from '../../core/characters';
+import type { RaceFact } from '../../core/types';
 import type { RaceSimulation } from '../../sim/RaceSimulation';
 import type { SimPhase } from '../../sim/types';
 import type { SpeakerLine } from '../subtitle';
@@ -11,6 +12,13 @@ import { CameraRig } from '../view/CameraRig';
 import { CharacterSprite } from '../view/CharacterSprite';
 import { buildDebugModel } from '../view/debugModel';
 import { DebugPanel } from '../view/DebugPanel';
+import { FinishPanel, type FinishActions } from '../view/FinishPanel';
+import {
+  buildFinishModel,
+  captureFinishSnapshot,
+  deceleratedDistances,
+  type FinishSnapshot,
+} from '../view/finishModel';
 import { Hud } from '../view/Hud';
 import { buildHudModel } from '../view/hudModel';
 import { SubtitleBanner } from '../view/SubtitleBanner';
@@ -39,6 +47,13 @@ export interface CommentaryView {
    * peut pas annoncer un commentaire que le speaker n'a pas.
    */
   queuedCount(): number;
+  /**
+   * Fait d'arrivée réellement produit par le noyau (`FINISH` ou `PHOTO_FINISH`), ou `null`.
+   *
+   * L'écran d'arrivée n'a pas le droit de recalculer un seuil de photo finish : il reçoit le fait
+   * mesuré, et n'affiche la mention que si ce fait est bien un `PHOTO_FINISH`.
+   */
+  arrivalFact(): RaceFact | null;
 }
 
 /** Tout ce dont la scène de course a besoin, fourni par `src/app/`. */
@@ -61,6 +76,13 @@ export interface RaceSceneOptions {
   readonly exposeView: boolean;
   /** Commentaire du speaker, ou `null` quand la course n'en a pas (tests unitaires, mode nu). */
   readonly commentary: CommentaryView | null;
+  /**
+   * Actions de l'écran d'arrivée (P013), fournies par `app/`.
+   *
+   * La seed et l'URL appartiennent à `app/` : le rendu se contente de **déclencher** ce qu'on lui
+   * donne, il ne fabrique jamais une seed et ne décide jamais d'une nouvelle course.
+   */
+  readonly finishActions: FinishActions;
 }
 
 /** Libellé d'état correspondant à une phase temps réel. Exhaustif par construction. */
@@ -111,6 +133,29 @@ export class RaceScene extends Scene {
 
   private subtitle: SubtitleBanner | null = null;
 
+  private finish: FinishPanel | null = null;
+
+  /**
+   * Instantané **figé** de l'arrivée, ou `null` tant que la course n'est pas terminée.
+   *
+   * Il est capturé une seule fois, à la frame où le noyau devient `finished`, puis n'est plus jamais
+   * recalculé : le classement et les distances affichés ne peuvent donc pas bouger, même si le rendu
+   * continue de vivre et d'animer.
+   */
+  private finishSnapshot: FinishSnapshot | null = null;
+
+  /** Temps **réel** écoulé depuis l'arrivée, en millisecondes : il ne pilote que la décélération. */
+  private finishElapsedMs = 0;
+
+  /**
+   * Distances réellement utilisées pour placer les sprites et cadrer la caméra.
+   *
+   * En course, ce sont celles du noyau. Après l'arrivée, ce sont les distances figées plus une
+   * courte inertie visuelle : le tableau n'est donc jamais une seconde source de classement, il n'est
+   * qu'une position de dessin.
+   */
+  private visualXs: readonly number[] = [];
+
   private layoutHeight = 0;
 
   private layoutWidth = 0;
@@ -147,6 +192,16 @@ export class RaceScene extends Scene {
       this.debug = new DebugPanel(this.options.debugPanel, this.options.text);
     }
 
+    // L'écran d'arrivée vit dans la même grille que le HUD : sa cellule ne recouvre donc jamais le
+    // statut, les réglages, le chrono, la seed ni le bandeau de commentaire (P013).
+    if (this.options.hudRoot !== null) {
+      this.finish = new FinishPanel(
+        this.options.hudRoot,
+        this.options.text,
+        this.options.finishActions,
+      );
+    }
+
     if (this.options.exposeView) {
       installViewDebug({
         sprites: () =>
@@ -171,6 +226,11 @@ export class RaceScene extends Scene {
         // résultat, il ne copie rien lui-même et n'écrit jamais dans la simulation.
         hudCopy: () => this.hud?.copySeed() ?? Promise.resolve(false),
         hudCopyConfirmed: () => this.hud?.copyConfirmed ?? false,
+        // Les distances de rendu : elles valent celles du noyau en course, et incluent l'inertie
+        // visuelle après l'arrivée. Aucune écriture n'est possible depuis un hook.
+        visualDistances: () => this.visualXs,
+        // L'écran d'arrivée tel qu'il est réellement présenté, pour comparer le podium au noyau.
+        finish: () => this.finish?.snapshot() ?? null,
       });
     }
 
@@ -178,7 +238,9 @@ export class RaceScene extends Scene {
   }
 
   override update(_time: number, delta: number): void {
-    // 1. Le temps réel ne sert qu'ici, et il ne fait qu'autoriser des pas de taille fixe.
+    // 1. Le temps réel ne sert qu'ici, et il ne fait qu'autoriser des pas de taille fixe. Une fois la
+    // course terminée, `RaceSimulation.update()` ne fait plus rien : le noyau ne reçoit donc plus
+    // aucun pas, et c'est cette seule ligne qui garantit qu'il n'y a pas de « course après la course ».
     this.options.simulation.update(delta);
 
     // 2. Un unique instantané, lu par toutes les vues de cette frame.
@@ -186,21 +248,41 @@ export class RaceScene extends Scene {
     const phase = this.options.simulation.phase;
     const checkpoint = this.options.simulation.checkpoint;
 
-    // 3. Le cadrage se déduit des distances : jamais l'inverse.
-    this.rig.follow(state.characters.map((character) => character.x));
+    // 3. À l'arrivée, la photographie du noyau est prise **une fois** : c'est elle, et rien d'autre,
+    // qui alimente ensuite le podium et les distances affichées.
+    if (phase === 'finished') {
+      if (this.finishSnapshot === null) {
+        this.finishSnapshot = captureFinishSnapshot(state);
+      }
+    } else {
+      this.finishSnapshot = null;
+      this.finishElapsedMs = 0;
+    }
+
+    // 4. Les positions de rendu : celles du noyau, plus une inertie purement visuelle après l'arrivée.
+    // Le décalage est le même pour les six marcheurs, donc l'ordre à l'écran ne peut pas diverger du
+    // classement figé — une position de sprite n'est jamais un critère de victoire.
+    this.visualXs =
+      this.finishSnapshot === null
+        ? state.characters.map((character) => character.x)
+        : deceleratedDistances(this.finishSnapshot, this.finishElapsedMs);
+
+    // 5. Le cadrage se déduit des distances de rendu : jamais l'inverse.
+    this.rig.follow(this.visualXs);
 
     this.applyLayout();
     this.track?.update(this.rig);
 
     for (const [index, sprite] of this.sprites.entries()) {
+      const distance = this.visualXs[index];
       const character = state.characters[index];
-      if (character === undefined) {
+      if (distance === undefined || character === undefined) {
         continue;
       }
-      sprite.place(this.rig.toScreenX(character.x, this.layoutWidth), this.layoutHeight);
-      if (this.rig.isOffscreen(character.x, this.layoutWidth)) {
+      sprite.place(this.rig.toScreenX(distance, this.layoutWidth), this.layoutHeight);
+      if (this.rig.isOffscreen(distance, this.layoutWidth)) {
         sprite.showEdgeMarker(
-          this.rig.toScreenX(character.x, this.layoutWidth) < VIEW.EDGE_MARGIN_PX ? 'left' : 'right',
+          this.rig.toScreenX(distance, this.layoutWidth) < VIEW.EDGE_MARGIN_PX ? 'left' : 'right',
           this.layoutWidth,
           this.layoutHeight,
         );
@@ -215,15 +297,30 @@ export class RaceScene extends Scene {
     const hudModel = buildHudModel(state, phase, checkpoint);
     this.hud?.update(hudModel);
 
+    // L'écran d'arrivée lit la photographie figée et le fait d'arrivée **réel** : il ne recalcule ni
+    // le classement, ni un seuil de photo finish. Hors arrivée, il est masqué.
+    this.finish?.update(
+      this.finishSnapshot === null
+        ? null
+        : buildFinishModel(this.finishSnapshot, this.options.commentary?.arrivalFact() ?? null),
+    );
+
     // Le `tSim` courant vient de l'instantané déjà lu : le commentaire n'a aucun accès au moteur,
     // il reçoit un simple nombre, ce qui lui permet de repoller un fait en file dès qu'il devient
-    // éligible — sans attendre qu'un nouveau fait arrive.
+    // éligible — sans attendre qu'un nouveau fait arrive. Il continue donc de vivre après l'arrivée,
+    // jusqu'à la disparition propre de la réplique d'arrivée.
     this.updateSubtitle(delta, state.tSim);
     this.updateHud();
     if (this.debug !== null) {
       this.debug.update(
         buildDebugModel(state, phase, this.options.simulation.timeScale, hudModel.rows),
       );
+    }
+
+    // 6. La montre de la décélération n'avance qu'après coup : la frame de l'arrivée elle-même est
+    // donc dessinée exactement aux distances finales du noyau, sans le moindre décalage.
+    if (this.finishSnapshot !== null) {
+      this.finishElapsedMs += delta > 0 && Number.isFinite(delta) ? delta : 0;
     }
   }
 

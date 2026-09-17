@@ -293,7 +293,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P010 | Équilibrage statistique + verrouillage des constantes `[x]` *(25/25 critères sur 1000 seeds)* | P009 | `tools/balance.ts` + seuils testés |
 | P011 | HUD complet + panneau debug `[x]` | P010 | mini-carte, classement détaillé, chrono |
 | P012 | Affichage du speaker + réglages `[x]` | P011 | bannières de commentaires |
-| P013 | Arrivée et podium | P012 | course complète jouable |
+| P013 | Arrivée et podium `[x]` | P012 | course complète jouable |
 | **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
 | P014 | Identité visuelle et animations des 6 personnages | P013.5 | personnages distincts et drôles |
 | P015 | Polish, accessibilité, audio optionnel | P014 | finition |
@@ -928,6 +928,8 @@ blocage.
 
 ### P013 — Arrivée et podium
 
+**Statut : `[x]`** (terminé — voir le compte rendu ci-dessous)
+
 **Livrables**
 * `FINISHED` : décélération **visuelle** (le rendu anime, le noyau ne fait plus de pas), classement
   final figé, `FinishScene` avec podium, liste des 6 avec écarts, mise en avant de `PHOTO_FINISH`.
@@ -940,6 +942,96 @@ blocage.
 * « Rejouer la même seed » ⇒ podium identique ; « Nouvelle course » ⇒ podium différent (5 essais).
 * Aucun pas de simulation après `FINISHED` (compteur de pas stable via les hooks).
 * Le podium n'utilise **jamais** un repère de décor ni une ligne d'arrivée dessinée comme critère.
+
+**Compte rendu**
+
+Créé : `src/render/view/finishModel.ts`, `src/render/view/FinishPanel.ts`,
+`tests/unit/finishModel.test.ts`, `tests/e2e/finish.spec.ts`.
+Modifié : `src/render/scenes/RaceScene.ts`, `src/render/Game.ts`, `src/render/viewDebug.ts`,
+`src/render/view/Hud.ts`, `src/render/viewConfig.ts`, `src/render/uiText.ts`, `src/app/main.ts`,
+`src/app/RaceCommentary.ts`, `src/app/strings.fr.ts`, `src/styles.css`, `tests/fixtures/seeds.ts`,
+`tests/e2e/helpers.ts`, `GAME_DESIGN.md` §5.
+
+* **`src/core/**` et `src/sim/**` sont strictement inchangés.** Aucun pas de noyau, aucune constante,
+  aucun RNG, aucun événement, aucun cooldown du speaker, aucune règle avant 180 s n'a été touché : P013
+  est une couche de fin de course et de présentation. `RaceSimulation.update()` n'appelait déjà plus
+  `step()` après `finished` ; la frontière était donc déjà absolue, et tout le travail consiste à ne
+  pas la franchir côté rendu.
+* **Architecture : un panneau HTML, pas une scène Phaser.** Le rôle de `FinishScene` est tenu par
+  `RaceScene` (branche `phase === 'finished'`) et par `FinishPanel`, un panneau HTML vivant dans la
+  grille `.hud`, comme le HUD de P011 et le bandeau de P012 : c'est ce qui garantit **par
+  construction** l'absence de recouvrement avec les blocs de course (cellules différentes de la même
+  grille), garde les six résultats lisibles en 844×390, rend le podium comparable par le DOM dans les
+  tests, et évite qu'une géométrie dessinée à la main devienne une donnée de course. Aucun fichier
+  `scenes/FinishScene.ts` n'a donc été créé : il aurait été une scène Phaser vide ou un doublon.
+* **Instantané final figé.** `captureFinishSnapshot(state)` refuse tout état qui n'est pas `finished`,
+  copie distances, vitesses et classement (`leaderboardOf`, donc `core/ranking.ts`), et gèle le tout en
+  profondeur (`Object.freeze` sur l'instantané, ses tableaux et chaque ligne). Il est pris **une seule
+  fois**, à la frame où le noyau devient `finished` : le classement affiché ne peut plus changer, même
+  si le rendu continue de vivre. Le modèle de présentation (`buildFinishModel`) ne trie rien, ne
+  compare rien, n'importe ni `core/ranking` directement ni le décor, et n'affiche le podium que comme
+  le **début** de la liste du noyau.
+* **Décélération visuelle** : `decelerationOffset()` fait décroître linéairement une vitesse d'inertie
+  jusqu'à zéro sur `VIEW.FINISH_DECELERATION_MS = 1200 ms` (décalage `v̄·T·(1−(1−u)²)/2`, soit au plus
+  `v̄·0,6 ≈ 7 m`), et `deceleratedDistances()` l'ajoute aux distances figées. Le décalage est **le même
+  pour les six marcheurs** : l'ordre visuel ne peut donc pas diverger du classement figé, et une
+  position de sprite ne peut jamais devenir un critère. Le noyau, lui, ne reçoit aucun pas : la
+  montre de la décélération est du temps réel, dans `RaceScene` uniquement.
+* **`FINISH` / `PHOTO_FINISH`** : `RaceCommentary` conserve le fait d'arrivée réel (`FINISH` ou
+  `PHOTO_FINISH`) indépendamment de la décision de parole, et l'expose en lecture seule
+  (`arrivalFact()`). Le panneau n'affiche la mention que si ce fait est `PHOTO_FINISH` et publie
+  l'écart **mesuré** du fait : aucun seuil n'est recalculé dans le rendu. Seed de référence mesurée :
+  `SRS47J58` ⇒ `PHOTO_FINISH` avec un écart P1–P2 de `0,438 m` (le corpus canonique en produit 49 sur
+  600, ≈ 8 % ; la campagne de 200 courses de P009-A : 181 `FINISH` / 19 `PHOTO_FINISH`). `POULET42`
+  ⇒ `FINISH`, écart `62,935 m` : aucune mention.
+* **Politique de commentaire d'arrivée** : choix simple et déterministe — le podium apparaît
+  **immédiatement** à `FINISHED`, sans délai, et le bandeau de commentaire continue sa vie normale
+  dans **sa propre cellule** de la grille, au-dessus du podium. Aucun cooldown, aucune préemption,
+  aucune durée P012 n'a été modifié, et `FINISHED` n'est jamais retardé. Le commentaire d'arrivée
+  finit donc de s'afficher puis disparaît proprement (comportement déjà couvert par
+  `subtitle.spec.ts`), et le recouvrement est impossible par construction, pas « évité » par une marge.
+* **Deux boutons** : « Rejouer la même seed » (`simulation.restart()` — aucune nouvelle seed) et
+  « Nouvelle course » (`createRandomSeedText()` → URL → HUD → `restart(seed)` → `reset` du
+  commentaire → `start()`). Le second réutilise le mécanisme de seed existant de `app/` : aucun
+  deuxième système de seed n'a été créé, et la seed précédente est remplacée partout à la fois avant
+  le départ. Les callbacks viennent de `app/` (seule couche qui connaît l'URL et la seed) et sont
+  injectés dans le rendu par `GameOptions.finishActions`.
+* **HUD à l'arrivée** : le classement **live** et la mini-carte sont masqués (le premier ferait doublon
+  avec le classement final, la seconde représente une course qui n'avance plus). Le chrono s'arrête à
+  `180,0 s`, l'état, la seed et les **réglages restent affichés et utilisables** sur l'écran d'arrivée
+  (un test clique `Muet` à l'arrivée et vérifie `aria-pressed`) : la persistance P012 n'est pas
+  touchée. Les lignes du classement sont mises à jour **avant** d'être masquées, donc le DOM ne peut
+  pas conserver une frame en retard.
+* **Responsive** : l'écran d'arrivée vit dans les cellules basses de la grille ; en `max-height:
+  560px` les titres de section disparaissent et les gouttières se resserrent, sans retirer ni une ligne
+  ni un bouton. Mesuré en 1280×720, 1920×1080 et 844×390 : tout est dans l'arène, le podium et le
+  classement ne se recouvrent pas, rien ne recouvre le statut, les réglages, le chrono, la seed ou le
+  commentaire, la police des résultats reste ≥ 8 px, et les deux boutons sont cliquables.
+* **Écarts assumés** : aucun. `VIEW` accueille deux constantes de **présentation**
+  (`FINISH_DECELERATION_MS`, `FINISH_PODIUM_SIZE`) ; `GAME_DESIGN.md` §5 documente la règle de
+  présentation correspondante (décélération purement décorative, podium qui présente sans décider,
+  mention de photo finish issue du seul fait du noyau).
+
+Preuves `steps = 10800` : E2E, cinq lectures séparées (une immédiate puis quatre espacées de 400 ms),
+toutes à `10800` pas et `tSim = 180 s`, avec des distances finales **strictement** identiques ; pendant
+ce temps les positions de rendu augmentent (décélération réellement animée) puis se stabilisent.
+Podium == noyau : les 6 identifiants, les rangs, le top 3, les distances et les écarts sont comparés
+aux valeurs du noyau lues dans le même appel ; les valeurs brutes (`data-*`) sont comparées à
+l'identique et les textes à la précision d'interface documentée (**une décimale**). Même seed ⇒ même
+podium : deuxième course complète après clic, distances, classement et podium strictement identiques,
+seed d'URL inchangée. Preuve structurelle « pas de ligne d'arrivée » : tests unitaires interdisant à
+`finishModel.ts` toute règle de classement (`computeRanks`, `sortByRank`, tri), tout décor
+(`NOMINAL_SCALE`, `screenX`, `sprite`, `phaser`) et à `FinishPanel.ts` tout import de `core/ranking`,
+`sim/leaderboard` (fonctions) ou `viewConfig` ; plus un cas fabriqué où les distances dépassent
+largement l'échelle nominale et où le podium suit quand même les distances.
+
+Résultats réels : `npm run verify` **vert** — `typecheck` 0 erreur ; **585 tests unitaires** (37
+fichiers, dont 16 nouveaux) ; `vite build` OK ; **59 tests E2E** OK (dont 8 nouveaux pour P013), aucune
+erreur console. Cinq essais « Nouvelle course » exécutés réellement, depuis une course initiale sur
+`POULET42` : seeds `SEQXK3H3`, `GK1MKB0Y`, `WF1JWY0Y`, `50ZW7HVN`, `0W44R56G` (5 seeds distinctes,
+toutes différentes de la seed initiale) et six podiums observés — `c3,c2,c1` (course initiale),
+`c2,c1,c3`, `c1,c3,c4`, `c5,c0,c4`, `c2,c5,c0`, `c1,c5,c0` : au moins un podium diffère (ici les cinq
+diffèrent), et les courses diffèrent réellement, pas seulement leurs étiquettes. Aucun blocage.
 
 ---
 

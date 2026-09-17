@@ -99,33 +99,51 @@ export class RaceCommentary {
   }
 
   /**
-   * Avance la montre d'affichage. `realDtMs` est du temps **réel** : il ne sert qu'à savoir quand
-   * retirer la réplique, jamais à faire avancer la course.
+   * Avance la montre d'affichage, puis tente de parler au temps simulé **courant**.
+   *
+   * `realDtMs` est du temps **réel** : il ne sert qu'à savoir quand retirer la réplique, jamais à
+   * faire avancer la course. `simNowS` est le `tSim` courant, fourni par le rendu qui possède déjà
+   * l'instantané de la simulation — cette classe ne connaît donc toujours ni `RaceEngine`, ni
+   * `RaceSimulation`, seulement un nombre.
+   *
+   * Ce paramètre est ce qui évite un blocage silencieux : un fait arrivé trop tôt est mis en file et
+   * n'attend plus qu'une chose — que son cooldown simulé expire. Sans le temps courant, il faudrait
+   * qu'un **nouveau** fait arrive pour le repoller, et une course silencieuse pourrait le laisser en
+   * file indéfiniment. Repoller ne crée jamais de décision : cela ne fait que constater qu'un fait
+   * **déjà mesuré** est devenu éligible, et aucun tirage n'est consommé tant qu'aucune réplique ne
+   * démarre.
+   *
+   * Pendant une pause, `tSim` ne bouge pas : les appels répétés ne font donc progresser aucun
+   * cooldown simulé, et la seule chose qui continue d'avancer est la durée d'affichage réelle.
    */
-  update(realDtMs: number): void {
-    if (!Number.isFinite(realDtMs) || realDtMs <= 0) {
-      return;
-    }
-    if (this.line === null) {
-      return;
+  update(realDtMs: number, simNowS?: number): void {
+    const nowS = Math.max(simNowS ?? this.lastSimS, this.lastSimS);
+
+    if (Number.isFinite(realDtMs) && realDtMs > 0 && this.line !== null) {
+      this.remainingMs -= realDtMs;
+      if (this.remainingMs <= 0) {
+        // Fin de la réplique : la place se libère. La suite est traitée par le poll ci-dessous.
+        this.remainingMs = 0;
+        this.line = null;
+        this.speaker.finish();
+      }
     }
 
-    this.remainingMs -= realDtMs;
-    if (this.remainingMs > 0) {
-      return;
+    // Candidat en attente et rien à l'écran : on retente au temps simulé courant, sans dépendre de
+    // l'arrivée d'un nouveau fait.
+    if (this.line === null && this.speaker.queuedCount() > 0) {
+      this.take(this.speaker.poll(nowS));
     }
-
-    // Fin de réplique : la place se libère, et le candidat suivant peut être choisi. L'instant est
-    // celui du dernier fait observé — jamais un instant futur, jamais l'horloge réelle.
-    this.remainingMs = 0;
-    this.line = null;
-    this.speaker.finish();
-    this.take(this.speaker.poll(this.lastSimS));
   }
 
   /** Réplique affichée, ou `null`. Le rendu lit cet état, il ne le modifie pas. */
   currentLine(): SpeakerLine | null {
     return this.line;
+  }
+
+  /** Nombre de répliques réellement démarrées depuis le début : sert à prouver qu'un poll n'en crée pas. */
+  linesStarted(): number {
+    return this.speaker.totalLinesStarted();
   }
 
   /**

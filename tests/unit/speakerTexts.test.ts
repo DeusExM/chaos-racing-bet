@@ -43,7 +43,8 @@ const SAMPLE_MAGNITUDES: Readonly<Record<RaceFactType, readonly number[]>> = Obj
   BIG_COMEBACK: [4, 2],
   OVERTAKE_STREAK: [5],
   BIG_BONUS: [1.35, 8, 1],
-  LEADER_MALUS: [0.6, 3, 1],
+  // Magnitude **réellement négative** : c'est ce que publie P009-A (`CHUTE` : `-0.6`, `SIESTE` : `-0.7`).
+  LEADER_MALUS: [-0.6, 3, 1],
   CLOSE_RACE: [8.42, 5.05],
   LAST_COMEBACK: [4, 3],
   CHECKPOINT_SPLIT: [812.4, 809.1, 804.6, 800.2, 798.9, 790.3],
@@ -59,9 +60,20 @@ function sampleFact(type: RaceFactType): RaceFact {
 function derivableNumbers(source: RaceFact): Set<string> {
   const values: string[] = [String(source.tSim)];
   for (const magnitude of source.magnitudes) {
-    values.push(String(magnitude), magnitude.toFixed(1), String(Math.trunc(magnitude)), String(Math.floor(magnitude)));
-    // Le pourcentage des bonus et malus est la magnitude relative exprimée en pour cent.
-    values.push(String(Math.round(magnitude * 100)));
+    // Une magnitude négative (malus) est présentée en valeur absolue : `Math.abs` est la seule
+    // transformation autorisée, et elle est explicite des deux côtés — ici et dans le catalogue.
+    const shown = Math.abs(magnitude);
+    values.push(
+      String(magnitude),
+      magnitude.toFixed(1),
+      String(Math.trunc(magnitude)),
+      String(Math.floor(magnitude)),
+      String(shown),
+      shown.toFixed(1),
+      String(Math.trunc(shown)),
+      // Le pourcentage est la magnitude relative exprimée en pour cent.
+      String(Math.round(shown * 100)),
+    );
   }
   for (const id of source.characterIds) {
     values.push(characterNameFr(id));
@@ -226,11 +238,72 @@ describe('P009-C : catalogue de textes', () => {
     expect(SPEAKER_LINES_FR.BIG_BONUS[0]?.(bonusFact)).toContain('135');
     expect(SPEAKER_LINES_FR.BIG_BONUS[0]?.(bonusFact)).toContain('8');
 
-    const malusFact = fact('LEADER_MALUS', [0.6, 3, 1]);
-    expect(SPEAKER_LINES_FR.LEADER_MALUS[1]?.(malusFact)).toContain('60');
-
     const streakFact = fact('OVERTAKE_STREAK', [4]);
     expect(SPEAKER_LINES_FR.OVERTAKE_STREAK[0]?.(streakFact)).toContain('4');
+  });
+
+  it('exprime BIG_COMEBACK en places, jamais en mètres', () => {
+    const source = fact('BIG_COMEBACK', [4, 2]);
+    const lines = SPEAKER_LINES_FR.BIG_COMEBACK.map((formatter) => formatter(source));
+
+    for (const line of lines) {
+      expect(line, `« ${line} »`).toContain('4 places');
+      expect(line, `« ${line} » ne doit pas parler de mètres`).not.toContain('4 m');
+      // Aucune distance en mètres : le motif « unité m » est cherché, pas la lettre « m ».
+      expect(line).not.toMatch(/\d\s?m\b/);
+    }
+    // Le rang courant est une position, pas une distance : il s'écrit en ordinal.
+    expect(lines.some((line) => line.includes('2e'))).toBe(true);
+  });
+
+  it('exprime LAST_COMEBACK en places, avec un pluriel correct', () => {
+    const source = fact('LAST_COMEBACK', [3, 3]);
+    const lines = SPEAKER_LINES_FR.LAST_COMEBACK.map((formatter) => formatter(source));
+
+    for (const line of lines) {
+      expect(line, `« ${line} »`).not.toContain('3 m');
+      expect(line).not.toMatch(/\d\s?m\b/);
+    }
+    expect(lines.filter((line) => line.includes('3 places')).length).toBeGreaterThanOrEqual(4);
+
+    // Une seule place gagnée s'écrit au singulier.
+    const single = SPEAKER_LINES_FR.LAST_COMEBACK.map((formatter) => formatter(fact('LAST_COMEBACK', [1, 2])));
+    expect(single.some((line) => line.includes('1 place') && !line.includes('1 places'))).toBe(true);
+  });
+
+  it('affiche la pénalité du leader en pour cent positifs, sans double négation', () => {
+    // Faits réels de P009-A : `CHUTE` puis `SIESTE`.
+    const chute = fact('LEADER_MALUS', [-0.6, 4, 1]);
+    const sieste = fact('LEADER_MALUS', [-0.7, 5, 1]);
+
+    const chuteLines = SPEAKER_LINES_FR.LEADER_MALUS.map((formatter) => formatter(chute));
+    const siesteLines = SPEAKER_LINES_FR.LEADER_MALUS.map((formatter) => formatter(sieste));
+
+    for (const line of chuteLines) {
+      expect(line, `« ${line} »`).toContain('60 % en moins');
+      expect(line, `« ${line} » ne doit pas doubler la négation`).not.toContain('-60');
+      expect(line).not.toContain('+-');
+      expect(line).not.toContain('60 % de moins');
+    }
+    for (const line of siesteLines) {
+      expect(line, `« ${line} »`).toContain('70 % en moins');
+      expect(line).not.toContain('-70');
+      expect(line).not.toContain('+-');
+    }
+  });
+
+  it('écrit le premier rang « 1re », et les suivants en « e »', () => {
+    const bonusRank1 = SPEAKER_LINES_FR.BIG_BONUS[4]?.(fact('BIG_BONUS', [1.35, 8, 1])) ?? '';
+    expect(bonusRank1).toContain('1re');
+    expect(bonusRank1).not.toContain('1e ');
+    expect(bonusRank1).not.toContain('100 %');
+
+    const bonusRank2 = SPEAKER_LINES_FR.BIG_BONUS[4]?.(fact('BIG_BONUS', [1.35, 8, 2])) ?? '';
+    expect(bonusRank2).toContain('2e');
+
+    const comebackRank1 = SPEAKER_LINES_FR.BIG_COMEBACK[0]?.(fact('BIG_COMEBACK', [3, 1])) ?? '';
+    expect(comebackRank1).toContain('1re');
+    expect(comebackRank1).not.toContain('1e ');
   });
 
   it('tronque les distances de pointage au mètre, sans jamais les surestimer', () => {

@@ -118,14 +118,32 @@ export function formatTruncatedMetresFr(value: number): string {
   return `${String(Math.floor(value))} m`;
 }
 
-/** Mètre entier, sans réarrondi. */
-function metres(magnitude: number): string {
-  return `${String(Math.trunc(magnitude))} m`;
+/**
+ * Places gagnées, en **places** : jamais en mètres.
+ *
+ * `BIG_COMEBACK` et `LAST_COMEBACK` publient `[placesGagnées, rangCourant]` : la première magnitude
+ * est un nombre de places, pas une distance. Le mot est donc obligatoire, et le pluriel suit la
+ * valeur (`1 place`, `4 places`).
+ */
+export function formatPlacesFr(value: number): string {
+  const places = Math.trunc(value);
+  return `${String(places)} place${Math.abs(places) >= 2 ? 's' : ''}`;
 }
 
-/** Rang ordinal en toutes lettres : `1` → `« 1er »`. */
+/**
+ * Pénalité de vitesse d'un événement, exprimée en pour cent **positifs**.
+ *
+ * Les magnitudes de `LEADER_MALUS` sont **négatives** (`CHUTE` : `-0.6`, `SIESTE` : `-0.7`) : la
+ * valeur absolue n'est prise que pour l'affichage, afin de ne jamais écrire « -60 % en moins ».
+ */
+export function formatPenaltyPercentFr(magnitude: number): string {
+  return `${String(Math.round(Math.abs(magnitude) * 100))} % en moins`;
+}
+
+/** Rang ordinal : `1` → `« 1re »`, `2` → `« 2e »`, `3` → `« 3e »`… */
 function rankLabel(rank: number): string {
-  return `${String(Math.trunc(rank))}e`;
+  const value = Math.trunc(rank);
+  return value === 1 ? '1re' : `${String(value)}e`;
 }
 
 /**
@@ -166,11 +184,11 @@ export const SPEAKER_LINES_FR: Readonly<Record<RaceFactType, readonly ((fact: Ra
 
     // magnitudes = [places gagnées, rang courant]
     BIG_COMEBACK: Object.freeze([
-      (fact: RaceFact) => `${nameAt(fact, 0)} remonte de ${metres(magnitudeAt(fact, 0))} : voilà le ${rankLabel(magnitudeAt(fact, 1))} !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} a mangé ${metres(magnitudeAt(fact, 0))} en un éclair, et pointe au ${rankLabel(magnitudeAt(fact, 1))} rang !`,
-      (fact: RaceFact) => `Remontée express : ${nameAt(fact, 0)} gagne ${metres(magnitudeAt(fact, 0))} et se retrouve ${rankLabel(magnitudeAt(fact, 1))} !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} n'était pas invité, le revoilà ${rankLabel(magnitudeAt(fact, 1))} : ${metres(magnitudeAt(fact, 0))} de grimpées !`,
-      (fact: RaceFact) => `On ne l'avait pas vu venir : ${nameAt(fact, 0)} bondit de ${metres(magnitudeAt(fact, 0))} jusqu'au ${rankLabel(magnitudeAt(fact, 1))} rang !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} remonte de ${formatPlacesFr(magnitudeAt(fact, 0))} : voilà le ${rankLabel(magnitudeAt(fact, 1))} !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} a mangé ${formatPlacesFr(magnitudeAt(fact, 0))} en un éclair, et pointe au ${rankLabel(magnitudeAt(fact, 1))} rang !`,
+      (fact: RaceFact) => `Remontée express : ${nameAt(fact, 0)} gagne ${formatPlacesFr(magnitudeAt(fact, 0))} et se retrouve ${rankLabel(magnitudeAt(fact, 1))} !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} n'était pas invité, le revoilà ${rankLabel(magnitudeAt(fact, 1))} : ${formatPlacesFr(magnitudeAt(fact, 0))} de grimpées !`,
+      (fact: RaceFact) => `On ne l'avait pas vu venir : ${nameAt(fact, 0)} bondit de ${formatPlacesFr(magnitudeAt(fact, 0))} jusqu'au ${rankLabel(magnitudeAt(fact, 1))} rang !`,
     ]),
 
     // magnitudes = [dépassements dans la fenêtre]
@@ -188,17 +206,17 @@ export const SPEAKER_LINES_FR: Readonly<Record<RaceFactType, readonly ((fact: Ra
       (fact: RaceFact) => `Coup de boost pour ${nameAt(fact, 0)} : +${String(Math.round(magnitudeAt(fact, 0) * 100))} % pendant ${String(magnitudeAt(fact, 1))} s !`,
       (fact: RaceFact) => `${nameAt(fact, 0)} touche le jackpot : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % de mieux pendant ${String(magnitudeAt(fact, 1))} s !`,
       (fact: RaceFact) => `Bonus pour ${nameAt(fact, 0)} : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % de vitesse en plus, ${String(magnitudeAt(fact, 1))} s pour en profiter !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} appuie sur le champignon : +${String(Math.round(magnitudeAt(fact, 0) * 100))} % pendant ${String(magnitudeAt(fact, 1))} s, ${rankLabel(magnitudeAt(fact, 2))} au moment du tirage !`,
-      (fact: RaceFact) => `Le hasard gâte ${nameAt(fact, 0)} : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % de vitesse en plus, et ${rankLabel(magnitudeAt(fact, 2))} au classement !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} appuie sur le champignon : +${String(Math.round(magnitudeAt(fact, 0) * 100))} % pendant ${String(magnitudeAt(fact, 1))} s, avec le ${rankLabel(magnitudeAt(fact, 2))} rang au tirage !`,
+      (fact: RaceFact) => `Le hasard gâte ${nameAt(fact, 0)} : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % de vitesse en plus, et le ${rankLabel(magnitudeAt(fact, 2))} rang au moment du tirage !`,
     ]),
 
-    // magnitudes = [magnitude de l'événement, durée, rang au moment du tirage] ; le rang vaut 1
+    // magnitudes = [magnitude de l'événement (négative), durée, rang au moment du tirage] ; le rang vaut 1
     LEADER_MALUS: Object.freeze([
-      (fact: RaceFact) => `Aïe pour ${nameAt(fact, 0)} : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % en moins pendant ${String(magnitudeAt(fact, 1))} s, et c'est le leader qui trinque !`,
-      (fact: RaceFact) => `Coup dur pour ${nameAt(fact, 0)}, leader : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % de vitesse en moins pendant ${String(magnitudeAt(fact, 1))} s !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} était devant, il prend ${String(Math.round(magnitudeAt(fact, 0) * 100))} % dans les dents pendant ${String(magnitudeAt(fact, 1))} s !`,
-      (fact: RaceFact) => `Le sort s'acharne sur ${nameAt(fact, 0)} : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % en moins pendant ${String(magnitudeAt(fact, 1))} s, juste quand il mène !`,
-      (fact: RaceFact) => `Ça sent le roussi pour ${nameAt(fact, 0)} : ${String(Math.round(magnitudeAt(fact, 0) * 100))} % de moins pendant ${String(magnitudeAt(fact, 1))} s, en tête de course !`,
+      (fact: RaceFact) => `Aïe pour ${nameAt(fact, 0)} : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${String(magnitudeAt(fact, 1))} s, et c'est le leader qui trinque !`,
+      (fact: RaceFact) => `Coup dur pour ${nameAt(fact, 0)}, leader : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} de vitesse pendant ${String(magnitudeAt(fact, 1))} s !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} était devant, il prend une pénalité de ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${String(magnitudeAt(fact, 1))} s !`,
+      (fact: RaceFact) => `Le sort s'acharne sur ${nameAt(fact, 0)} : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${String(magnitudeAt(fact, 1))} s, juste quand il mène !`,
+      (fact: RaceFact) => `Ça sent le roussi pour ${nameAt(fact, 0)} : ${formatPenaltyPercentFr(magnitudeAt(fact, 0))} pendant ${String(magnitudeAt(fact, 1))} s, en tête de course !`,
     ]),
 
     // magnitudes = [écart P1–P3, secondes écoulées]
@@ -212,11 +230,11 @@ export const SPEAKER_LINES_FR: Readonly<Record<RaceFactType, readonly ((fact: Ra
 
     // magnitudes = [places gagnées, rang courant]
     LAST_COMEBACK: Object.freeze([
-      (fact: RaceFact) => `${nameAt(fact, 0)} était dernier, le revoilà ${rankLabel(magnitudeAt(fact, 1))} : ${metres(magnitudeAt(fact, 0))} avalées !`,
-      (fact: RaceFact) => `Retour des abysses : ${nameAt(fact, 0)} quitte la cave et grimpe ${rankLabel(magnitudeAt(fact, 1))} !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} sort de la cave : ${metres(magnitudeAt(fact, 0))} de gagnées, ${rankLabel(magnitudeAt(fact, 1))} au classement !`,
-      (fact: RaceFact) => `On l'avait enterré trop vite : ${nameAt(fact, 0)} remonte ${metres(magnitudeAt(fact, 0))} et pointe ${rankLabel(magnitudeAt(fact, 1))} !`,
-      (fact: RaceFact) => `${nameAt(fact, 0)} fait le ménage dans le classement : ${metres(magnitudeAt(fact, 0))} de remontées, ${rankLabel(magnitudeAt(fact, 1))} !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} était dernier, le revoilà ${rankLabel(magnitudeAt(fact, 1))} : ${formatPlacesFr(magnitudeAt(fact, 0))} avalées !`,
+      (fact: RaceFact) => `Retour des abysses : ${nameAt(fact, 0)} quitte la cave et grimpe à la ${rankLabel(magnitudeAt(fact, 1))} place !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} sort de la cave : ${formatPlacesFr(magnitudeAt(fact, 0))} de gagnées, ${rankLabel(magnitudeAt(fact, 1))} au classement !`,
+      (fact: RaceFact) => `On l'avait enterré trop vite : ${nameAt(fact, 0)} remonte ${formatPlacesFr(magnitudeAt(fact, 0))} et pointe ${rankLabel(magnitudeAt(fact, 1))} !`,
+      (fact: RaceFact) => `${nameAt(fact, 0)} fait le ménage dans le classement : ${formatPlacesFr(magnitudeAt(fact, 0))} de remontées, ${rankLabel(magnitudeAt(fact, 1))} !`,
     ]),
 
     // magnitudes = distances dans l'ordre du classement (P1 → P6), du plus loin au moins loin

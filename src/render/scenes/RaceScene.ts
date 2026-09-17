@@ -22,8 +22,12 @@ import { TrackView } from '../view/TrackView';
  * l'afficher, puis de la retirer quand la source n'en fournit plus.
  */
 export interface CommentaryView {
-  /** Avance la montre d'affichage (temps réel) et rend la réplique visible, ou `null`. */
-  update(realDtMs: number): void;
+  /**
+   * Avance la montre d'affichage (temps réel) puis retente la parole au temps simulé **courant**.
+   *
+   * `simNowS` est un simple nombre : le commentaire ne connaît ni le moteur ni la simulation.
+   */
+  update(realDtMs: number, simNowS?: number): void;
   /** Réplique à afficher dans cette frame, ou `null`. */
   currentLine(): SpeakerLine | null;
 }
@@ -167,7 +171,10 @@ export class RaceScene extends Scene {
     }
 
     this.leaderboard?.update(leaderboardOf(state));
-    this.updateSubtitle(delta);
+    // Le `tSim` courant vient de l'instantané déjà lu : le commentaire n'a aucun accès au moteur,
+    // il reçoit un simple nombre, ce qui lui permet de repoller un fait en file dès qu'il devient
+    // éligible — sans attendre qu'un nouveau fait arrive.
+    this.updateSubtitle(delta, state.tSim);
     this.updateHud();
     this.debug?.update(state, this.options.simulation.phase, this.options.simulation.timeScale);
   }
@@ -179,13 +186,13 @@ export class RaceScene extends Scene {
    * par le speaker, dans `src/speaker/`. Le bandeau ne fait que constater — et remplacer
    * immédiatement un texte par un autre, sans jamais remettre l'ancien.
    */
-  private updateSubtitle(deltaMs: number): void {
+  private updateSubtitle(deltaMs: number, simNowS: number): void {
     const commentary = this.options.commentary;
     if (commentary === null || this.subtitle === null) {
       return;
     }
 
-    commentary.update(deltaMs);
+    commentary.update(deltaMs, simNowS);
     const text = commentary.currentLine()?.text ?? '';
     // Le conteneur redessine son fond : on ne le réécrit que lorsque la réplique change réellement.
     if (text !== this.shownSubtitle) {

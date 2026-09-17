@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { RaceCommentary, SUBTITLE_DISPLAY_MS } from '../../src/app/RaceCommentary';
 import { SPEAKER_CATALOGUE_FR } from '../../src/app/strings.fr';
+import { forkStream } from '../../src/core/rng';
 import type { CharacterId, RaceFact, RaceFactType } from '../../src/core/types';
 import { RaceSimulation } from '../../src/sim/RaceSimulation';
 import { SIM_FAST_CONFIG } from '../../src/sim/config';
@@ -198,12 +199,84 @@ describe('P009-C : intégration visible du speaker', () => {
     // Deux faits du même pas : 50 puis 70. Alimentés en lot, c'est bien le plus important qui parle.
     commentary.feedFacts([
       fact('BIG_BONUS', 0, 50, [1.2, 6, 1]),
-      fact('LEADER_MALUS', 0, 70, [0.6, 3, 1]),
+      fact('LEADER_MALUS', 0, 70, [-0.6, 3, 1]),
     ]);
 
     const line = commentary.currentLine();
     expect(line?.decision.fact.type).toBe('LEADER_MALUS');
     expect(line?.decision.importance).toBe(70);
+  });
+
+  it('reprend un fait en file dès que le temps simulé courant le rend éligible', () => {
+    const { commentary } = director();
+
+    commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+    expect(commentary.currentLine()?.decision.fact.type).toBe('LEADER_CHANGE');
+
+    // B arrive à t=2, plus important mais pas assez pour couper (écart < INTERRUPT_DELTA) : il entre
+    // en file sans parler, et il y est retenu par sa **propre** fenêtre d'éligibilité.
+    commentary.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
+    expect(commentary.currentLine()?.decision.fact.type).toBe('LEADER_CHANGE');
+
+    // Plus aucun fait n'arrive ensuite : le seul instant connu du commentaire reste t=2.
+    // A expire alors que la course est déjà bien plus loin — un `poll` au temps courant le prouve.
+    commentary.update(SUBTITLE_DISPLAY_MS, 15);
+    expect(commentary.currentLine()?.decision.fact.type).toBe('BIG_COMEBACK');
+
+    // Preuve du bug corrigé : repoller avec l'ancien instant (t=2) laissait B en file pour toujours.
+    const stale = director();
+    stale.commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+    stale.commentary.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
+    stale.commentary.update(SUBTITLE_DISPLAY_MS, 2);
+    expect(stale.commentary.currentLine()).toBeNull();
+  });
+
+  it('ne contourne aucun cooldown quand le temps simulé est figé (pause)', () => {
+    const { commentary } = director();
+
+    commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+    commentary.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
+
+    // Pause : `tSim` ne bouge pas, seules les frames réelles défilent. Les cooldowns simulés ne
+    // progressent donc pas, et B ne peut pas démarrer, quel que soit le nombre d'appels.
+    commentary.update(SUBTITLE_DISPLAY_MS, 3);
+    for (let frame = 0; frame < 600; frame += 1) {
+      commentary.update(16, 3);
+      expect(commentary.currentLine()).toBeNull();
+    }
+    expect(commentary.linesStarted()).toBe(1);
+
+    // Le temps simulé reprend et dépasse la fenêtre d'éligibilité : B démarre, une seule fois.
+    commentary.update(16, 15);
+    expect(commentary.currentLine()?.decision.fact.type).toBe('BIG_COMEBACK');
+    expect(commentary.linesStarted()).toBe(2);
+  });
+
+  it('ne consomme aucun tirage de variante tant qu’aucune réplique ne démarre', () => {
+    const simulation = new RaceSimulation('POULET42', SIM_FAST_CONFIG);
+    const seedValue = simulation.view.seedValue;
+
+    const commentary = new RaceCommentary(seedValue, SPEAKER_CATALOGUE_FR);
+    commentary.feedFacts([fact('LEADER_CHANGE', 0, 60, [3.24, 12])]);
+    commentary.feedFacts([fact('BIG_COMEBACK', 2, 70, [4, 2])]);
+
+    // Beaucoup de polls infructueux (tSim trop tôt, puis pause) : aucun tirage ne doit être consommé.
+    for (let frame = 0; frame < 200; frame += 1) {
+      commentary.update(16, 3);
+    }
+    expect(commentary.currentLine()).toBeNull();
+
+    // Le flux attendu est celui d'une seule réplique démarrée : la 2e décision consomme le 2e tirage.
+    commentary.update(16, 15);
+    const second = commentary.currentLine();
+    expect(second?.decision.fact.type).toBe('BIG_COMEBACK');
+
+    const stream = forkStream(seedValue, 'speaker:lines');
+    const firstVariant = stream.nextInt(0, SPEAKER_CATALOGUE_FR.lines.LEADER_CHANGE.length - 1);
+    const secondVariant = stream.nextInt(0, SPEAKER_CATALOGUE_FR.lines.BIG_COMEBACK.length - 1);
+    expect(second?.variantIndex).toBe(secondVariant);
+    expect(firstVariant).toBeGreaterThanOrEqual(0);
+    expect(firstVariant).toBeLessThan(SPEAKER_CATALOGUE_FR.lines.LEADER_CHANGE.length);
   });
 });
 

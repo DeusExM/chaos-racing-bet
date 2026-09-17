@@ -44,12 +44,16 @@ import type { ActiveEvent, CharacterId, EventId } from './types';
  *
  * ## Neutralité en distance (P010)
  *
- * À poids et durées égaux, un bonus rapporte **plus** de distance qu'un malus n'en retire : le gain
- * n'est pas proportionnel à la magnitude mais à `BASE × (1 + m)`, donc la famille positive est
- * convexe. Mesuré sur 100 seeds, le catalogue d'origine ajoutait `+0,90 %` de distance moyenne à lui
- * seul. Les magnitudes de **bonus** ont donc été réduites de 35 % (`× 0,65`), ce qui ramène
- * l'ensemble du catalogue à la neutralité ; les **malus** sont inchangés, faute de raison mesurée de
- * les aggraver.
+ * Le catalogue **n'est pas** neutre en distance : les bonus rapportent globalement plus de distance
+ * que les malus n'en retirent. Ce n'est **pas** une conséquence de la formule de gain — le gain d'un
+ * événement isolé, `Δv × (D − t_rampe / 2)` (`GAME_DESIGN.md` §7.2), est **linéaire** en `m`, donc
+ * neutre en signe — mais un fait **mesuré**, produit par la combinaison réelle des magnitudes, durées
+ * et poids tirés, des rampes directionnelles (`MAX_ACCEL` ≠ `MAX_DECEL`), de l'écrêtage à
+ * `SPEED.MIN`/`SPEED.MAX` (qui rabote les malus) et des interactions avec la dérive et les surges.
+ * Mesuré sur 100 seeds, le catalogue d'origine ajoutait `+0,90 %` de distance moyenne à lui seul.
+ * Les magnitudes de **bonus** ont donc été réduites de 35 % (`× 0,65`, plus grand facteur conforme
+ * parmi les valeurs testées) ; les **malus** sont inchangés, faute de raison mesurée de les aggraver.
+ * `GAME_DESIGN.md` §7.1 porte le détail et le tableau du balayage.
  */
 
 /** Fiche normative d'un événement du catalogue. */

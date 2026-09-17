@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 
-import { PREVIEW_HOST, PREVIEW_PORT } from './dev-ports';
+import { DEV_HOST, DEV_PORT, PREVIEW_HOST, PREVIEW_PORT } from './dev-ports';
 
 // P001 : configuration minimale. Le plugin PWA (vite-plugin-pwa) est deja installe
 // mais n'est volontairement PAS active ici : son branchement appartient a P016.
@@ -15,8 +15,10 @@ export default defineConfig({
     // Hote explicitement local : jamais 0.0.0.0, aucun acces depuis un autre appareil.
     // Sans cela, `localhost` peut se resoudre en ::1 et le test E2E, qui interroge
     // 127.0.0.1, ne voit jamais le serveur.
-    host: '127.0.0.1',
-    port: 5173,
+    // Hote et port lus dans `dev-ports.ts` : convention 18000-18999, hors des plages que
+    // Windows reserve dynamiquement autour de 4000/5000 (bind -> EACCES).
+    host: DEV_HOST,
+    port: DEV_PORT,
     strictPort: true,
   },
   preview: {

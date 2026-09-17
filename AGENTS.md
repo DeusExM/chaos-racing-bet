@@ -302,13 +302,16 @@ d'implémenter** et proposer une variante compatible (ou demander une modificati
 * `$env:TEMP` / `$env:TMP` peuvent être redirigés ponctuellement vers `$PWD\.tmp` pour une commande
   (Chromium y écrit alors son profil). **Ne jamais modifier les variables globales de Windows.**
 * **Ports d'outillage : convention `18000–18999`, source unique `dev-ports.ts`.** Le serveur de
-  prévisualisation (`vite preview`) et la `baseURL` des tests E2E (`playwright.config.ts`) lisent le
-  même port (`18173`) dans ce module. Motif : Windows réserve **dynamiquement** des plages autour de
-  `4000` (WinNAT/Hyper-V — constaté : `4108–4207`), et `bind()` sur un port réservé échoue en
-  `EACCES`. L'ancien port `4173` a dû être abandonné pour cette raison : `npm run verify` échouait à
-  l'étape E2E (`vite preview` ne démarrait plus) alors qu'aucun test n'était en cause. Ne pas
-  « réparer » cela en modifiant la configuration réseau de la machine : changer de port suffit, et la
-  convention évite d'y revenir. Le serveur de développement reste sur `5173` (`vite.config.ts`).
+  développement (`18100`) et le serveur de prévisualisation (`18173`, également `baseURL` des tests
+  E2E dans `playwright.config.ts`) lisent leur hôte et leur port dans ce module. Motif : Windows
+  réserve **dynamiquement** des plages à l'intérieur de sa plage dynamique (`1024–15000`), et
+  `bind()` sur un port réservé échoue en `EACCES`. Cas **constaté** : la plage `4108–4207`, qui
+  contenait l'ancien port de prévisualisation `4173` — `vite preview` ne démarrait plus, donc
+  `npm run verify` échouait à l'étape E2E alors qu'aucun test n'était en cause. L'ancien port de
+  développement `5173` **répondait encore** (`bind` testé : OK) : il a été déplacé pour tenir la même
+  convention, pas parce qu'il était cassé. Ne pas « réparer » ces collisions en modifiant la
+  configuration réseau de la machine : changer de port suffit, et la convention évite d'y revenir.
+  Un outil externe au dépôt utilise `18080` ; il n'a pas à être intégré au projet.
 
 ### 9.1 Périmètre d'exécution et garde-fous
 

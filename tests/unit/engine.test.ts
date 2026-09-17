@@ -442,8 +442,8 @@ describe('équivalence des 6 personnages', () => {
       );
     }
 
-    // 3. Le biais est bien *commun*, et il est positif : c'est l'écrêtage à `SPEED.MIN` et la
-    //    convexité du gain de distance qui le veulent, pas un personnage avantagé.
+    // 3. Le biais est bien *commun*, et il est positif : c'est un fait mesuré (écrêtage à
+    //    `SPEED.MIN`, rampes directionnelles, catalogue d'événements), pas un personnage avantagé.
     const relative = (grand - SPEED.BASE) / SPEED.BASE;
     expect(relative, `biais global mesuré : ${(relative * 100).toFixed(3)} %`).toBeGreaterThan(0);
     expect(relative).toBeLessThan(0.015);

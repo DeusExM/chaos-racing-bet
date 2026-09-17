@@ -879,10 +879,12 @@ export function balanceCriteria(metrics: BalanceMetrics): readonly BalanceCriter
       integer,
     ),
     criterionAtLeast('overtakes-mean', 'Dépassements (moyenne)', metrics.overtakesMean, 25, integer),
-    // §13 : « Répliques du speaker par course | 12 – 30 ». Comme les deux lignes voisines
+    // §13 : « Répliques du speaker par course (moyenne) | 12 – 30 ». Comme ses deux lignes voisines
     // (« Événements par course (moyenne) », « Surges par personnage »), la ligne se lit sur la
-    // **moyenne** du corpus. La dispersion par course est publiée à part (et dans le rapport), parce
-    // qu'une moyenne dans la plage ne dit rien des courses les plus pauvres en répliques.
+    // **moyenne** du corpus : le libellé porte donc le mot « moyenne », pour qu'aucun lecteur ne
+    // puisse croire que chaque course doit tenir dans la plage. La dispersion par course est publiée
+    // à part (et dans le rapport), parce qu'une moyenne dans la plage ne dit rien des courses les plus
+    // pauvres en répliques.
     ...(metrics.speakerLines === null
       ? []
       : [

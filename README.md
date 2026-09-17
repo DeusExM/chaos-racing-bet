@@ -23,7 +23,7 @@ Aucun personnage, aucun asset, aucune simulation.
 
 | Commande | Effet |
 | --- | --- |
-| `npm.cmd run dev` | Serveur de développement Vite sur `http://127.0.0.1:5173` |
+| `npm.cmd run dev` | Serveur de développement Vite sur `http://127.0.0.1:18100` (voir `dev-ports.ts`) |
 | `npm.cmd run build` | Build de production dans `dist/` |
 | `npm.cmd run preview` | Sert `dist/` sur `http://127.0.0.1:18173` (voir `dev-ports.ts`) |
 | `npm.cmd run typecheck` | `tsc --noEmit` |

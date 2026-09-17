@@ -112,7 +112,7 @@ Résultat : **66,90 %** sur 1000 seeds, dans la plage, avec de la marge des deux
 
 | Constante | Avant | Après | Justification mesurée |
 | --- | --- | --- | --- |
-| `EVENT_CATALOG` : magnitudes de **bonus** (`TURBO`, `RACCOURCI`, `MEGA_TURBO`) | ×1,00 | **×0,65** | Cause du biais net positif : à poids et durées égaux, les bonus rapportent plus que les malus ne retirent, et l'écrêtage `SPEED.MIN` rabote encore les malus. Facteur choisi par balayage (§3.1). Malus **inchangés**. |
+| `EVENT_CATALOG` : magnitudes de **bonus** (`TURBO`, `RACCOURCI`, `MEGA_TURBO`) | ×1,00 | **×0,65** | Le catalogue d'origine produisait un biais net positif **mesuré** (`2,190 %` sur 300 seeds). Ce biais ne découle pas de la formule de gain — `Δv × (D − t_rampe/2)`, §7.2, est **linéaire** en `m` — mais de la combinaison réelle des magnitudes, durées et poids tirés, des rampes directionnelles, de l'écrêtage `SPEED.MIN`/`SPEED.MAX` et des interactions avec la dérive et les surges. Facteur retenu par balayage (§3.1). Malus **inchangés**. |
 | `EVENT.RATE_PER_S` | `1/14` | `1/10` → **`1/14`** | Aller-retour assumé : le passage à `1/10` visait la densité de répliques, mais la ligne §13 du speaker se lit sur la **moyenne**, déjà conforme à `1/14`, et « proche d'une borne » n'est pas un motif de réglage. **Retour à la valeur d'origine.** |
 | `EventDefinition.cancelsTurbo` + règle de remplacement | présente | **supprimée** | `CHAR_COOLDOWN_S = 8 s` dépasse la durée maximale d'un `TURBO` (4 s) : la règle ne pouvait jamais se déclencher (**0 annulation sur 1000 courses**). Retirée du catalogue, du planificateur, des tests et du document. **Aucun cooldown n'a été réduit.** |
 | `DRIFT` / `SURGE` | — | **inchangés** | Le balayage §2.3 prouve qu'ils ne sont pas la cause : les toucher n'apporte rien et mettrait en danger les critères de surges. |
@@ -127,12 +127,14 @@ changement**, comme l'exige `AGENTS.md` §2.
 | `× 1,00` (catalogue d'origine) | `2,190 %` | hors plage |
 | `× 0,85` | `1,871 %` | hors plage |
 | `× 0,75` | `1,659 %` | hors plage |
-| **`× 0,65`** | **`1,444 %`** | conforme — facteur **minimal** retenu |
+| **`× 0,65`** | **`1,444 %`** | conforme — plus grand facteur conforme **testé**, retenu |
 | `× 0,55` | `1,225 %` | (marge plus large, spectacle plus faible) |
 | `× 0,50` | `1,115 %` | — |
 
-`× 0,75` ne suffit pas, `× 0,65` suffit : aucune marge gratuite n'a été ajoutée. Sur le corpus
-canonique de 1000 seeds, le biais final vaut **1,258 %** (marge 0,24 point).
+`× 0,75` ne suffit pas, `× 0,65` suffit : aucune marge gratuite n'a été ajoutée. Le balayage est
+**discret** — aucun facteur intermédiaire (par exemple `× 0,70`) n'a été mesuré —, donc `× 0,65`
+n'est pas démontré minimal au sens mathématique : c'est le plus grand facteur **testé** qui soit
+conforme. Sur le corpus canonique de 1000 seeds, le biais final vaut **1,258 %** (marge 0,24 point).
 
 ---
 

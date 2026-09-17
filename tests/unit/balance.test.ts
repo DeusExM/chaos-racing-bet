@@ -250,8 +250,11 @@ describe('critères §13 : corpus réduit de 100 seeds', () => {
 
   /**
    * Le critère du leader est **désormais conforme** : §13 demande que le leader à `tSim = 135 s`
-   * gagne 55 % à 85 % des courses, et P010 mesure **66,33 %** sur 300 seeds, **67,00 %** sur les 100
-   * seeds de ce test.
+   * gagne 55 % à 85 % des courses. Trois mesures, trois corpus :
+   *
+   * * corpus **canonique de 1000 seeds** : **66,90 %** — valeur normative, celle de §13 ;
+   * * corpus **réduit de 300 seeds** (mesure de travail) : 66,33 % ;
+   * * corpus de ce test, **100 seeds** (préfixe du canonique) : 67,00 %.
    *
    * Il a remplacé en P010 un critère mesuré à `tSim = 171 s`, qui valait **88,10 %** sur le corpus
    * canonique de 1000 seeds — hors plage. L'instant a été déplacé parce que 135 s est le **début du

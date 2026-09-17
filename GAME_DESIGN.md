@@ -385,27 +385,49 @@ Poids total = `92`. Le tirage est un tirage pondéré **uniforme par poids**.
 Vitesses cibles maximales atteintes : `TURBO` `26,0 m/s`, `RACCOURCI` `27,6 m/s`, `MEGA_TURBO`
 `31,6 m/s` — toutes sous `SPEED.MAX = 48 m/s`, donc **aucun événement n'est écrasé par le plafond**.
 
-**Neutralité en distance (P010).** À poids et durées égaux, un bonus rapporte plus de distance qu'un
-malus de même magnitude n'en retire : le gain vaut `BASE × (1 + m) × D`, expression **convexe** en
-`m`, donc la famille positive pèse davantage. Mesuré sur 100 seeds, le tableau d'origine (bonus
-`+1.20 .. +2.50`) ajoutait `+0,90 %` de distance moyenne à lui seul. Les magnitudes de **bonus** ont
-donc été réduites de 35 % (`× 0,65`) ; les **malus** sont inchangés.
+**Neutralité en distance (P010).** Le catalogue **n'est pas** neutre en distance : les événements
+**bonus** rapportent globalement plus de distance que les **malus** n'en retirent. Ce n'est pas une
+propriété de la formule de gain : le gain d'un événement isolé, `Δv × (D − t_rampe / 2)` (§7.2), est
+**linéaire** en `m` — elle ne penche ni du côté positif ni du côté négatif. Le biais est **mesuré**,
+et il provient de la combinaison réelle des effets suivants :
 
-Le facteur `× 0,65` a été choisi par **balayage sur 300 seeds**, à `RATE_PER_S = 1/14` (table du
-§7.3), en cherchant la correction **minimale** qui ramène le biais sous `±1,5 %` :
+* **Magnitudes, durées et poids tels qu'ils sont tirés** dans le catalogue ci-dessus : les couples
+  `TURBO`/`CHUTE` (poids 22 et 20) ne se compensent pas exactement, et rien ne garantit que la
+  moyenne des magnitudes positives égale celle des négatives ;
+* **Rampes** d'accélération et de décélération (`MAX_ACCEL = 10`, `MAX_DECEL = 12`) : chaque
+  transition est rognée d'une quantité qui dépend du **signe** de `Δv` et de sa distance à la cible,
+  donc le gain net d'un aller-retour n'est pas nul ;
+* **Écrêtage** à `SPEED.MIN = 3` et `SPEED.MAX = 48` : un malus qui se compose avec une dérive et un
+  surge déjà négatifs voit sa cible passer sous le plancher et retire **moins** de distance que §7.2
+  ne l'annonce (une `SIESTE` peut ne retirer qu'une trentaine de mètres), tandis qu'un bonus peut
+  buter sur le plafond ;
+* **Interactions avec la dynamique existante** (dérive, surges, événements voisins) : ce que mesure
+  §7.2 est le gain **d'un événement isolé**, `drift = surge = 0`, pas le net d'un catalogue complet
+  sur 180 s.
+
+Mesuré sur 100 seeds, le tableau d'origine (bonus `+1.20 .. +2.50`) ajoutait `+0,90 %` de distance
+moyenne à lui seul. Les magnitudes de **bonus** ont donc été réduites de 35 % (`× 0,65`) ; les
+**malus** sont inchangés, faute de raison mesurée de les aggraver. La **formule de gain avec rampe du
+§7.2 reste la référence** pour le gain d'un événement isolé ; elle ne prédit pas le net d'un
+catalogue.
+
+Le facteur `× 0,65` vient d'un **balayage sur 300 seeds**, à `RATE_PER_S = 1/14` (table du §7.3) :
+c'est **le plus grand facteur conforme parmi les valeurs testées**, celles qui ramènent le biais sous
+`±1,5 %`.
 
 | Facteur sur les bonus | Biais de vitesse maximal (300 seeds) |
 | --- | --- |
 | `× 1,00` (catalogue d'origine) | `2,190 %` — **hors plage** |
 | `× 0,85` | `1,871 %` — hors plage |
 | `× 0,75` | `1,659 %` — hors plage |
-| **`× 0,65`** | **`1,444 %`** — conforme |
+| **`× 0,65`** | **`1,444 %`** — conforme, facteur retenu |
 | `× 0,55` | `1,225 %` |
 | `× 0,50` | `1,115 %` |
 
-`× 0,75` ne suffit pas, `× 0,65` suffit : c'est donc le facteur retenu, sans marge gratuite ajoutée.
-La marge est **mince** (0,056 point sur le corpus réduit), et c'est le corpus canonique de 1000 seeds
-qui tranche — voir `docs/balance-report.md`.
+Le balayage est **discret** : aucun facteur intermédiaire (par exemple `× 0,70`) n'a été mesuré, donc
+`× 0,65` n'est pas démontré **minimal au sens mathématique** — c'est le plus grand facteur **testé**
+qui soit conforme. La marge est **mince** (0,056 point sur le corpus réduit), et c'est le corpus
+canonique de 1000 seeds qui tranche : `1,258 %` — voir `docs/balance-report.md`.
 
 ### 7.2 Gain de distance réellement produit
 
@@ -626,8 +648,18 @@ Cooldowns par type : `LEADER_CHANGE 12 s`, `BIG_COMEBACK 15 s`, `OVERTAKE_STREAK
 `CHECKPOINT_SPLIT 5 s`, `FINISH 0`. Déduplication : un fait identique (même type, mêmes personnages,
 même tranche de magnitude) est supprimé pendant `10 s`.
 
-**Cible d'équilibre** : 12 à 30 répliques par course (≈ 1 toutes les 6 à 15 s), jamais 0, jamais
-plus de 12 par segment.
+**Cible statistique** : **moyenne de 12 à 30 répliques par course sur le corpus d'équilibrage**
+(≈ 1 toutes les 6 à 15 s en moyenne). C'est bien une **moyenne de corpus**, pas une exigence par
+course : la discipline de parole est déterministe mais elle dépend des faits réellement produits, donc
+une course pauvre en faits saillants parle moins. Le quota dur de `12` par segment reste une borne
+**par segment**, jamais un objectif à atteindre : **le speaker ne parle que sur un `RaceFact`**, il
+n'est jamais forcé d'émettre une réplique pour remplir un quota, et il ne parle pas du tout si les
+faits manquent. La distribution est surveillée en entier (min, percentiles, max, nombre de courses
+sous 12, courses muettes).
+
+Mesuré par P010 sur le corpus canonique de 1000 seeds : **min 7** | moyenne **16,734** | max **29**,
+**93 courses sur 1000 sous 12** répliques, **aucune course muette** (`= 0` : 0 course, `> 30` : 0
+course). Détail dans `docs/balance-report.md` §4.2.
 
 ### 9.4 Textes
 
@@ -763,7 +795,7 @@ Sur **1000 seeds**, 6 personnages, course complète :
 | Événements par course (moyenne) | 10 – 16 |
 | Événements par personnage | ≤ 5, part de chacun entre 10 % et 27 % |
 | Surges par personnage | 14 – 26 |
-| Répliques du speaker par course | 12 – 30 |
+| Répliques du speaker par course (moyenne) | 12 – 30 |
 | Reproductibilité | 100/100 seeds identiques bit à bit |
 | Nombre de pas par course | exactement `10800`, avec ou sans pauses |
 | Vitesse moyenne finale par personnage | `SPEED.BASE ± 1,5 %` (équivalence) |
@@ -772,14 +804,13 @@ Ces seuils sont **implémentés comme tests** (P010). Si un réglage change, le 
 changent ensemble.
 
 > **Biais de vitesse — résolu en P010.** La dérive, les surges et les événements ont chacun une
-> espérance **nette positive** : les constantes de surge de §6.4 valent ≈ +0,9 %, et le catalogue
-> d'événements de §7.1 ajoutait ≈ +1,1 point de plus, parce qu'à poids et durées égaux les bonus
-> rapportent plus de distance que les malus n'en retirent — l'écrêtage à `SPEED.MIN` rabote encore les
-> malus (une `SIESTE` ne retire parfois que 29 m). P008 avait mesuré **+2,03 %** de `SPEED.BASE`
-> (384 courses). P010 a corrigé la cause : les **magnitudes de bonus du catalogue §7.1 ont été
-> réduites à 65 %** (§7.1 recalculé, malus inchangés), facteur choisi par balayage comme la
-> correction minimale qui suffit. L'invariant d'équivalence §5.6 tient toujours : aucun personnage ne
-> s'écarte durablement de la moyenne des six.
+> espérance **nette positive**, et leur somme dépassait le seuil `±1,5 %` de §13. P008 avait mesuré
+> **+2,03 %** de `SPEED.BASE` (384 courses). P010 a corrigé la part qui vient du catalogue : les
+> **magnitudes de bonus du catalogue §7.1 ont été réduites à 65 %** (§7.1 recalculé, malus inchangés),
+> facteur retenu par balayage — le **plus grand facteur conforme parmi les valeurs testées**, et rien
+> de plus. Biais résiduel mesuré sur le corpus canonique de 1000 seeds : **+1,258 %**, mesure par
+> personnage comprise (`docs/balance-report.md` §4). L'invariant d'équivalence §5.6 tient toujours :
+> aucun personnage ne s'écarte durablement de la moyenne des six.
 
 > **Critère du leader — instant remplacé en P010, de 171 s à 135 s.** Le critère s'énonçait « le
 > leader à `tSim = 171 s` gagne 55 % – 85 % des courses ». Mesuré sur le corpus canonique de
@@ -799,8 +830,10 @@ changent ensemble.
 > au prix de l'écart P1–P6 (181 m → 121 m) et du spectacle de §7. Aucun mécanisme de fin de course,
 > aucun malus du leader, aucun bonus au dernier n'a été introduit : §7.4 et §5.5 l'interdisent.
 >
-> Le critère du leader à 135 s, avec la même plage `55 % – 85 %`, est **conforme** : **66,33 %** sur
-> 300 seeds, mesuré sur le corpus canonique de 1000 seeds par le harnais.
+> Le critère du leader à 135 s, avec la même plage `55 % – 85 %`, est **conforme**. Deux mesures, deux
+> corpus — la valeur **normative** est celle du corpus canonique :
+> * corpus canonique de **1000 seeds** : **66,90 %** — valeur de référence, celle que cite §13 ;
+> * corpus **réduit de 300 seeds** (préfixe du précédent, mesure de travail) : 66,33 %.
 
 ---
 

@@ -760,12 +760,16 @@ permanente déjà présente (P004).
 * **Mesure canonique** : 1000 seeds, corpus `balance-p010`, **25 critères conformes sur 25**.
   Reproductibilité **100/100** bit à bit, `10800` pas par course.
 * **Constantes ajustées** (chacune justifiée par une mesure, aucune touche à §6.3/§6.4) :
-  magnitudes de **bonus** du catalogue §7.1 `× 0,65` — facteur minimal d'un balayage 300 seeds qui
-  ramène le biais de vitesse sous `±1,5 %` (`× 0,75` échouait encore) ; malus inchangés.
+  magnitudes de **bonus** du catalogue §7.1 `× 0,65` — **plus grand facteur conforme parmi les valeurs
+  testées** lors d'un balayage de 300 seeds qui ramène le biais de vitesse sous `±1,5 %` (`× 0,75`
+  échouait encore) ; malus inchangés. Le balayage est discret : `× 0,65` n'est pas démontré minimal au
+  sens mathématique.
   `EVENT.RATE_PER_S` testé à `1/10` puis **rétabli à `1/14`** : le compte d'événements était déjà
   conforme, donc rien ne justifiait de déplacer la constante.
 * **Critère du leader remplacé** : `tSim = 171 s` → `tSim = 135 s` (début du quatrième et dernier
-  segment), même plage `55 % – 85 %`. L'ancien critère mesurait **88,10 %** sur 1000 seeds : hors
+  segment), même plage `55 % – 85 %`. Valeur normative : **66,90 %** sur le corpus canonique de
+  1000 seeds (66,33 % sur le corpus réduit de 300 seeds). L'ancien critère mesurait **88,10 %** sur
+  1000 seeds : hors
   plage, et aucun levier global/symétrique ne le corrigeait (diagnostic apparié McNemar dans
   `docs/balance-report.md` §2). Le nouveau critère est conforme, sans qu'aucun mécanisme de fin de
   course ni aucune règle dépendant du rang n'ait été introduit.
@@ -783,11 +787,23 @@ permanente déjà présente (P004).
 * **Distribution du speaker publiée en entier** (min, p5, p25, médiane, moyenne, p75, p95, max,
   `< 12`, `= 0`, `> 30`) : la moyenne conforme ne doit pas masquer la traîne, et le critère §13 se lit
   sur la moyenne comme ses deux lignes voisines.
-* **Correctif d'infrastructure (hors gameplay)** : le port de prévisualisation/E2E `4173` est passé à
-  **`18173`**, centralisé dans `dev-ports.ts` et lu par `vite.config.ts` **et** `playwright.config.ts`.
-  Motif : Windows réserve dynamiquement des plages autour de `4000` (constaté : `4108–4207`), où
-  `bind()` échoue en `EACCES` — `npm run verify` ne pouvait plus démarrer `vite preview` alors
-  qu'aucun test n'était en cause. Aucune règle de jeu, aucune constante de `core/` n'est concernée.
+* **Correctif d'infrastructure (hors gameplay)** : convention de ports `18000–18999`, source unique
+  `dev-ports.ts` lue par `vite.config.ts` et `playwright.config.ts`. Prévisualisation/E2E `4173` →
+  **`18173`**, serveur de développement `5173` → **`18100`**. Motif : Windows réserve dynamiquement
+  des plages dans sa plage dynamique `1024–15000`, et `bind()` sur un port réservé échoue en
+  `EACCES` — cas constaté `4108–4207` (qui contenait `4173`), où `npm run verify` ne pouvait plus
+  démarrer `vite preview` alors qu'aucun test n'était en cause. `5173` répondait encore au moment du
+  déplacement : il a suivi la convention, il n'était pas cassé. Aucune règle de jeu, aucune constante
+  de `core/` n'est concernée.
+* **Passe de cohérence documentaire (post-P010, hors gameplay)** : §13 nomme le critère du speaker
+  « par course **(moyenne)** » et §9.3 dit explicitement qu'il s'agit d'une **cible statistique de
+  corpus**, pas d'une exigence par course (le quota de 12 reste une borne **par segment**, jamais un
+  objectif, et aucune réplique n'est forcée). Les deux valeurs du critère du leader sont séparées
+  (1000 seeds : **66,90 %**, normatif ; 300 seeds : 66,33 %). L'explication du biais de distance ne
+  parle plus de « convexité » — la formule de gain de §7.2 est **linéaire** en `m` — mais d'un biais
+  **mesuré**, attribué à la combinaison réelle magnitudes/durées/poids + rampes + écrêtage +
+  interactions. `× 0,65` est présenté comme **le plus grand facteur conforme parmi les valeurs
+  testées**, pas comme un minimum mathématique.
 
 ---
 

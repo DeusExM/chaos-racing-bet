@@ -25,7 +25,16 @@
           course) ; son modèle reste un hook de test et de debug.
         -->
         <div class="hud" data-testid="hud">
-          <p id="race-status" class="hud-status" data-testid="race-status">—</p>
+          <!--
+            Ligne d'état compacte (passe responsive iPhone) : sur petit écran paysage, l'état, le
+            segment, le chrono, le son et le commentateur forment **une seule ligne** en haut de la
+            colonne de droite, au lieu de plusieurs blocs superposés. Sur les autres formats, ce
+            conteneur est en `display: contents` : ses enfants reprennent exactement les cellules de
+            la grille du HUD, et la mise en page de bureau reste inchangée.
+          -->
+          <div class="hud-topline">
+            <p id="race-status" class="hud-status" data-testid="race-status">—</p>
+          </div>
           <p
             id="checkpoint-banner"
             class="hud-banner"

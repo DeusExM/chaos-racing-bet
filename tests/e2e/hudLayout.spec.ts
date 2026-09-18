@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { CHARACTER_IDS } from '../../src/core/characters';
-import { VIEW } from '../../src/render/viewConfig';
+import { VIEW, characterHeightPx } from '../../src/render/viewConfig';
 import { expectNoErrors, raceUrl, waitForHooks, watchConsole } from './helpers';
 
 /**
@@ -21,9 +21,13 @@ import { expectNoErrors, raceUrl, waitForHooks, watchConsole } from './helpers';
  * 2. les rectangles réels des six personnages, à plusieurs instants de la course : aucun de ceux qui
  *    sont dessinés ne doit croiser le rectangle du classement.
  *
- * En téléphone paysage (hauteur ≤ `VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX`), il n'y a pas de bande
- * latérale : le classement permanent est masqué pendant la course, et la piste occupe toute la
- * largeur. Masquer est préférable à recouvrir.
+ * ## Les deux formats
+ *
+ * Sur bureau, la bande du classement est **dans** le canvas (`VIEW.TRACK_WIDTH_RATIO`) : la piste est
+ * plus étroite que l'arène. En téléphone paysage (passe responsive iPhone), la bande est devenue une
+ * **colonne HTML à droite de la piste** : le canvas lui-même est la piste, et la colonne commence
+ * exactement à son bord droit. Les deux cas partagent la même preuve — les rectangles mesurés ne se
+ * croisent pas — mais pas le même calcul de largeur, d'où la branche explicite.
  */
 
 const SEED = 'KR7Z8NAR';
@@ -50,10 +54,15 @@ interface GeometrySample {
   readonly logicalTrackWidth: number;
   readonly logicalArenaWidth: number;
   readonly arenaWidth: number;
+  readonly arenaHeight: number;
   /** Échelle entre pixels logiques du canvas et pixels CSS de l'arène. */
   readonly scale: number;
   readonly compact: boolean;
   readonly leaderboardVisible: boolean;
+  /** Hauteur du canvas dans le repère de l'arène : en petit paysage, il remplit la piste. */
+  readonly canvasHeight: number;
+  /** Hauteur de l'en-tête (titre) : nulle en petit paysage. */
+  readonly titleHeight: number;
   readonly steps: number;
 }
 
@@ -131,9 +140,12 @@ async function collectGeometry(page: Page, targets: readonly number[]): Promise<
         logicalTrackWidth: track.trackWidth,
         logicalArenaWidth: track.arenaWidth,
         arenaWidth: stageBox.width,
+        arenaHeight: stageBox.height,
         scale,
         compact: track.compact,
         leaderboardVisible: visible,
+        canvasHeight: canvasBox.height,
+        titleHeight: document.querySelector('.head')?.getBoundingClientRect().height ?? 0,
         steps: api.state().steps,
       };
     };
@@ -201,10 +213,11 @@ for (const viewport of VIEWPORTS) {
       expect(sample.drawnCount, 'au moins quatre personnages sont dessinés').toBeGreaterThanOrEqual(4);
       expect(sample.drawnCount).toBeLessThanOrEqual(CHARACTER_IDS.length);
 
-      // Les visuels sont des **images**, jamais des carrés : la hauteur suit la constante de rendu et
-      // la largeur se déduit du ratio du fichier. Une image écrasée, une texture manquante ou une
-      // résolution utilisée comme taille d'affichage seraient détectées ici, aux trois résolutions.
-      const expectedHeight = VIEW.CHARACTER_HEIGHT_PX * sample.scale;
+      // Les visuels sont des **images**, jamais des carrés : la hauteur suit la constante du format
+      // courant et la largeur se déduit du ratio du fichier. Une image écrasée, une texture manquante
+      // ou une résolution utilisée comme taille d'affichage seraient détectées ici, aux résolutions de
+      // référence — et le format compact est celui où les personnages sont les plus grands.
+      const expectedHeight = characterHeightPx(sample.compact) * sample.scale;
       for (const character of sample.characters) {
         expect(
           character.height,
@@ -218,13 +231,42 @@ for (const viewport of VIEWPORTS) {
       }
 
       if (sample.compact) {
-        // Téléphone paysage : pas de bande latérale, classement masqué pendant la course, piste
-        // pleine largeur. Masquer vaut mieux que recouvrir.
-        expect(sample.leaderboardVisible, 'le classement permanent est masqué').toBe(false);
-        expect(sample.logicalTrackWidth, 'la piste occupe toute la largeur logique').toBe(
+        // Téléphone paysage : la piste occupe la zone de gauche du canvas, le HUD vit dans une colonne
+        // HTML à droite. Le classement est donc **affiché**, et il commence au bord droit de la piste.
+        expect(sample.leaderboardVisible, 'le classement permanent est affiché').toBe(true);
+        expect(sample.logicalTrackWidth, 'la piste occupe toute la largeur du canvas').toBe(
           sample.logicalArenaWidth,
         );
-        expect(sample.trackWidth).toBeGreaterThanOrEqual(sample.arenaWidth - 2);
+        expect(sample.titleHeight, 'le titre ne prend plus de hauteur').toBeLessThanOrEqual(1);
+        expect(sample.canvasHeight, 'la piste occupe toute la hauteur de l’écran').toBeGreaterThanOrEqual(
+          sample.arenaHeight - 2,
+        );
+
+        const leaderboard = sample.leaderboard;
+        expect(leaderboard).not.toBeNull();
+        if (leaderboard === null) {
+          throw new Error('classement invisible');
+        }
+        // Le canvas **est** la piste : sa largeur est celle de la piste, et le panneau commence après.
+        expect(sample.trackWidth, 'la piste occupe la zone de gauche').toBeLessThan(sample.arenaWidth);
+        expect(
+          leaderboard.left,
+          `pas ${String(sample.steps)} : le classement commence après la piste`,
+        ).toBeGreaterThanOrEqual(sample.trackWidth - 1);
+        for (const character of sample.characters) {
+          expect(
+            overlaps(character, leaderboard),
+            `pas ${String(sample.steps)} : ${character.id} ne passe pas sous le classement`,
+          ).toBe(false);
+          expect(
+            character.right,
+            `pas ${String(sample.steps)} : ${character.id} reste dans la piste`,
+          ).toBeLessThanOrEqual(sample.trackWidth + 1);
+          expect(
+            character.left,
+            `pas ${String(sample.steps)} : ${character.id} reste dans la piste`,
+          ).toBeGreaterThanOrEqual(-1);
+        }
       } else {
         expect(sample.leaderboardVisible, 'le classement permanent est affiché').toBe(true);
         expect(

@@ -135,9 +135,13 @@ export interface TrackViewportDebugSnapshot {
   readonly arenaWidth: number;
   /** Hauteur de l'arène, en pixels logiques : `VIEW.BASE_HEIGHT`. */
   readonly arenaHeight: number;
-  /** Largeur de la piste, en pixels logiques : l'arène moins la bande réservée. */
+  /**
+   * Largeur de la piste, en pixels logiques : l'arène moins la bande réservée du classement. En
+   * téléphone paysage, la bande réservée est devenue une **colonne HTML** : la piste occupe donc toute
+   * la largeur du canvas, et cette valeur égale `arenaWidth`.
+   */
   readonly trackWidth: number;
-  /** Vrai quand l'interface est en mode téléphone paysage (classement masqué pendant la course). */
+  /** Vrai quand l'interface est en mode téléphone paysage (voies larges, HUD en colonne à droite). */
   readonly compact: boolean;
 }
 

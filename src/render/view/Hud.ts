@@ -80,6 +80,19 @@ function requireElement(element: HTMLElement | null, id: string): HTMLElement {
   return element;
 }
 
+/**
+ * Ligne d'état compacte (`.hud-topline`), portée par `index.html`.
+ *
+ * Elle n'existe que pour le petit écran paysage ; sur les autres formats, elle est en
+ * `display: contents` et n'a donc aucun effet sur la mise en page. Le repli sur la racine du HUD
+ * garde le module utilisable même si le conteneur disparaissait : le HUD écrirait alors simplement
+ * le chrono dans la grille, comme avant.
+ */
+function topline(root: HTMLElement): HTMLElement {
+  const existing = root.querySelector('.hud-topline');
+  return existing instanceof HTMLElement ? existing : root;
+}
+
 /** Éléments d'interface fournis par `index.html` et réorganisés par le HUD. */
 export interface HudElements {
   /** Bandeau de checkpoint (`#checkpoint-banner`) : il porte le titre du checkpoint. */
@@ -306,7 +319,10 @@ export class Hud {
     this.segment.className = 'hud-segment-value';
     this.segment.dataset['testid'] = 'hud-segment';
     time.append(this.time, this.segment);
-    root.appendChild(time);
+    // Le chrono rejoint la **ligne d'état** (`index.html`) : sur petit écran paysage, elle réunit
+    // état, segment, chrono et réglages sur une seule ligne. Sur les autres formats, ce conteneur est
+    // en `display: contents`, donc le chrono reprend sa cellule de grille habituelle.
+    topline(root).appendChild(time);
 
     // Le classement reste l'élément existant (`#leaderboard`) : ses identifiants de test ne changent
     // pas, et `app/` continue de le résoudre par identifiant.

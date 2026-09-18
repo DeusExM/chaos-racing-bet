@@ -113,14 +113,20 @@ for (const viewport of VIEWPORTS) {
     );
 
     const rows = page.locator('[data-testid="leaderboard-row"]');
-    // Passe corrective 2 : en téléphone paysage, le classement permanent est **masqué pendant la
-    // course** (la piste occupe alors toute la largeur). Les lignes restent dans le DOM, donc le
-    // classement de l'écran d'arrivée reste complet — c'est le panneau qui est caché, pas la donnée.
+    // Passe responsive iPhone : en téléphone paysage, le classement permanent vit dans la **colonne
+    // de droite**, à côté de la piste — il n'est plus masqué, et il n'a plus besoin de l'être puisque
+    // la piste ne passe jamais dessous.
     const compact = await page.evaluate(
       () => window.__CHAOS_RACE_VIEW__?.track().compact ?? false,
     );
     if (compact) {
-      await expect(page.getByTestId('leaderboard')).toBeHidden();
+      await expect(page.getByTestId('leaderboard')).toBeVisible();
+      // La colonne est à droite de la piste : les deux zones sont disjointes.
+      const canvasBox = await canvas.boundingBox();
+      const panelBox = await page.getByTestId('leaderboard').boundingBox();
+      expect(panelBox?.x ?? 0, 'le classement commence après la piste').toBeGreaterThanOrEqual(
+        (canvasBox?.x ?? 0) + (canvasBox?.width ?? 0) - 1,
+      );
     } else {
       await expect(rows.first()).toBeVisible();
     }

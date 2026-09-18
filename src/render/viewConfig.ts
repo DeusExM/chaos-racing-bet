@@ -35,6 +35,18 @@ export interface ViewConfig {
   /** Position verticale de la dernière voie, en fraction de la hauteur. */
   readonly LANE_BOTTOM_RATIO: number;
   /**
+   * Position verticale de la première voie **en petit paysage** (téléphone), en fraction de la hauteur.
+   *
+   * La passe responsive issue du test sur iPhone a supprimé, sur ce format, le titre, les marges
+   * extérieures et le HUD supérieur : la zone des voies peut donc s'étendre vers le haut et le bas,
+   * et les personnages grossir d'autant. Les deux ratios sont calculés pour que, à
+   * `CHARACTER_HEIGHT_COMPACT_PX`, le nom de la première voie reste **entier** en haut du canvas et
+   * qu'aucune silhouette ne touche la voie voisine (voir `tests/unit/laneGeometry.test.ts`).
+   */
+  readonly COMPACT_LANE_TOP_RATIO: number;
+  /** Position verticale de la dernière voie en petit paysage, en fraction de la hauteur. */
+  readonly COMPACT_LANE_BOTTOM_RATIO: number;
+  /**
    * Hauteur affichée d'un personnage, en pixels logiques, pour l'arène de référence (1280×720).
    *
    * C'est la hauteur de l'**image** : les illustrations comportent une marge transparente de 4 à 11 %,
@@ -46,6 +58,27 @@ export interface ViewConfig {
    * réduit ici, mais garde de la marge pour les écrans à haute densité, où le canvas est agrandi.
    */
   readonly CHARACTER_HEIGHT_PX: number;
+  /**
+   * Hauteur affichée d'un personnage **en petit paysage**, en pixels logiques.
+   *
+   * Le test joueur sur iPhone a jugé les personnages encore trop petits : le titre, les marges
+   * extérieures et le HUD supérieur libèrent de la hauteur, et les voies s'étendent
+   * (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO`) pour accueillir cette hauteur. La
+   * borne haute (88 px logiques) est celle qui laisse encore le nom de la première voie entier et
+   * une séparation nette entre voisines ; `84` est la plus grande valeur qui tient avec de la marge
+   * aux deux extrémités.
+   */
+  readonly CHARACTER_HEIGHT_COMPACT_PX: number;
+  /**
+   * Taille de police du nom affiché au-dessus d'un personnage, en pixels de la scène.
+   *
+   * Sur un téléphone, le canvas est réduit à ≈ 0,54 : la police nominale donnerait ≈ 7,5 px CSS,
+   * sous le plancher de lisibilité. La valeur compacte est donc plus grande en pixels logiques pour
+   * rendre ≈ 11 px CSS.
+   */
+  readonly CHARACTER_NAME_FONT_PX: number;
+  /** Taille de police du nom au-dessus d'un personnage en petit paysage, en pixels de la scène. */
+  readonly CHARACTER_NAME_FONT_COMPACT_PX: number;
   /**
    * Hauteur affichée **minimale** d'un personnage, en pixels logiques.
    *
@@ -73,15 +106,29 @@ export interface ViewConfig {
    * La même fraction vit côté CSS (`--hud-sidebar-width`), puisque le classement est du HTML posé
    * sur l'arène : les deux valeurs doivent rester cohérentes, et c'est le test E2E de géométrie
    * (`tests/e2e/hud.spec.ts`) qui le vérifie aux trois résolutions de référence.
+   *
+   * En **téléphone paysage**, la bande n'est plus dessinée dans le canvas : la place du classement est
+   * prise hors du canvas, par la colonne HTML de `styles.css`. La piste occupe donc toute la largeur du
+   * canvas, et cette fraction ne sert plus qu'au format de bureau.
    */
   readonly TRACK_WIDTH_RATIO: number;
   /**
    * Hauteur de fenêtre, en pixels CSS, sous laquelle l'interface passe en mode **téléphone paysage**.
    *
-   * Elle sert à deux décisions du rendu : masquer le classement permanent pendant la course et rendre
-   * toute la largeur à la piste. La même valeur vit dans la requête média de `styles.css`.
+   * Elle sert à deux décisions du rendu : élargir les voies et agrandir les personnages, et adapter la
+   * largeur logique du canvas à la piste (le HUD, lui, se range dans une **colonne** à droite, décrite
+   * par la requête média de `styles.css`, qui lit la même hauteur).
    */
   readonly COMPACT_VIEWPORT_MAX_HEIGHT_PX: number;
+  /**
+   * Largeur logique **minimale** de l'arène en petit paysage.
+   *
+   * La largeur logique est déduite du rapport de la piste (`viewport.arenaBaseSize`), pour que la
+   * piste et la colonne du HUD coïncident au pixel. Cette borne n'existe que pour les fenêtres
+   * franchement étroites, où descendre plus bas rendrait les personnages démesurés par rapport à la
+   * piste ; elle n'est jamais atteinte par un téléphone en paysage (rapport ≈ 2,1).
+   */
+  readonly COMPACT_MIN_BASE_WIDTH: number;
   /**
    * Taille de la police du commentaire, en pixels de la scène (le canvas est mis à l'échelle).
    *
@@ -152,7 +199,12 @@ export const VIEW: ViewConfig = Object.freeze({
   CAMERA_SMOOTHING: 0.15,
   LANE_TOP_RATIO: 0.24,
   LANE_BOTTOM_RATIO: 0.86,
+  COMPACT_LANE_TOP_RATIO: 0.1,
+  COMPACT_LANE_BOTTOM_RATIO: 0.9,
   CHARACTER_HEIGHT_PX: 73,
+  CHARACTER_HEIGHT_COMPACT_PX: 84,
+  CHARACTER_NAME_FONT_PX: 14,
+  CHARACTER_NAME_FONT_COMPACT_PX: 20,
   CHARACTER_MIN_HEIGHT_PX: 30,
   TRACK_TICK_STEP_M: 50,
   TRACK_LABEL_STEP_M: 250,
@@ -160,6 +212,7 @@ export const VIEW: ViewConfig = Object.freeze({
   EDGE_MARGIN_PX: 22,
   TRACK_WIDTH_RATIO: 0.78,
   COMPACT_VIEWPORT_MAX_HEIGHT_PX: 560,
+  COMPACT_MIN_BASE_WIDTH: 760,
   SUBTITLE_FONT_PX: 24,
   SUBTITLE_NAME_FONT_PX: 22,
   SUBTITLE_QUEUE_FONT_PX: 15,
@@ -176,10 +229,34 @@ export const VIEW: ViewConfig = Object.freeze({
   FINISH_PODIUM_SIZE: 3,
 });
 
-/** Ordonnée écran d'une voie, répartie uniformément entre les deux ratios du décor. */
-export function laneY(index: number, heightPx: number): number {
-  const top = heightPx * VIEW.LANE_TOP_RATIO;
-  const bottom = heightPx * VIEW.LANE_BOTTOM_RATIO;
+/**
+ * Ratios de la zone des voies, selon le format.
+ *
+ * Une seule fonction décide : le décor (`TrackView`), les sprites et leurs noms (`CharacterSprite`)
+ * l'appellent tous, donc les bandes de voie, les personnages, les noms et les repères de distance
+ * restent alignés par construction, quel que soit le format.
+ */
+export function laneRatios(compact: boolean): { readonly top: number; readonly bottom: number } {
+  return compact
+    ? { top: VIEW.COMPACT_LANE_TOP_RATIO, bottom: VIEW.COMPACT_LANE_BOTTOM_RATIO }
+    : { top: VIEW.LANE_TOP_RATIO, bottom: VIEW.LANE_BOTTOM_RATIO };
+}
+
+/** Hauteur d'affichage d'un personnage, en pixels logiques, selon le format. */
+export function characterHeightPx(compact: boolean): number {
+  return compact ? VIEW.CHARACTER_HEIGHT_COMPACT_PX : VIEW.CHARACTER_HEIGHT_PX;
+}
+
+/** Taille de police du nom d'un personnage, en pixels logiques, selon le format. */
+export function characterNameFontPx(compact: boolean): number {
+  return compact ? VIEW.CHARACTER_NAME_FONT_COMPACT_PX : VIEW.CHARACTER_NAME_FONT_PX;
+}
+
+/** Ordonnée écran d'une voie, répartie uniformément entre les deux ratios du format courant. */
+export function laneY(index: number, heightPx: number, compact = false): number {
+  const ratios = laneRatios(compact);
+  const top = heightPx * ratios.top;
+  const bottom = heightPx * ratios.bottom;
   const span = CHARACTER_IDS.length - 1;
   return span === 0 ? top : top + ((bottom - top) * index) / span;
 }

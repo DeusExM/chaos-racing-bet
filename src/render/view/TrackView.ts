@@ -2,7 +2,7 @@ import type { GameObjects, Scene } from 'phaser';
 
 import { CHARACTER_IDS } from '../../core/characters';
 import type { UiText } from '../uiText';
-import { VIEW, laneY } from '../viewConfig';
+import { VIEW, laneRatios, laneY } from '../viewConfig';
 import type { CameraRig } from './CameraRig';
 
 /**
@@ -26,6 +26,11 @@ export class TrackView {
 
   private heightPx: number;
 
+  /** Ratios des voies du format courant : une seule source pour les bandes, les repères et les noms. */
+  private laneTop = VIEW.LANE_TOP_RATIO;
+
+  private laneBottom = VIEW.LANE_BOTTOM_RATIO;
+
   constructor(scene: Scene, text: UiText) {
     this.text = text;
     this.widthPx = VIEW.BASE_WIDTH;
@@ -47,14 +52,18 @@ export class TrackView {
   }
 
   /** Redessine le décor pour la taille courante. À appeler au démarrage et à chaque redimensionnement. */
-  layout(widthPx: number, heightPx: number): void {
+  layout(widthPx: number, heightPx: number, compact = false): void {
     this.widthPx = widthPx;
     this.heightPx = heightPx;
+
+    const ratios = laneRatios(compact);
+    this.laneTop = ratios.top;
+    this.laneBottom = ratios.bottom;
 
     this.lanes.clear();
     const bandHeight = heightPx / (CHARACTER_IDS.length + 1);
     for (const [index] of CHARACTER_IDS.entries()) {
-      const center = laneY(index, heightPx);
+      const center = laneY(index, heightPx, compact);
       const even = index % 2 === 0;
       this.lanes.fillStyle(even ? 0x131a2f : 0x101627, 1);
       this.lanes.fillRect(0, center - bandHeight / 2, widthPx, bandHeight);
@@ -62,7 +71,19 @@ export class TrackView {
 
     // Ligne d'horizon : repère purement visuel du sol, sans aucun sens de course.
     this.lanes.lineStyle(2, 0x24305a, 1);
-    this.lanes.lineBetween(0, heightPx * VIEW.LANE_TOP_RATIO - bandHeight / 2, widthPx, heightPx * VIEW.LANE_TOP_RATIO - bandHeight / 2);
+    this.lanes.lineBetween(0, this.horizonY(heightPx), widthPx, this.horizonY(heightPx));
+  }
+
+  /** Ordonnée de la ligne d'horizon : le haut de la zone des voies du format courant. */
+  private horizonY(heightPx: number): number {
+    const bandHeight = heightPx / (CHARACTER_IDS.length + 1);
+    return heightPx * this.laneTop - bandHeight / 2;
+  }
+
+  /** Ordonnée du bas de la zone des voies : elle borne les graduations de distance. */
+  private laneAreaBottom(heightPx: number): number {
+    const bandHeight = heightPx / (CHARACTER_IDS.length + 1);
+    return heightPx * this.laneBottom + bandHeight / 2;
   }
 
   /** Redessine les graduations visibles, d'après le cadrage courant. */
@@ -70,8 +91,8 @@ export class TrackView {
     const leftM = rig.left;
     const rightM = leftM + rig.span;
 
-    const top = this.heightPx * VIEW.LANE_TOP_RATIO - this.heightPx / (CHARACTER_IDS.length + 1) / 2;
-    const bottom = this.heightPx * VIEW.LANE_BOTTOM_RATIO + this.heightPx / (CHARACTER_IDS.length + 1) / 2;
+    const top = this.horizonY(this.heightPx);
+    const bottom = this.laneAreaBottom(this.heightPx);
 
     this.ticks.clear();
     this.ticks.lineStyle(1, 0x26315c, 1);

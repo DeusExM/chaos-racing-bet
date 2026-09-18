@@ -646,8 +646,11 @@ for (const viewport of VIEWPORTS) {
 
     const canvas = domRects.canvas;
     expect(canvas, 'le canvas est présent').not.toBeNull();
-    expect(canvas?.width ?? 0, 'le canvas remplit l’arène en largeur').toBeGreaterThanOrEqual(
-      arenaRect.width * 0.95,
+    // En téléphone paysage, le canvas **est** la piste : il n'occupe donc qu'une partie de la largeur
+    // de l'arène (le reste est la colonne du HUD), mais toute sa hauteur.
+    const canvasWidthRatio = track.compact ? 0.6 : 0.95;
+    expect(canvas?.width ?? 0, 'le canvas remplit sa zone en largeur').toBeGreaterThanOrEqual(
+      arenaRect.width * canvasWidthRatio,
     );
     expect(canvas?.height ?? 0, 'le canvas remplit l’arène en hauteur').toBeGreaterThanOrEqual(
       arenaRect.height * 0.95,
@@ -658,22 +661,38 @@ for (const viewport of VIEWPORTS) {
     ).toBeLessThanOrEqual(0.25);
 
     /*
-     * 4 bis) **Le classement ne recouvre plus la piste** (passe corrective 2).
+     * 4 bis) **Le classement ne recouvre plus la piste** (passe corrective 2, étendue au téléphone
+     * par la passe responsive).
      *
      * La preuve est géométrique et porte sur les deux rectangles réellement mesurés dans la même
      * tâche : celui du classement, ramené dans le repère de l'arène, et la largeur de piste publiée
      * par le rendu. Le bord gauche du panneau doit se trouver **à droite** de la piste.
      *
-     * En téléphone paysage, il n'y a pas de bande latérale : le classement permanent est masqué
-     * pendant la course, et la piste occupe toute la largeur. Masquer est préférable à recouvrir.
+     * Sur bureau, la bande est dans le canvas : la piste est plus étroite que l'arène. En téléphone
+     * paysage, le canvas **est** la piste et la colonne du HUD commence à son bord droit.
      */
-    const trackWidthCss = track.trackWidth * (arenaRect.width / track.arenaWidth);
+    /*
+     * L'échelle entre pixels logiques et pixels CSS se lit sur le **canvas**, pas sur l'arène : en
+     * téléphone paysage, le canvas est la piste et n'occupe qu'une partie de l'arène (le reste est la
+     * colonne du HUD). Utiliser la largeur de l'arène donnerait une piste fausse, égale à l'écran.
+     */
+    const canvasScale = (canvas?.width ?? arenaRect.width) / track.arenaWidth;
+    const trackWidthCss = track.trackWidth * canvasScale;
     if (track.compact) {
-      expect(track.trackWidth, 'en téléphone paysage, la piste occupe toute la largeur').toBe(
+      expect(track.trackWidth, 'en téléphone paysage, la piste occupe tout le canvas').toBe(
         track.arenaWidth,
       );
-      expect(areaFraction(domRects.leaderboard), 'le classement permanent est masqué').toBe(0);
-      await expect(page.getByTestId('leaderboard')).toBeHidden();
+      const panelRect = domRects.leaderboard;
+      expect(panelRect, 'le classement permanent est affiché dans la colonne').not.toBeNull();
+      const panelLeft = (panelRect?.left ?? 0) - arenaRect.left;
+      expect(
+        panelLeft,
+        `le classement commence après la piste (piste ${trackWidthCss.toFixed(1)} px, panneau ${panelLeft.toFixed(1)} px)`,
+      ).toBeGreaterThanOrEqual(trackWidthCss - 1);
+      expect(trackWidthCss, 'la piste ne prend pas toute la largeur de l’écran').toBeLessThan(
+        arenaRect.width * 0.75,
+      );
+      await expect(page.getByTestId('leaderboard')).toBeVisible();
     } else {
       const panelRect = domRects.leaderboard;
       expect(panelRect, 'le classement permanent est affiché hors téléphone paysage').not.toBeNull();

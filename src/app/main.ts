@@ -186,11 +186,18 @@ function bootstrap(): void {
   // Le panneau de réglages est créé par `app/`, qui possède déjà le DOM et la persistance : le rendu
   // n'a donc jamais à connaître un réglage.
   //
+  // Il rejoint la **ligne d'état compacte** (`.hud-topline`) : sur petit écran paysage, le son et le
+  // commentateur tiennent ainsi sur la même ligne que l'état, le segment et le chrono, au lieu
+  // d'occuper un bloc à part. Ailleurs, ce conteneur est en `display: contents` et les réglages
+  // reprennent leur cellule habituelle de la grille du HUD.
+  //
   // Les deux rappels ne sont appelés qu'à l'**activation**, et depuis le clic lui-même : le klaxon et
   // la courte confirmation vocale sont donc des réponses à un geste utilisateur, jamais des sons de
   // chargement. Ils ne passent ni par le speaker, ni par sa file, ni par ses cooldowns.
+  const toplineRoot = hudRoot?.querySelector('.hud-topline') ?? null;
   if (hudRoot !== null) {
-    new SettingsPanel(hudRoot, settings, UI_TEXT_FR, {
+    const settingsRoot = toplineRoot instanceof HTMLElement ? toplineRoot : hudRoot;
+    new SettingsPanel(settingsRoot, settings, UI_TEXT_FR, {
       onSoundEnabled: () => {
         soundOutput?.playHorn();
       },

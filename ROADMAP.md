@@ -1166,6 +1166,12 @@ de bord reste dans la piste) plutôt que dessiné sous le panneau. En **téléph
 (hauteur ≤ `VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX = 560`), la bande disparaît et le classement permanent
 est **masqué pendant la course** : masquer est préférable à recouvrir. Le reste du HUD est inchangé.
 
+> **Note (passe responsive, après le premier test sur iPhone).** Le comportement compact décrit
+> ci-dessus — bande supprimée, classement masqué — a été **remplacé** : la bande de droite est devenue
+> une **colonne HTML** (32 % de la largeur) où le classement reste **affiché pendant la course**, à
+> côté d'une piste qui occupe toute la zone de gauche et toute la hauteur. Voir la section
+> « Disposition téléphone paysage » de `GAME_DESIGN.md`. Ce qui précède reste vrai sur bureau.
+
 **4. Plus de segment invalide à l'arrivée.** Le HUD affichait `segment 0/3` à `60,0 s` : le modèle
 publie désormais `segment: null` hors course, et l'affichage dit **`Terminé`**. Le noyau n'a que trois
 segments (`1` à `3`) ; `0/3` n'existe plus nulle part.

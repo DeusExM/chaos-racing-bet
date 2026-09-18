@@ -7,6 +7,7 @@ import type { SimPhase } from '../../sim/types';
 import type { SpeakerLine } from '../subtitle';
 import type { UiText } from '../uiText';
 import { VIEW } from '../viewConfig';
+import { isCompactViewport } from '../viewport';
 import { installViewDebug } from '../viewDebug';
 import { CameraRig } from '../view/CameraRig';
 import { CharacterSprite } from '../view/CharacterSprite';
@@ -193,6 +194,14 @@ export class RaceScene extends Scene {
 
   private layoutWidth = 0;
 
+  /**
+   * Format du dernier agencement appliqué (petit paysage ou non).
+   *
+   * Il fait partie de la clé de `applyLayout()` : un changement de format sans changement de taille
+   * de canvas (bascule de la requête média) doit quand même reposer les voies et les personnages.
+   */
+  private compactLayout = false;
+
   constructor(options: RaceSceneOptions) {
     super('race');
     this.options = options;
@@ -291,7 +300,7 @@ export class RaceScene extends Scene {
           arenaWidth: this.layoutWidth,
           arenaHeight: this.layoutHeight,
           trackWidth: this.trackWidth,
-          compact: this.isCompactViewport(),
+          compact: this.compactLayout,
         }),
         // Relecture en cours : instants consulté et réel, en pas du noyau.
         replay: () =>
@@ -363,7 +372,7 @@ export class RaceScene extends Scene {
         continue;
       }
       const screenX = this.rig.toScreenX(distance, this.trackWidth);
-      sprite.place(screenX, this.layoutHeight);
+      sprite.place(screenX, this.layoutHeight, this.compactLayout);
       // Un personnage hors du champ est **masqué** : il n'est jamais dessiné sous la bande réservée au
       // classement permanent, pas même partiellement. La décision se prend sur la **taille réellement
       // affichée** (les images sont plus larges que hautes) : supposer un carré laisserait dépasser
@@ -376,6 +385,7 @@ export class RaceScene extends Scene {
           screenX < this.trackWidth / 2 ? 'left' : 'right',
           this.trackWidth,
           this.layoutHeight,
+          this.compactLayout,
         );
       } else {
         sprite.hideEdgeMarker();
@@ -520,16 +530,20 @@ export class RaceScene extends Scene {
   private applyLayout(): void {
     const width = this.scale.width;
     const height = this.scale.height;
-    if (width === this.layoutWidth && height === this.layoutHeight) {
+    const compact = isCompactViewport();
+    const sameSize = width === this.layoutWidth && height === this.layoutHeight;
+    if (sameSize && compact === this.compactLayout) {
       return;
     }
 
     this.layoutWidth = width;
     this.layoutHeight = height;
+    this.compactLayout = compact;
 
-    // Bande réservée au classement permanent (passe corrective 2). En téléphone paysage, elle est
-    // nulle : le classement est masqué pendant la course et la piste récupère toute la largeur.
-    const compact = this.isCompactViewport();
+    // Bande réservée au classement permanent (passe corrective 2). En téléphone paysage, c'est la
+    // **colonne du HUD** qui tient ce rôle : la piste n'occupe plus qu'une partie de l'écran, mais
+    // elle occupe **tout le canvas** — la largeur logique de l'arène est choisie pour cela
+    // (`viewport.arenaBaseSize`), donc le canvas et la colonne coïncident au pixel.
     this.trackWidth = Math.round(width * (compact ? 1 : VIEW.TRACK_WIDTH_RATIO));
 
     // La largeur de la bande est publiée au CSS, qui la consomme pour la colonne du classement : une
@@ -542,21 +556,10 @@ export class RaceScene extends Scene {
       );
     }
 
-    this.track?.layout(this.trackWidth, height);
+    this.track?.layout(this.trackWidth, height, compact);
     for (const sprite of this.sprites) {
-      sprite.layout(height);
+      sprite.layout(height, compact);
     }
-  }
-
-  /**
-   * L'interface est-elle en mode téléphone paysage ?
-   *
-   * Le seuil est celui de `VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX`, et la requête média de `styles.css`
-   * utilise la même valeur : les deux décisions (piste pleine largeur ici, classement masqué là-bas)
-   * restent donc cohérentes, et le test E2E de géométrie le vérifie en 844×390.
-   */
-  private isCompactViewport(): boolean {
-    return window.matchMedia(`(max-height: ${String(VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX)}px)`).matches;
   }
 }
 

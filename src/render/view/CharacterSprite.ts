@@ -3,7 +3,7 @@ import type { GameObjects, Scene } from 'phaser';
 import type { CharacterConfig } from '../../core/characters';
 import type { CharacterId } from '../../core/types';
 import { characterTextureKey } from '../characterAssets';
-import { VIEW, laneY } from '../viewConfig';
+import { VIEW, characterHeightPx, characterNameFontPx, laneY } from '../viewConfig';
 
 /**
  * Un personnage à l'écran.
@@ -39,7 +39,7 @@ export class CharacterSprite {
 
   private widthPx = VIEW.CHARACTER_HEIGHT_PX;
 
-  private fontSizePx = 14;
+  private fontSizePx = VIEW.CHARACTER_NAME_FONT_PX;
 
   constructor(scene: Scene, character: CharacterConfig, laneIndex: number) {
     this.characterId = character.id;
@@ -53,14 +53,14 @@ export class CharacterSprite {
 
     this.nameLabel = scene.add.text(0, 0, character.name, {
       fontFamily: 'system-ui, sans-serif',
-      fontSize: '14px',
+      fontSize: `${String(VIEW.CHARACTER_NAME_FONT_PX)}px`,
       color: '#e8ecf8',
     });
     this.nameLabel.setOrigin(0.5, 1);
 
     this.edgeMarker = scene.add.text(0, 0, '', {
       fontFamily: 'system-ui, sans-serif',
-      fontSize: '14px',
+      fontSize: `${String(VIEW.CHARACTER_NAME_FONT_PX)}px`,
       color: '#ffd166',
       backgroundColor: '#00000080',
       padding: { left: 4, right: 4, top: 2, bottom: 2 },
@@ -70,20 +70,25 @@ export class CharacterSprite {
   }
 
   /**
-   * Adapte la taille à la hauteur du canvas. Le rendu ne dépend jamais de la taille des sprites.
+   * Adapte la taille au format courant. Le rendu ne dépend jamais de la taille des sprites.
    *
-   * L'arène logique est fixe (`Scale.FIT` ne change que l'échelle du canvas) : la hauteur reçue vaut
-   * donc toujours `VIEW.BASE_HEIGHT`, et un personnage mesure exactement `CHARACTER_HEIGHT_PX` de
-   * haut. Le facteur proportionnel et le plancher ne servent qu'à rester lisible si cette base change
-   * un jour — ils n'autorisent jamais un affichage non proportionnel à la texture.
+   * La hauteur logique reçue vaut `VIEW.BASE_HEIGHT` dans les deux formats : ce qui change en petit
+   * paysage, c'est la **cible** (`CHARACTER_HEIGHT_COMPACT_PX`), plus grande, parce que la zone des
+   * voies y est plus haute. Le facteur proportionnel et le plancher ne servent qu'à rester lisible si
+   * la hauteur logique changeait un jour — ils n'autorisent jamais un affichage non proportionnel à
+   * la texture.
    */
-  layout(heightPx: number): void {
+  layout(heightPx: number, compact = false): void {
+    const target = characterHeightPx(compact);
     this.heightPx = Math.max(
       VIEW.CHARACTER_MIN_HEIGHT_PX,
-      Math.min(VIEW.CHARACTER_HEIGHT_PX, heightPx * (VIEW.CHARACTER_HEIGHT_PX / VIEW.BASE_HEIGHT)),
+      Math.min(target, heightPx * (target / VIEW.BASE_HEIGHT)),
     );
     this.widthPx = this.heightPx * this.aspectRatio;
-    this.fontSizePx = Math.max(9, Math.min(14, heightPx * 0.022));
+
+    const fontTarget = characterNameFontPx(compact);
+    this.fontSizePx = Math.max(9, Math.min(fontTarget, heightPx * (fontTarget / VIEW.BASE_HEIGHT)));
+
     this.image.setDisplaySize(this.widthPx, this.heightPx);
     this.nameLabel.setFontSize(this.fontSizePx);
     this.edgeMarker.setFontSize(this.fontSizePx);
@@ -95,8 +100,8 @@ export class CharacterSprite {
    * Le nom est posé à partir de la hauteur **réellement affichée**, pas d'une constante : il reste
    * juste au-dessus de la tête, quel que soit le cadrage de l'illustration.
    */
-  place(screenX: number, heightPx: number): void {
-    const y = laneY(this.laneIndex, heightPx);
+  place(screenX: number, heightPx: number, compact = false): void {
+    const y = laneY(this.laneIndex, heightPx, compact);
     this.image.setPosition(screenX, y);
     this.nameLabel.setPosition(screenX, y - this.heightPx / 2 - 2);
     this.image.setDepth(10 + this.laneIndex);
@@ -104,10 +109,10 @@ export class CharacterSprite {
   }
 
   /** Signale un personnage sorti de la fenêtre, collé au bord correspondant. */
-  showEdgeMarker(side: 'left' | 'right', widthPx: number, heightPx: number): void {
+  showEdgeMarker(side: 'left' | 'right', widthPx: number, heightPx: number, compact = false): void {
     const x = side === 'left' ? VIEW.EDGE_MARGIN_PX : widthPx - VIEW.EDGE_MARGIN_PX;
     this.edgeMarker.setText(side === 'left' ? `◀ ${this.name}` : `${this.name} ▶`);
-    this.edgeMarker.setPosition(x, laneY(this.laneIndex, heightPx));
+    this.edgeMarker.setPosition(x, laneY(this.laneIndex, heightPx, compact));
     this.edgeMarker.setDepth(80);
     this.edgeMarker.setVisible(true);
   }

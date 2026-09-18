@@ -145,6 +145,19 @@ body {
 }
 
 /*
+ * Ligne d'état compacte (passe responsive iPhone).
+ *
+ * Elle ne sert qu'au petit écran paysage, où elle réunit état, segment, chrono, son et commentateur
+ * sur **une seule ligne** en haut de la colonne de droite. Partout ailleurs elle est en
+ * `display: contents` : ses enfants (`.hud-status`, `.hud-time`, `.hud-settings`) redeviennent des
+ * cellules de la grille du HUD, exactement comme avant cette passe. La mise en page de bureau ne
+ * change donc pas d'un pixel, et il n'existe qu'une seule structure de DOM.
+ */
+.hud-topline {
+  display: contents;
+}
+
+/*
  * Badge de checkpoint : **temporaire**, visible uniquement pendant la pause réelle.
  *
  * Il vit dans la grande rangée flexible, aligné en haut au centre : il apparaît donc au-dessus de la
@@ -841,53 +854,167 @@ body {
   line-height: 1.5;
 }
 
-/* Téléphone en paysage : on récupère de la hauteur pour l'arène, qui est le sujet. */
+/*
+ * ============================================================================================
+ * Téléphone en paysage : la piste à gauche, le HUD dans une colonne à droite
+ * ============================================================================================
+ *
+ * ## Ce que le test sur iPhone a montré
+ *
+ * Le layout précédent gardait l'en-tête, les marges extérieures et une arène en 16:9 centrée : à
+ * 844×390, l'arène ne faisait plus que 522×294 au milieu de l'écran, avec ≈ 150 px de vide à gauche
+ * **et** à droite, les commandes sous l'arène et le classement masqué faute de place. Résultat : une
+ * interface trop petite et trop de surface perdue.
+ *
+ * ## Ce que fait cette passe
+ *
+ * 1. **Le titre disparaît** (avec le sous-titre) : il ne sert à rien pendant une partie et coûtait la
+ *    hauteur qui manquait aux voies. Le bureau garde le titre.
+ * 2. **Plus aucune marge extérieure** : l'arène occupe l'écran entier et la piste commence au bord
+ *    gauche. Il n'y a donc plus de bande vide à gauche.
+ * 3. **Une seule zone réservée : la colonne de droite**, large de `--hud-mobile-column`. Elle porte,
+ *    de haut en bas : la ligne d'état, le badge de checkpoint, le classement, l'écran d'arrivée, le
+ *    speaker, la seed, et tout en bas les commandes.
+ * 4. **Le HUD supérieur tient sur une ligne** : état · segment · chrono · son · commentateur.
+ * 5. **Les voies s'étendent** (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO` côté rendu) et
+ *    les personnages grossissent : la hauteur récupérée leur revient.
+ *
+ * ## Pourquoi la colonne 1 de la grille est exactement la piste
+ *
+ * `.hud` est une grille à deux colonnes dont la première reste **vide** : c'est la piste. La
+ * gouttière de colonne est nulle et le rembourrage de gauche aussi, donc la colonne 1 coïncide au
+ * pixel avec la boîte du canvas (`.game`, qui est inséré de la largeur de la colonne). C'est ce qui
+ * permet aux badges d'événement — posés en pourcentage de la piste — de tomber au bon endroit, et
+ * aux tests de géométrie de comparer des rectangles qui décrivent la même zone.
+ *
+ * ## Ce qui reste vrai
+ *
+ * Aucune règle de course n'est touchée : ce bloc ne fait que déplacer des boîtes. La simulation, la
+ * seed, le speaker et la relecture sont identiques au bureau.
+ */
 @media (max-height: 560px) {
-  .shell {
-    gap: 0.35rem;
-    padding: 0.4rem 0.5rem calc(0.4rem + env(safe-area-inset-bottom, 0px));
+  :root {
+    /*
+     * Largeur de la colonne de droite : 32 % de l'écran, bornée pour rester lisible sur un écran large
+     * et compacte sur un petit. C'est la plus petite valeur de la fourchette demandée (30–35 %) qui
+     * laisse tenir **sur une seule ligne** l'état, le segment, le chrono et les deux pastilles de
+     * réglages **sans troncature** : mesuré en 844×390, à 30 % les libellés `Course en cours` et
+     * `Commentateur` perdaient 2 à 3 px (points de suspension). C'est donc la valeur qui rend le plus
+     * de place à la piste tout en restant lisible.
+     */
+    --hud-mobile-column: clamp(11rem, 32%, 18rem);
+    /*
+     * Hauteur réservée aux commandes au bas de la colonne : deux rangées de boutons tactiles
+     * (Lancer · Pause, puis Rejouer), plus la barre de relecture quand une pause manuelle l'affiche.
+     */
+    --hud-mobile-controls: 5.8rem;
   }
 
-  .subtitle {
+  .shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--hud-mobile-column);
+    grid-template-rows: 100%;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* 1) Le titre et le sous-titre ne prennent plus de hauteur. */
+  .head {
     display: none;
   }
 
+  /* 2) L'arène est l'écran ; la piste est la zone de gauche, sans marge ni bord arrondi. */
   .stage {
-    width: min(100%, 1280px, calc((100vh - 96px) * 16 / 9));
+    grid-column: 1 / -1;
+    grid-row: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    aspect-ratio: auto;
   }
 
-  .controls button {
-    padding: 0.35rem 0.7rem;
-    min-width: 5.5rem;
-    font-size: 0.8rem;
+  .game {
+    position: absolute;
+    inset: 0 var(--hud-mobile-column) 0 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  /* 3) La grille du HUD : colonne 1 = la piste (vide), colonne 2 = la colonne du HUD. */
+  .hud {
+    grid-template-columns: minmax(0, 1fr) var(--hud-mobile-column);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+    column-gap: 0;
+    row-gap: 0.15rem;
+    align-items: start;
+    /*
+     * Aucun rembourrage horizontal : la colonne 1 de la grille doit coïncider **au pixel** avec la
+     * boîte du canvas, sinon les badges d'événement (posés en pourcentage de la piste) seraient
+     * décalés de la valeur du rembourrage. Chaque bloc de la colonne porte donc sa propre marge
+     * intérieure.
+     */
+    padding: 0.2rem 0 calc(var(--hud-mobile-controls) + 0.25rem) 0;
+    font-size: 0.6rem;
+    --hud-sidebar-width: 0;
+    /*
+     * Plancher de lisibilité du classement : `0.62rem` ≈ 9,9 px, au-dessus du minimum de 9 px
+     * vérifié par les tests E2E responsive.
+     */
+    --hud-row-font: 0.62rem;
+  }
+
+  /* 4) Ligne d'état : une seule ligne, tout au haut de la colonne. */
+  .hud-topline {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    /*
+     * `nowrap` est le cœur de l'exigence : l'état, le segment, le chrono et les réglages forment
+     * **une** ligne, jamais une pile de blocs. Ce sont les libellés qui cèdent de la place (ils se
+     * raccourcissent avec des points de suspension) plutôt que la ligne qui se replie — et le test
+     * E2E vérifie qu'à 844×390 et 926×428 aucun libellé n'est effectivement tronqué.
+     */
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.1rem 0.25rem;
+    padding-right: 0.2rem;
+    font-size: 0.55rem;
   }
 
   /*
-   * Le HUD garde ses informations essentielles et abandonne le confort : le titre de la seed et les
-   * libellés d'état des réglages disparaissent, la seed se réduit à sa valeur copiable. Rien
-   * d'essentiel — chrono, segment, seed, commentaire — ne quitte l'écran.
-   *
-   * Le **classement permanent**, lui, est masqué pendant la course (passe corrective 2) : sur un écran
-   * de cette taille, il n'existe aucune bande latérale assez large pour lui sans réduire la piste à
-   * presque rien, et masquer vaut mieux que recouvrir les coureurs. L'écran d'arrivée porte le
-   * classement complet, et `--hud-sidebar-width: 0` rend toute la largeur à la piste.
+   * Ordre de lecture imposé par la ligne elle-même : `état · segment · chrono · son · commentateur`.
+   * Le DOM, lui, reçoit le chrono et les réglages de deux modules différents (le rendu et `app/`), et
+   * leur ordre d'insertion ne dit rien de l'ordre de lecture : c'est donc ici qu'il est fixé.
    */
-  .hud {
-    gap: 0.15rem 0.3rem;
-    padding: 0.25rem 0.3rem;
+  .hud-status {
+    order: 1;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0.05rem 0.25rem;
     font-size: 0.55rem;
-    --hud-sidebar-width: 0;
-    /*
-     * Plancher de lisibilité du classement : `0.6rem` = 9,6 px, au-dessus du minimum de 9 px vérifié
-     * par les tests E2E responsive. La passe corrective a d'abord réduit cette ligne à `0.5rem`
-     * (8 px) pour libérer la piste ; la mesure E2E a montré que le texte passait alors sous le
-     * plancher de lisibilité, et c'est le CSS qui a été corrigé — jamais le seuil du test.
-     */
-    --hud-row-font: 0.6rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .hud-panel {
-    display: none;
+  /*
+   * Le chrono et le segment ne forment plus une pastille à part : ils rejoignent la ligne, dans
+   * l'ordre demandé (`2/3` puis `37,4 s`, d'où l'inversion), sans bord ni fond.
+   */
+  .hud-time {
+    order: 2;
+    flex: 0 0 auto;
+    flex-direction: row-reverse;
+    gap: 0.25rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font-size: 0.55rem;
   }
 
   .hud-time .hud-title,
@@ -895,53 +1022,65 @@ body {
     display: none;
   }
 
-  .hud-status {
+  .hud-settings {
+    order: 3;
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 0.15rem;
+    padding: 0;
+    background: transparent;
     font-size: 0.55rem;
   }
 
-  .hud-time {
-    padding: 0.15rem 0.3rem;
-  }
-
-  .hud-row {
-    grid-template-columns: 0.8rem minmax(0, 1fr) auto auto;
-    gap: 0.2rem;
-    line-height: 1.2;
-  }
-
-  /*
-   * Réglages en téléphone paysage : on garde les deux pastilles, dont le libellé d'état devient
-   * inutile puisque la couleur et l'`aria-pressed` portent l'état. Le commentaire reste sur sa propre
-   * rangée et ne peut donc rien recouvrir.
-   */
-  .hud-settings {
-    gap: 0.15rem;
-    padding: 0.05rem 0.15rem;
-  }
-
   .hud-settings-toggle {
-    padding: 0.05rem 0.35rem;
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 0.05rem 0.25rem;
+  }
+
+  /* Le libellé cède de la place avant la ligne : il se raccourcit, il ne passe jamais dessous. */
+  .hud-settings-toggle-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .hud-settings-toggle-state {
     display: none;
   }
 
-  .hud-subtitle {
-    gap: 0.3rem;
-    padding: 0.15rem 0.4rem;
+  /* 5) Badge de checkpoint : temporaire, dans la colonne (jamais sur une voie). */
+  .hud-checkpoint {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: stretch;
+    max-width: 100%;
+    padding: 0.1rem 0.3rem;
+    white-space: normal;
+    font-size: 0.58rem;
   }
 
-  .hud-subtitle-name {
-    padding: 0.02rem 0.3rem;
+  /* 6) Classement : dans la colonne, six lignes, sans gros rembourrage. */
+  .hud-panel {
+    grid-column: 2;
+    grid-row: 3;
+    justify-self: stretch;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 0.15rem 0.25rem;
+    border-radius: 6px;
   }
 
-  /*
-   * Écran d'arrivée en téléphone paysage : les six résultats et le podium doivent tenir dans la
-   * rangée de piste. On abandonne les titres de section (le podium se reconnaît à sa colonne et à sa
-   * police) et on resserre les gouttières ; ni les lignes ni les boutons ne sont retirés.
-   */
+  .hud-row {
+    grid-template-columns: 0.85rem minmax(0, 1fr) auto auto;
+    gap: 0.2rem;
+    line-height: 1.2;
+  }
+
+  /* 7) Écran d'arrivée : pleine largeur, dans sa propre rangée (il ne recouvre rien). */
   .hud-finish {
+    grid-row: 4;
     gap: 0.15rem;
     padding: 0.2rem 0.35rem;
   }
@@ -960,7 +1099,128 @@ body {
     line-height: 1.25;
   }
 
+  /* Boutons d'arrivée : compacts, mais réellement tactiles (≥ 30 px de haut). */
   .hud-finish-actions button {
-    padding: 0.15rem 0.5rem;
+    min-height: 1.9rem;
+    padding: 0.2rem 0.5rem;
+  }
+
+  /* 8) Speaker : sous le classement, en colonne, jamais au-dessus d'une voie. */
+  .hud-subtitle {
+    grid-column: 2;
+    grid-row: 5;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-self: stretch;
+    gap: 0.15rem;
+    max-width: 100%;
+    padding: 0.15rem 0.3rem;
+    font-size: 0.58rem;
+  }
+
+  .hud-subtitle-name {
+    padding: 0.02rem 0.3rem;
+  }
+
+  /* 9) Seed : discrète, au bas de la colonne, au-dessus des commandes. */
+  .hud-seed {
+    grid-column: 2;
+    grid-row: 6;
+    justify-self: start;
+    align-self: end;
+    gap: 0.2rem;
+    padding: 0.05rem 0.3rem;
+    font-size: 0.55rem;
+  }
+
+  /*
+   * 10) Commandes : au bas de la colonne, sur deux rangées (Lancer · Pause, puis Rejouer). Elles ne
+   * prennent plus aucune place au-dessus ni au-dessous de la piste.
+   */
+  .controls {
+    grid-column: 2;
+    grid-row: 1;
+    z-index: 3;
+    align-self: end;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.25rem;
+    padding: 0 0.25rem calc(0.25rem + env(safe-area-inset-bottom, 0px)) 0.25rem;
+    background: #05070fcc;
+    border-top: 1px solid var(--border);
+  }
+
+  /*
+   * Les trois commandes de course occupent toute la largeur de la colonne. Le sélecteur vise les
+   * **enfants directs** : les boutons de la barre de relecture sont eux aussi des `button` de
+   * `.controls`, et ils doivent garder leur largeur naturelle (sinon ils passent à la ligne).
+   */
+  .controls > button {
+    width: 100%;
+    min-width: 0;
+    min-height: 2.6rem;
+    padding: 0.35rem 0.4rem;
+    font-size: 0.78rem;
+  }
+
+  .controls #replay-button {
+    grid-column: 1 / -1;
+  }
+
+  /*
+   * Barre de relecture : dans la colonne, sur une seule ligne. Le titre disparaît (les libellés
+   * `−2 s` / `+2 s` portent déjà le contexte) et le curseur prend la place restante : sans cela, la
+   * barre se replierait sur trois lignes dans une colonne de 32 %.
+   */
+  .replay {
+    grid-column: 1 / -1;
+    flex-wrap: nowrap;
+    gap: 0.2rem;
+    padding: 0.15rem 0.25rem;
+    font-size: 0.68rem;
+  }
+
+  .replay-title {
+    display: none;
+  }
+
+  .replay-range {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 2.5rem;
+  }
+
+  .replay-readout {
+    flex: 0 0 auto;
+    min-width: 0;
+    font-size: 0.9em;
+  }
+
+  /*
+   * `.replay .replay-step` et non `.replay-step` : la règle de bureau `.controls button` (largeur
+   * minimale de 7rem, rembourrage large) vise ces boutons-là aussi, et il faut la battre pour que la
+   * barre tienne sur une ligne dans une colonne de 32 %.
+   */
+  .replay .replay-step {
+    flex: 0 0 auto;
+    min-width: 2.4rem;
+    padding: 0.15rem 0.3rem;
+  }
+
+  /*
+   * La barre de relecture n'existe que pendant une pause manuelle : tant qu'elle est affichée, sa
+   * hauteur est réservée dans la colonne (`:has`), sinon les commandes recouvriraient la seed. Hors
+   * pause, la place reste rendue au speaker.
+   */
+  .shell:has(#replay-bar:not([hidden])) {
+    --hud-mobile-controls: 7.8rem;
+  }
+
+  /*
+   * 11) La couche des badges d'événement couvre la **piste**, pas l'écran : elle est positionnée en
+   * pourcentage de la piste par le rendu, et la colonne de droite n'en reçoit donc jamais aucun.
+   */
+  .hud-events {
+    width: calc(100% - var(--hud-mobile-column));
   }
 }

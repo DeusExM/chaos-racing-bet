@@ -276,11 +276,39 @@ est donc dessinée dans une zone qui **exclut** la bande du classement : le rend
 `VIEW.TRACK_WIDTH_RATIO = 0.78` de la largeur de l'arène, et le classement vit dans les 22 % restants.
 Un personnage sorti du champ est **masqué** — son marqueur de bord, lui, reste dans la piste — plutôt
 que dessiné sous le panneau. En **téléphone paysage** (hauteur ≤
-`VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX = 560`), la bande disparaît et le classement permanent est
-**masqué pendant la course** : masquer est préférable à recouvrir, et le classement complet reste
-présenté au podium. La vérification est **géométrique** : à plusieurs instants de la course, et en
-1280×720, 1920×1080 et 844×390, aucun personnage dessiné ne croise le rectangle du classement — une
-fraction de surface ne prouverait rien de la position.
+`VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX = 560`), la bande réservée devient une **colonne HTML à droite de
+la piste** (voir « Disposition téléphone paysage ») : le classement y reste **affiché pendant la
+course**, la piste occupant toute la zone de gauche. La vérification est **géométrique** : à plusieurs
+instants de la course, et en 1280×720, 1920×1080, 844×390 et 926×428, aucun personnage dessiné ne
+croise le rectangle du classement — une fraction de surface ne prouverait rien de la position.
+
+**Disposition téléphone paysage (passe responsive issue du test sur iPhone).** Le premier essai sur un
+vrai téléphone a montré une interface trop petite : l'en-tête, les marges extérieures et une arène en
+16:9 centrée laissaient ≈ 150 px de vide de chaque côté, et le classement était masqué faute de place.
+La disposition compacte est donc devenue, pour la même course :
+
+* **titre et sous-titre masqués** : ils ne servent à rien pendant une partie et coûtaient la hauteur
+  qui manquait aux voies ;
+* **aucune marge extérieure** : l'arène occupe l'écran entier et la piste commence au bord gauche ;
+* **une seule zone réservée**, la colonne de droite (`--hud-mobile-column`, 32 % de la largeur), qui
+  porte de haut en bas : la **ligne d'état** (état · segment · chrono · son · commentateur, sur une
+  seule ligne), le badge de checkpoint, le **classement**, l'écran d'arrivée, le **speaker**, la seed,
+  puis les **commandes** (`Lancer` · `Pause`, puis `Rejouer`) ;
+* **la piste n'a plus aucun HUD textuel superposé** : les badges d'événement restent la seule
+  surimpression, et ils sont attachés aux personnages ;
+* **les personnages grandissent** : la hauteur récupérée revient aux voies, qui s'étendent
+  (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO`), et le rendu passe de
+  `CHARACTER_HEIGHT_PX = 73` à `CHARACTER_HEIGHT_COMPACT_PX = 84` px logiques (nom compris, police
+  `CHARACTER_NAME_FONT_COMPACT_PX = 20`) — la plus grande valeur qui laisse le nom de la première voie
+  entier et une séparation nette entre voisines.
+
+Techniquement, la piste n'a plus le rapport 16:9 de l'arène de bureau : la **largeur logique du canvas**
+est donc déduite du rapport réel de la piste (`viewport.arenaBaseSize`), pour que le canvas et la
+colonne du HUD coïncident au pixel — sans quoi les badges d'événement, posés en pourcentage de la
+piste, seraient décalés. La **hauteur logique reste 720** : toute la géométrie verticale garde son sens,
+et seule la correspondance mètres → pixels change, comme elle le fait déjà à chaque cadrage. Rien de
+tout cela ne touche la simulation : ce sont des décisions de **présentation**, prises dans `render/` et
+`styles.css`.
 
 **Visuels des personnages (passe visuelle).** Les six coureurs ne sont plus des formes géométriques
 provisoires : chacun affiche son **illustration** (`public/assets/characters/`, une par personnage,
@@ -297,7 +325,10 @@ personnage qui ne tient pas entièrement dans la piste est masqué au profit de 
 
 **Relecture pendant une pause manuelle (passe corrective 2).** Pendant une pause du MJ, une petite
 barre apparaît sous les commandes : `−2 s`, une barre de temps, `+2 s`, et une lecture
-`38,4 s / 52,4 s` (instant consulté / instant réel de la pause). Le curseur est **borné** à
+`38,4 s / 52,4 s` (instant consulté / instant réel de la pause). En téléphone paysage, cette barre
+tient dans la colonne de droite, sur une ligne (son titre disparaît, les libellés `−2 s` / `+2 s`
+portant déjà le contexte), et la place qu'elle occupe est **réservée** tant qu'elle est affichée, pour
+qu'elle ne recouvre ni la seed ni le speaker. Le curseur est **borné** à
 `[0, instant de pause]` : on ne remonte jamais avant le départ, et on n'avance jamais au-delà de ce
 qui a réellement été joué. La relecture est **purement visuelle** : `RaceEngine` ne recule jamais,
 aucun pas n'est exécuté, aucun fait n'est produit, aucun tirage n'a lieu, et la relecture est

@@ -6,7 +6,7 @@ import { RaceScene } from './scenes/RaceScene';
 import type { CommentaryView } from './scenes/RaceScene';
 import type { UiText } from './uiText';
 import type { FinishActions } from './view/FinishPanel';
-import { VIEW } from './viewConfig';
+import { arenaBaseSize, isCompactViewport, type ArenaSize } from './viewport';
 
 /** Dépendances injectées par `src/app/` : le rendu ne crée ni ne possède la simulation. */
 export interface GameOptions {
@@ -39,6 +39,16 @@ export interface GameOptions {
  * un plan large, jamais rognée — et `autoRound` évite les demi-pixels. La conséquence assumée est
  * que les textes **dessinés dans le canvas** rétrécissent avec la fenêtre : c'est pourquoi tout ce
  * qui doit rester lisible (classement, état, debug) est en HTML au-dessus du canvas.
+ *
+ * ## Taille logique et petit paysage
+ *
+ * En petit paysage, l'écran est partagé entre la piste et la colonne du HUD : la piste n'a donc plus
+ * le rapport 16:9. La taille logique est alors choisie pour **remplir exactement** la boîte de la
+ * piste (`arenaBaseSize`) : sans cela, `Scale.FIT` ajouterait des bandes vides et, plus grave, le
+ * canvas ne coïnciderait plus avec la colonne du HUD qui lui fait face — les badges d'événement,
+ * posés en pourcentage de la piste, seraient décalés. La taille est réajustée au redimensionnement
+ * (rotation du téléphone, barre d'URL qui se replie), sans jamais toucher à la simulation : seuls le
+ * cadrage et la taille des sprites changent.
  */
 export function createGame(options: GameOptions): void {
   const raceScene = new RaceScene({
@@ -58,11 +68,13 @@ export function createGame(options: GameOptions): void {
     finishActions: options.finishActions,
   });
 
-  new Game({
+  const base = arenaBaseSizeFor(options.parent);
+
+  const game = new Game({
     type: AUTO,
     parent: options.parent,
-    width: VIEW.BASE_WIDTH,
-    height: VIEW.BASE_HEIGHT,
+    width: base.width,
+    height: base.height,
     backgroundColor: '#0b0f1e',
     scale: {
       mode: Scale.ScaleModes.FIT,
@@ -71,4 +83,20 @@ export function createGame(options: GameOptions): void {
     },
     scene: [new BootScene(), raceScene],
   });
+
+  // Le canvas suit la boîte de la piste tant qu'elle change : la mise en page CSS décide, le rendu
+  // s'aligne. `setGameSize` est l'API prévue pour `Scale.FIT` (elle change la taille **de base**,
+  // pas la taille du canvas), et la scène relit `scale.width/height` à la frame suivante.
+  window.addEventListener('resize', () => {
+    const next = arenaBaseSizeFor(options.parent);
+    if (next.width !== game.scale.width || next.height !== game.scale.height) {
+      game.scale.setGameSize(next.width, next.height);
+    }
+  });
+}
+
+/** Taille logique de l'arène d'après la boîte réellement occupée par la piste. */
+function arenaBaseSizeFor(parent: HTMLElement): ArenaSize {
+  const box = parent.getBoundingClientRect();
+  return arenaBaseSize(box.width, box.height, isCompactViewport());
 }

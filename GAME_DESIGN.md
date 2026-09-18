@@ -298,8 +298,8 @@ La disposition compacte est donc devenue, pour la même course :
 * **la piste n'a plus aucun HUD textuel superposé** : les badges d'événement restent la seule
   surimpression, et ils sont attachés aux personnages ;
 * **les personnages grandissent** : la hauteur récupérée revient aux voies, qui s'étendent
-  (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO`), et le rendu passe de
-  `CHARACTER_HEIGHT_PX = 73` à `CHARACTER_HEIGHT_COMPACT_PX = 106` px logiques (police du nom
+  (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO`), et le rendu passe de la taille de bureau
+  (`CHARACTER_HEIGHT_PX`) à `CHARACTER_HEIGHT_COMPACT_PX = 106` px logiques (police du nom
   `CHARACTER_NAME_FONT_COMPACT_PX = 20`) — la plus grande valeur de la fourchette demandée qui laisse
   une séparation visible entre silhouettes voisines (≥ 10 px logiques, marges transparentes des images
   comprises).
@@ -314,18 +314,21 @@ personnages **en grand**, avec leur nom, en réutilisant les images déjà servi
 surcouche d'interface pure, sans aucun effet sur la course (elle ne connaît ni la simulation, ni le
 speaker, ni la relecture).
 
-**Textes attachés aux personnages, en petit paysage.** Le **nom** et les mots d'événement
-(`TURBO !`, `BONUS !`, `MALUS !`) ne sont plus posés **au-dessus** du sprite : ils vivent **dans la
+**Textes attachés aux personnages, dans les deux formats.** Le **nom** et les mots d'événement
+(`TURBO !`, `BONUS !`, `MALUS !`) ne sont posés **au-dessus** d'aucun sprite : ils vivent **dans la
 voie**, sur l'axe du personnage, et **derrière lui au sens de la course** — c'est-à-dire à sa
-**gauche**, puisque la course va de gauche à droite (`characterNameX`, `CHARACTER_NAME_GAP_PX`).
-« Derrière » ne veut donc **pas** dire sous l'image : le texte s'arrête avant le début du sprite, n'est
-**jamais** recouvert par lui, et n'a pour cette raison aucun contour à porter. La conséquence est celle
-qui était recherchée : plus aucun texte ne consomme de hauteur au-dessus d'un sprite, donc les
-personnages peuvent grandir jusqu'à `106` px logiques sans que les voies se rapprochent. Les mots
-d'événement, eux, restent dans la couche DOM du HUD (comme le reste du HUD) : ils sont recentrés sur
-l'axe de la voie et reculés de la demi-largeur du sprite, sans jamais fusionner avec l'image. Sur
-**bureau**, rien ne change : le nom reste centré au-dessus de la tête, au-dessus du sprite, et les mots
-d'événement restent au-dessus du sprite.
+**gauche**, puisque la course va de gauche à droite (`characterNameX`, `characterNameY`,
+`CHARACTER_NAME_GAP_PX`). « Derrière » ne veut donc **pas** dire sous l'image : le texte s'arrête avant
+le début du sprite, n'est **jamais** recouvert par lui, et n'a pour cette raison aucun contour à
+porter — aucun mélange de texte sous le sprite n'est utilisé. La règle est **la même sur bureau et en
+petit paysage** ; seules les tailles changent (`CHARACTER_HEIGHT_PX = 92` contre
+`CHARACTER_HEIGHT_COMPACT_PX = 106`, polices `CHARACTER_NAME_FONT_PX = 16` contre
+`CHARACTER_NAME_FONT_COMPACT_PX = 20`). La conséquence est celle qui était recherchée : plus aucun
+texte ne consomme de hauteur au-dessus d'un sprite, donc les personnages peuvent grandir sans que les
+voies se rapprochent. Les mots d'événement, eux, restent dans la couche DOM du HUD (comme le reste du
+HUD) : ils sont recentrés sur l'axe de la voie et reculés de la **demi-largeur réelle du sprite** plus
+une petite marge (`EVENT_BADGE_GAP_PX`), sans jamais fusionner avec l'image. Le recul est calculé en
+pixels CSS, jamais en pourcentage : il reste donc exact à toutes les échelles de canvas.
 
 **Timeline de pause, en petit paysage.** La barre de relecture est **remontée** du bord bas de l'écran
 (marge de sécurité de `0.6rem` en plus de `env(safe-area-inset-bottom)`), et sa **zone tactile fait
@@ -344,17 +347,18 @@ tout cela ne touche la simulation : ce sont des décisions de **présentation**,
 **Visuels des personnages (passe visuelle).** Les six coureurs ne sont plus des formes géométriques
 provisoires : chacun affiche son **illustration** (`public/assets/characters/`, une par personnage,
 associée par `src/render/characterAssets.ts` — la seule table du projet qui connaît un chemin
-d'asset). Le rendu ne choisit qu'une **hauteur** (`VIEW.CHARACTER_HEIGHT_PX = 73`) et déduit la largeur
-du ratio de l'image : une image n'est donc **jamais** écrasée en carré, et la résolution du fichier
-n'est jamais une taille d'affichage. Les fichiers servis font 320 px de haut (copies runtime produites
-par `tools/optimizeCharacterAssets.mjs`, ≈ 0,75 Mio au total), les originaux fournis (~1448×1086,
+d'asset). Le rendu ne choisit qu'une **hauteur** (`VIEW.CHARACTER_HEIGHT_PX = 92` sur bureau,
+`VIEW.CHARACTER_HEIGHT_COMPACT_PX = 106` en petit paysage) et déduit la largeur du ratio de l'image :
+une image n'est donc **jamais** écrasée en carré, et la résolution du fichier n'est jamais une taille
+d'affichage. Les fichiers servis font 320 px de haut (copies runtime produites par
+`tools/optimizeCharacterAssets.mjs`, ≈ 0,75 Mio au total), les originaux fournis (~1448×1086,
 ~6,2 Mio) restant **intacts** hors du dépôt : c'est ce qui garde de la marge pour les écrans à haute
-densité tout en respectant le budget de ressources d'`AGENTS.md` §3.6. Le nom reste au-dessus du
-sprite sur les formats de bureau, positionné à partir de la hauteur réellement affichée ; en petit
-paysage il partage l'axe du personnage et s'arrête juste avant lui, à sa gauche (voir plus haut). La visibilité
-(`setDrawn`) est calculée sur la **taille réellement dessinée** : les illustrations étant plus larges
-que hautes, un personnage qui ne tient pas entièrement dans la piste est masqué au profit de son
-marqueur de bord.
+densité tout en respectant le budget de ressources d'`AGENTS.md` §3.6. Le nom partage l'axe du
+personnage et s'arrête juste avant lui, à sa gauche, dans les deux formats (voir plus haut) ; il est
+donc positionné à partir de la **largeur** réellement affichée du sprite et de la voie, jamais d'une
+hauteur de texte supposée. La visibilité (`setDrawn`) est calculée sur la **taille réellement
+dessinée** : les illustrations étant plus larges que hautes, un personnage qui ne tient pas entièrement
+dans la piste est masqué au profit de son marqueur de bord.
 
 **Relecture pendant une pause manuelle (passe corrective 2).** Pendant une pause du MJ, une petite
 barre apparaît sous les commandes : `−2 s`, une barre de temps, `+2 s`, et une lecture
@@ -391,11 +395,63 @@ désigne un. Elle ne crée **aucune** file d'attente : la bande affiche la répl
 (§9), et une nouvelle réplique **remplace** la précédente. Les textes restent ceux du speaker — le
 rendu ne compose ni ne réécrit aucun commentaire.
 
-**Bonus et malus = retour attaché au personnage.** Un événement actif affiche, **au-dessus du
-personnage concerné** et uniquement pendant sa durée, un libellé court (`TURBO !`, `CHUTE !`, …) et son
-sens (`BONUS !` / `MALUS !`) avec une couleur distincte. Plusieurs personnages peuvent en porter un en
-même temps, aucun retour ne capture les clics, et **tout provient des événements réels du noyau** : le
-retour ne crée, ne modifie et ne consomme rien (aucun tirage, aucune constante).
+**Bonus et malus = retour attaché au personnage.** Un événement actif affiche, **dans la voie du
+personnage concerné, sur son axe et derrière lui** (voir « Textes attachés aux personnages »), et
+uniquement pendant sa durée, un libellé court (`TURBO !`, `CHUTE !`, …) et son sens (`BONUS !` /
+`MALUS !`) avec une couleur distincte. Plusieurs personnages peuvent en porter un en même temps, aucun
+retour ne capture les clics, et **tout provient des événements réels du noyau** : le retour ne crée, ne
+modifie et ne consomme rien (aucun tirage, aucune constante).
+
+**Passe de finition de la version 2D (fin de P013).** Cette passe n'a **rien** changé aux règles : ni
+probabilité, ni modèle de vitesse, ni surge, ni événement, ni tirage, ni nombre de pas, ni durée, ni
+checkpoint, ni classement, ni speaker. Tout ce qui suit est de la **présentation**, de la **lecture** ou
+de l'**historique de résultats déjà calculés**.
+
+* **Géométrie de bureau.** Les voies s'étendent (`LANE_TOP_RATIO = 0,20`, `LANE_BOTTOM_RATIO = 0,90`)
+  et les personnages passent de `73` à **`92` px logiques** : la plus grande taille propre qui tient
+  dans les six voies en **1280×720** comme en **1920×1080**, sans recouvrement gênant, sans sprite sous
+  la colonne du HUD et sans sortir du canvas. La marge noire apparente entre voies est réduite au profit
+  des personnages ; la séparation **visible** entre deux silhouettes voisines (marges transparentes des
+  images comprises) reste ≥ 10 px logiques, et le test de géométrie le vérifie. Aucun PNG source n'a été
+  modifié : seule la **hauteur d'affichage** change, comme toujours.
+* **Retour d'événement, sur bureau aussi.** Les mots d'événement suivent désormais la **même règle**
+  qu'en petit paysage : dans la voie, sur l'axe du personnage, **derrière lui** (à sa gauche), sans
+  jamais recouvrir l'image. Leur **durée et leur logique sont inchangées** : ils apparaissent et
+  disparaissent exactement avec l'événement du noyau, et leur contenu reste celui des libellés.
+* **Historique des passages en tête, sur l'écran d'arrivée.** Une section `Passages en tête` liste les
+  bornes de la course : `Checkpoint 1 · 20 s`, `Checkpoint 2 · 40 s`, puis `Arrivée · 60 s`, chacune avec
+  le **leader réellement observé** à cet instant. Il n'existe **pas** de « Checkpoint 3 » : la troisième
+  borne est l'arrivée, et son leader est le vainqueur du classement final. Les valeurs proviennent
+  **exclusivement** d'états réellement observés : le rendu note le premier du classement du noyau au
+  moment de chaque checkpoint (`PassageRecorder`), et **ne recalcule rien** à partir des sprites. Le
+  classement existant reste l'**unique source de vérité** : aucun second moteur de classement n'a été
+  créé, l'enregistreur ne fait que lire `leaderboardOf(state)` et mémoriser un identifiant, un nom et un
+  instant. Un rejeu, un redémarrage ou un changement de seed repart d'un historique vide.
+* **`Rejouer` (bouton principal) tire une nouvelle seed.** Un clic **tire immédiatement une nouvelle
+  seed**, met l'URL à jour, remet la simulation et le commentaire à zéro, et **relance la course** — par
+  le mécanisme existant, sans second générateur de seed. Le bouton explicite de l'écran d'arrivée
+  (`Rejouer la même seed`) garde son sens : même seed, donc même course, bit à bit.
+* **Effets visuels d'événement, purement visuels.** Un **bonus** ajoute un léger halo derrière le
+  personnage (et une pulsation discrète) ; un **malus** le teinte légèrement (sombre/rougeâtre) et
+  laisse une petite traînée sombre vers l'arrière. Ces effets se contentent de **lire** `activeEvent` et
+  la magnitude : ils ne déplacent **pas** le personnage, ne changent **pas** sa vitesse, ne tirent
+  **aucun** nombre aléatoire et n'écrivent jamais `x` ni `v`. Aucune bibliothèque d'effets n'a été
+  ajoutée. La preuve est faite par les tests : les distances et le classement finaux d'une seed sont
+  **identiques** à ceux du noyau seul, effets et badges compris.
+* **`Persos` en paysage de téléphone.** Le panneau des six personnages tient **entièrement** dans
+  l'écran (844×390 comme 926×428) : la grille 3 × 2 reste, les six cartes et les six noms sont visibles,
+  le bouton `Fermer` est utilisable, et aucun défilement n'est nécessaire. La hauteur suit la zone
+  **réellement visible** (`100dvh`, avec `100vh` en secours) et les marges de sécurité
+  (`env(safe-area-inset-*)`) sont ajoutées au rembourrage. La cause de la coupure était une rangée de
+  grille **automatique** : elle se dimensionnait sur la hauteur minimale du panneau — six images — et
+  dépassait donc l'écran même quand le panneau, lui, était correct. La rangée est maintenant définie
+  (`minmax(0, 1fr)`), et l'en-tête, les rembourrages et les écarts sont légèrement resserrés en petit
+  paysage avant de réduire les images.
+* **Repère d'échelle retiré.** L'**échelle nominale** affichée sur la piste a été supprimée : elle
+  ressemblait à une ligne d'arrivée et induisait en erreur, alors que la course se termine **par le
+  temps** (§5, invariant 3). Le repère n'a **pas** été renommé `Arrivée` — ce serait faux — et la
+  logique d'arrivée n'a pas été touchée : la course se termine toujours à `tSim = 60 s`, sans aucune
+  condition de distance. Les graduations de décor restent, elles ne sont lues par personne.
 
 **Son et commentaire — deux réglages explicites.** Les commandes s'appellent **`Son`** et
 **`Commentateur`**, chacune avec un état explicite (`activé` / `coupé`), à la place des anciens

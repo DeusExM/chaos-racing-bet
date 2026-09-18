@@ -274,9 +274,15 @@ function bootstrap(): void {
     simulation.start();
   });
 
-  // « Rejouer » repart de zéro avec exactement la même seed.
+  // « Rejouer » tire une **nouvelle** seed et relance immédiatement une course (passe de finition 2D).
+  //
+  // C'est le bouton principal de la barre de commandes : un clic doit donner une course différente, et
+  // non rejouer la précédente. Il emprunte exactement le même chemin que le bouton « Nouvelle course »
+  // de l'écran d'arrivée — un seul tirage de seed dans tout le projet, une seule séquence de remise à
+  // zéro — donc rien n'est dupliqué. Le bouton explicite « Rejouer la même seed » de l'écran d'arrivée,
+  // lui, garde son sens et continue d'appeler `startSameSeedRace()`.
   replayButton?.addEventListener('click', () => {
-    startSameSeedRace();
+    startNewRace();
   });
 
   // « Pause / Reprendre » : même commande que la touche Espace, et rien d'autre.

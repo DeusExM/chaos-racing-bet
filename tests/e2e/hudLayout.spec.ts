@@ -41,11 +41,23 @@ interface Rect {
   readonly height: number;
 }
 
+interface CharacterGeometry extends Rect {
+  readonly id: string;
+  /** Position logique du **nom** : ancré par son bord droit, sur l'axe de la voie. */
+  readonly nameX: number;
+  readonly nameY: number;
+  /** Centre et dimensions du sprite, en pixels **logiques** du canvas (unités du rendu). */
+  readonly screenX: number;
+  readonly screenY: number;
+  readonly logicalWidth: number;
+  readonly logicalHeight: number;
+}
+
 interface GeometrySample {
   /** Rectangle du classement permanent, dans le repère de l'arène (`null` s'il est masqué). */
   readonly leaderboard: Rect | null;
   /** Rectangles des personnages **réellement dessinés**, dans le repère de l'arène. */
-  readonly characters: readonly (Rect & { readonly id: string })[];
+  readonly characters: readonly CharacterGeometry[];
   /** Nombre de personnages réellement dessinés (les autres sont hors champ, marqués au bord). */
   readonly drawnCount: number;
   /** Piste utilisable, en pixels CSS de l'arène. */
@@ -133,6 +145,14 @@ async function collectGeometry(page: Page, targets: readonly number[]): Promise<
             bottom: centerY + halfHeight,
             width: sprite.width * scale,
             height: sprite.height * scale,
+            // Position du nom et du centre, en unités **logiques** du rendu : c'est là que se décide
+            // la mise en place, et ces valeurs sont donc comparables aux constantes de `viewConfig`.
+            nameX: sprite.nameX,
+            nameY: sprite.nameY,
+            screenX: sprite.screenX,
+            screenY: sprite.screenY,
+            logicalWidth: sprite.width,
+            logicalHeight: sprite.height,
           };
         }),
         drawnCount: drawn.length,
@@ -307,6 +327,159 @@ for (const viewport of VIEWPORTS) {
         expect(sample.leaderboard.right).toBeLessThanOrEqual(sample.arenaWidth + 1);
       }
     }
+
+    expectNoErrors(watch);
+  });
+
+  test(`le nom vit dans la voie, derrière le personnage, en ${viewport.name}`, async ({ page }) => {
+    const watch = watchConsole(page);
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const samples = await collectGeometry(page, SAMPLED_STEPS);
+
+    expect(samples).toHaveLength(SAMPLED_STEPS.length);
+    for (const sample of samples) {
+      for (const character of sample.characters) {
+        // 1) Le nom partage l'axe de la voie : il ne réserve **aucune** hauteur au-dessus du sprite,
+        //    et il n'est donc jamais « au-dessus de la tête ».
+        expect(
+          Math.abs(character.nameY - character.screenY),
+          `pas ${String(sample.steps)} : ${character.id} — le nom est sur l'axe de la voie`,
+        ).toBeLessThanOrEqual(1);
+        // 2) Le nom est **derrière** le personnage au sens de la course : à sa gauche, puisque la
+        //    course va de gauche à droite. Son bord droit s'arrête avant le bord gauche du sprite.
+        const spriteLeft = character.screenX - character.logicalWidth / 2;
+        expect(
+          character.nameX,
+          `pas ${String(sample.steps)} : ${character.id} — le nom s'arrête avant le sprite`,
+        ).toBeLessThanOrEqual(spriteLeft);
+        // 3) Un espace constant les sépare : le texte n'est jamais recouvert par l'illustration, et
+        //    il n'en est pas collé non plus.
+        expect(
+          spriteLeft - character.nameX,
+          `pas ${String(sample.steps)} : ${character.id} — espace entre le nom et le sprite`,
+        ).toBeCloseTo(VIEW.CHARACTER_NAME_GAP_PX, 0);
+        // 4) Le nom est dessiné au-dessus du sprite : il reste lisible même si les silhouettes se
+        //    croisent en profondeur.
+        expect(character.nameY).toBeGreaterThan(0);
+        expect(character.nameY).toBeLessThan(VIEW.BASE_HEIGHT);
+      }
+    }
+
+    expectNoErrors(watch);
+  });
+
+  test(`les personnages gardent une taille utile en ${viewport.name}`, async ({ page }) => {
+    const watch = watchConsole(page);
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const samples = await collectGeometry(page, SAMPLED_STEPS);
+
+    const first = samples[0];
+    expect(first).toBeDefined();
+    if (first === undefined) {
+      throw new Error('aucun échantillon');
+    }
+
+    // La taille logique est celle du format : 92 px sur bureau, 106 px en petit paysage. Le test la
+    // compare à la constante du format courant, donc une régression de réglage est détectée ici.
+    const expected = characterHeightPx(first.compact);
+    for (const sample of samples) {
+      for (const character of sample.characters) {
+        expect(character.logicalHeight).toBeCloseTo(expected, 0);
+        // En pixels CSS, le personnage reste réellement visible : c'est cette valeur que l'œil juge.
+        expect(
+          character.height,
+          `pas ${String(sample.steps)} : ${character.id} mesure au moins 55 px CSS`,
+        ).toBeGreaterThanOrEqual(55);
+      }
+    }
+
+    // Sur bureau, les deux résolutions de référence partagent la même géométrie logique : la taille
+    // choisie doit donc tenir dans le canvas dans les deux cas (voies du haut et du bas comprises).
+    if (!first.compact) {
+      expect(expected).toBeGreaterThanOrEqual(88);
+      expect(expected).toBeLessThanOrEqual(96);
+    }
+
+    expectNoErrors(watch);
+  });
+
+  test(`les textes d’événement restent dans la voie du personnage en ${viewport.name}`, async ({
+    page,
+  }) => {
+    const watch = watchConsole(page);
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.goto(raceUrl({ seed: SEED, fast: true, autostart: true }));
+    await waitForHooks(page);
+
+    // Un badge n'apparaît que pendant un événement réel : on attend qu'il y en ait un.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => document.querySelectorAll('[data-testid="event-badge"]').length),
+        { timeout: 25_000, message: 'la course a produit un événement visible' },
+      )
+      .toBeGreaterThan(0);
+
+    // Les constantes du format sont passées en argument : `page.evaluate` s'exécute dans la page, où
+    // les modules du projet ne sont pas accessibles.
+    const laneSpanRatio = VIEW.LANE_BOTTOM_RATIO - VIEW.LANE_TOP_RATIO;
+    const laneCount = CHARACTER_IDS.length - 1;
+    const measured = await page.evaluate(
+      ({ span, lanes }) => {
+        const badge = document.querySelector('[data-testid="event-badge"]');
+        const canvas = document.querySelector('#game canvas');
+        const view = window.__CHAOS_RACE_VIEW__;
+        if (badge === null || canvas === null || view === undefined) {
+          throw new Error('mesure impossible');
+        }
+        const rect = badge.getBoundingClientRect();
+        const canvasRect = canvas.getBoundingClientRect();
+        const track = view.track();
+        const scale = canvasRect.height / track.arenaHeight;
+        const characterId = badge.getAttribute('data-character-id') ?? '';
+        const sprite = view.sprites().find((candidate) => candidate.id === characterId) ?? null;
+        return {
+          badge: {
+            left: rect.left,
+            right: rect.right,
+            centerY: (rect.top + rect.bottom) / 2,
+          },
+          characterId,
+          sprite:
+            sprite === null
+              ? null
+              : {
+                  axisY: canvasRect.top + sprite.screenY * scale,
+                  leftX: canvasRect.left + (sprite.screenX - sprite.width / 2) * scale,
+                  topY: canvasRect.top + (sprite.screenY - sprite.height / 2) * scale,
+                },
+          laneGap: ((track.arenaHeight * span) / lanes) * scale,
+        };
+      },
+      { span: laneSpanRatio, lanes: laneCount },
+    );
+
+    expect(measured.characterId, 'le badge désigne un personnage réel').not.toBe('');
+    const sprite = measured.sprite;
+    expect(sprite, 'le personnage du badge est suivi par le rendu').not.toBeNull();
+    if (sprite === null) {
+      throw new Error('personnage absent');
+    }
+
+    // 1) Le mot est **dans la voie**, sur l'axe du personnage : il ne monte plus au-dessus de sa tête.
+    expect(
+      Math.abs(measured.badge.centerY - sprite.axisY),
+      `le badge est sur l’axe de la voie (badge ${measured.badge.centerY.toFixed(1)}, axe ${sprite.axisY.toFixed(1)}, voie ${measured.laneGap.toFixed(1)})`,
+    ).toBeLessThanOrEqual(measured.laneGap / 2);
+    expect(measured.badge.centerY, 'le badge n’est pas posé au-dessus du sprite').toBeGreaterThan(
+      sprite.topY,
+    );
+    // 2) Il est **derrière** le personnage au sens de la course : il s'arrête avant le début du sprite,
+    //    donc il ne fusionne jamais avec l'image.
+    expect(
+      measured.badge.right,
+      `le badge s’arrête avant le sprite (badge ${measured.badge.right.toFixed(1)}, sprite ${sprite.leftX.toFixed(1)})`,
+    ).toBeLessThanOrEqual(sprite.leftX);
 
     expectNoErrors(watch);
   });

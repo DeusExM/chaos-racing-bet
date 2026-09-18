@@ -15,6 +15,7 @@ import {
   readFinishCore,
   readFinishDom,
   waitForFinished,
+  waitForHooks,
   watchConsole,
   type FinishCoreSample,
   type FinishDomSample,
@@ -176,6 +177,92 @@ test('une course fast=1 atteint l’écran d’arrivée : 3 600 pas, 60 s, podiu
   await expect(page.getByTestId('settings-sound')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('settings-sound').click();
   await expect(page.getByTestId('settings-sound')).toHaveAttribute('aria-pressed', 'false');
+
+  expectNoErrors(watch);
+});
+
+test('l’écran d’arrivée rappelle qui menait aux deux checkpoints, puis à l’arrivée', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const watch = watchConsole(page);
+  await page.goto(raceUrl({ seed: PLAIN_FINISH_SEED, fast: true, autostart: false }));
+  await waitForHooks(page);
+
+  // La course est observée **en direct** : à chaque checkpoint, le premier du classement du noyau est
+  // relevé, avec l'instant simulé mesuré. C'est la seule source possible — le noyau ne conserve pas
+  // les classements passés — et c'est exactement ce que le rendu doit avoir noté de son côté.
+  const observed = await page.evaluate(async () => {
+    const api = window.__CHAOS_RACE__;
+    if (api === undefined) {
+      throw new Error('hooks absents');
+    }
+    const seen: { checkpoint: number; tSim: number; id: string }[] = [];
+    const deadline = performance.now() + 60_000;
+    await new Promise<void>((resolve) => {
+      const tick = (): void => {
+        const checkpoint = api.checkpoint();
+        if (checkpoint !== null && !seen.some((row) => row.checkpoint === checkpoint)) {
+          seen.push({
+            checkpoint,
+            tSim: api.state().tSim,
+            id: api.ranks()[0]?.id ?? '',
+          });
+        }
+        if (api.phase() === 'finished' || performance.now() > deadline) {
+          resolve();
+          return;
+        }
+        requestAnimationFrame(tick);
+      };
+      tick();
+      api.start();
+    });
+    return seen;
+  });
+
+  // Les deux checkpoints intermédiaires ont réellement été observés, dans l'ordre, à 20 s et 40 s.
+  expect(observed.map((row) => row.checkpoint)).toEqual([1, 2]);
+  expect(observed[0]?.tSim).toBe(RACE_CONFIG.SEGMENT_DURATION_S);
+  expect(observed[1]?.tSim).toBe(RACE_CONFIG.SEGMENT_DURATION_S * 2);
+  expect(observed.every((row) => row.id !== '')).toBe(true);
+
+  await waitForFinished(page);
+  const { core, dom } = await readArrival(page);
+
+  // 1) La section existe, avec son titre, et elle présente exactement trois bornes.
+  expect(dom.passagesTitle).toBe(UI_TEXT_FR.finishPassagesTitle);
+  expect(dom.passages).toHaveLength(3);
+  // 2) Les deux premières lignes sont celles **observées en direct** : même personnage, même instant.
+  expect(dom.passages[0]?.checkpoint).toBe(1);
+  expect(dom.passages[0]?.id).toBe(observed[0]?.id);
+  expect(dom.passages[0]?.tSim).toBe(observed[0]?.tSim);
+  expect(dom.passages[1]?.checkpoint).toBe(2);
+  expect(dom.passages[1]?.id).toBe(observed[1]?.id);
+  expect(dom.passages[1]?.tSim).toBe(observed[1]?.tSim);
+  // 3) La troisième borne est l'**arrivée**, et son leader est le vainqueur du classement final : il
+  //    n'existe pas de « checkpoint 3 ».
+  expect(dom.passages[2]?.checkpoint).toBeNull();
+  expect(dom.passages[2]?.id).toBe(core.ranks[0]?.id);
+  expect(dom.passages[2]?.tSim).toBe(RACE_CONFIG.TOTAL_SIM_S);
+  expect(dom.passages.filter((row) => row.checkpoint === 3)).toHaveLength(0);
+
+  // 4) Les libellés et les instants affichés sont ceux du noyau, jamais des constantes inventées.
+  expect(dom.passages[0]?.boundText).toBe(`${UI_TEXT_FR.checkpointTitle} 1`);
+  expect(dom.passages[1]?.boundText).toBe(`${UI_TEXT_FR.checkpointTitle} 2`);
+  expect(dom.passages[2]?.boundText).toBe(UI_TEXT_FR.finishTitle);
+  expect(dom.passages.map((row) => row.timeText.replace(/\s/g, ' '))).toEqual([
+    '20 s',
+    '40 s',
+    '60 s',
+  ]);
+  // 5) Les noms sont ceux du roster, et le modèle publié par le panneau dit la même chose que le DOM.
+  for (const row of dom.passages) {
+    expect(row.name).toBe(nameOf(row.id));
+  }
+  expect(core.panel?.passages.map((row) => row.checkpoint)).toEqual([1, 2, null]);
+  expect(core.panel?.passages.map((row) => row.id)).toEqual(dom.passages.map((row) => row.id));
+  expect(core.panel?.passages[2]?.id).toBe(core.panel?.winnerId);
 
   expectNoErrors(watch);
 });

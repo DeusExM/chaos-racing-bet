@@ -402,6 +402,19 @@ export interface FinishRowSample {
   readonly gapRaw: number;
 }
 
+/** Une ligne de « passages en tête » telle qu'elle est présentée. */
+export interface FinishPassageSample {
+  /** Numéro de checkpoint, `null` pour l'arrivée. */
+  readonly checkpoint: number | null;
+  /** Instant simulé publié en `data-t-sim` : comparaison exacte avec le noyau. */
+  readonly tSim: number;
+  readonly id: string;
+  /** Texte de la borne affichée (`Checkpoint 1`, `Arrivée`). */
+  readonly boundText: string;
+  readonly timeText: string;
+  readonly name: string;
+}
+
 /** Écran d'arrivée réellement lu dans le DOM. */
 export interface FinishDomSample {
   readonly hidden: boolean;
@@ -411,6 +424,8 @@ export interface FinishDomSample {
   readonly photoText: string;
   readonly podium: readonly FinishRowSample[];
   readonly rows: readonly FinishRowSample[];
+  readonly passagesTitle: string;
+  readonly passages: readonly FinishPassageSample[];
   readonly replayLabel: string;
   readonly replayEnabled: boolean;
   readonly newRaceLabel: string;
@@ -496,6 +511,11 @@ export async function readFinishDom(page: Page): Promise<FinishDomSample> {
     const replay = document.querySelector('[data-testid="finish-replay-same"]');
     const newRace = document.querySelector('[data-testid="finish-new-race"]');
     const winner = document.querySelector('[data-testid="finish-winner"]');
+    const passages = document.querySelector('[data-testid="finish-passages"]');
+    const passageBoundOf = (element: Element): number | null => {
+      const bound = element.getAttribute('data-bound') ?? '';
+      return bound === 'arrival' || bound === '' ? null : Number(bound);
+    };
 
     return {
       hidden: panel?.hasAttribute('hidden') ?? true,
@@ -506,6 +526,17 @@ export async function readFinishDom(page: Page): Promise<FinishDomSample> {
       photoText: photo?.textContent ?? '',
       podium: Array.from(document.querySelectorAll('[data-testid="finish-podium-row"]')).map(rowOf),
       rows: Array.from(document.querySelectorAll('[data-testid="finish-row"]')).map(rowOf),
+      passagesTitle: passages?.querySelector('.hud-finish-subtitle')?.textContent ?? '',
+      passages: Array.from(document.querySelectorAll('[data-testid="finish-passage"]')).map(
+        (element) => ({
+          checkpoint: passageBoundOf(element),
+          tSim: Number(element.getAttribute('data-t-sim') ?? 'NaN'),
+          id: element.getAttribute('data-character-id') ?? '',
+          boundText: element.querySelector('.hud-finish-passage-bound')?.textContent ?? '',
+          timeText: element.querySelector('.hud-finish-passage-time')?.textContent ?? '',
+          name: element.querySelector('.hud-finish-passage-name')?.textContent ?? '',
+        }),
+      ),
       replayLabel: replay?.textContent ?? '',
       replayEnabled: replay instanceof HTMLButtonElement && !replay.disabled,
       newRaceLabel: newRace?.textContent ?? '',

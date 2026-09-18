@@ -61,8 +61,8 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   checkpointTitle: 'Checkpoint',
   checkpointLeaderSplit: 'en tête',
 
-  // Repère décoratif dessiné sur la piste (`TrackView`) : une échelle, pas une règle de jeu.
-  nominalScale: 'échelle nominale',
+  // Plus aucun libellé « échelle nominale » : le repère a été retiré de la piste (passe de finition
+  // 2D), parce qu'un trait plus épais au milieu du décor se lisait comme une ligne d'arrivée.
 
   startButton: 'Lancer',
   replayButton: 'Rejouer',
@@ -109,6 +109,10 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   finishWinnerLabel: 'Vainqueur',
   finishPodiumTitle: 'Podium',
   finishRankingTitle: 'Classement final',
+  // Passages en tête : les deux checkpoints réellement observés, puis l'arrivée. Les libellés des
+  // bornes sont ceux du HUD (`checkpointTitle`) et de l'écran d'arrivée (`finishTitle`) : il n'existe
+  // pas de « checkpoint 3 », la troisième borne est l'arrivée.
+  finishPassagesTitle: 'Passages en tête',
   finishPhotoBadge: 'Photo finish',
   finishReplaySameSeed: 'Rejouer la même seed',
   finishNewRace: 'Nouvelle course',

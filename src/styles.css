@@ -359,14 +359,18 @@ body {
   align-items: center;
   gap: 0.05rem;
   /*
-   * Position du badge, exprimée en deux variables : le badge est ancré sur le sprite (le modèle donne
-   * le pourcentage de son centre), et c'est ce décalage qui décide s'il est au-dessus ou dans la voie.
-   * Sur bureau, il reste juste au-dessus du sprite et apparaît en montant ; en petit paysage, la
-   * requête média le ramène sur l'axe de la voie (voir plus bas), sans qu'aucune coordonnée ne soit
-   * recalculée. `--event-shift-from` est la position de départ de l'animation d'apparition.
+   * Position du badge, exprimée en variables : le modèle donne le pourcentage du **centre** du
+   * sprite, et c'est ce décalage qui décide où le mot se pose. Le mot vit désormais **dans la voie,
+   * derrière le personnage au sens de la course** (donc à sa gauche, la course allant de gauche à
+   * droite) sur tous les formats : `--badge-back` vaut la demi-largeur réelle du sprite plus une
+   * marge, mesurée en pixels CSS par `EventFeedback` — aucune coordonnée n'est recopiée ici, et la
+   * règle est donc la même sur un téléphone et sur un bureau.
+   * `--event-shift-from` est la position de départ de l'animation d'apparition : le mot arrive de
+   * l'arrière, sans que sa position horizontale finale en dépende.
    */
-  --event-shift: translate(-50%, -160%);
-  --event-shift-from: translate(-50%, -120%);
+  --badge-back: 0px;
+  --event-shift: translate(calc(-100% - var(--badge-back)), -50%);
+  --event-shift-from: translate(calc(-100% - var(--badge-back) + 0.3rem), -50%);
   transform: var(--event-shift);
   font-size: clamp(0.5rem, 1vw, 0.72rem);
   font-weight: 700;
@@ -778,6 +782,41 @@ body {
   outline-offset: 1px;
 }
 
+/*
+ * Passages en tête (passe de finition 2D) : trois lignes courtes — les deux checkpoints réellement
+ * observés, puis l'arrivée. Les colonnes sont fixes pour que les noms s'alignent, et l'ensemble reste
+ * sous le classement : ce n'est pas une seconde source de résultat, seulement un rappel de qui menait.
+ */
+.hud-finish-passages {
+  min-width: 0;
+}
+
+.hud-finish-passage-list {
+  display: grid;
+  gap: 0.05rem;
+}
+
+.hud-finish-passage {
+  display: grid;
+  grid-template-columns: 7.6em 2.6em minmax(0, 1fr);
+  gap: 0.3rem;
+  align-items: baseline;
+  line-height: 1.25;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-finish-passage-bound,
+.hud-finish-passage-time {
+  color: var(--muted);
+}
+
+.hud-finish-passage-name {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
 .controls {
   display: flex;
   align-items: center;
@@ -911,8 +950,28 @@ body {
   inset: 0;
   z-index: 60;
   display: grid;
+  /*
+   * La rangée est **définie** (`minmax(0, 1fr)`) et non automatique : sans cela, la rangée se dimensionne
+   * sur la hauteur *minimale* du panneau — qui contient six images — et débordait donc de l'écran, même
+   * quand le panneau, lui, avait une hauteur correcte. C'était la cause du deuxième rangement coupé sur
+   * un vrai iPhone : le panneau était centré dans une rangée plus haute que la fenêtre.
+   */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   place-items: center;
-  padding: 0.5rem;
+  /*
+   * Hauteur **réellement visible** (passe de finition 2D).
+   *
+   * Sur un iPhone en paysage, `position: fixed; inset: 0` se cale sur la grande fenêtre : le bas du
+   * panneau passait sous la barre d'outils et sous la barre d'accueil. `100dvh` vaut la hauteur
+   * visible, barres déduites ; `100vh` reste en secours pour les navigateurs qui ne connaissent pas
+   * `dvh` (ils gardent l'ancien comportement, jamais pire). Les marges de sécurité sont ajoutées au
+   * rembourrage, pour qu'aucune carte ne soit sous l'encoche ni sous la barre d'accueil.
+   */
+  height: 100vh;
+  height: 100dvh;
+  padding: calc(0.4rem + env(safe-area-inset-top, 0px)) 0.4rem
+    calc(0.4rem + env(safe-area-inset-bottom, 0px));
   background: #05070fd9;
 }
 
@@ -926,6 +985,12 @@ body {
   gap: 0.4rem;
   width: min(46rem, 100%);
   height: min(24rem, 100%);
+  /*
+   * `min-height: 0` annule la hauteur minimale automatique d'un élément de grille : sans elle, le
+   * panneau ne pouvait pas descendre sous la hauteur de ses six images, et il poussait donc la rangée
+   * au-delà de l'écran.
+   */
+  min-height: 0;
   padding: 0.5rem 0.6rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1002,6 +1067,48 @@ body {
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * En petit paysage (téléphone couché), le panneau doit tenir **entièrement** dans la hauteur visible.
+ *
+ * La règle est de réduire d'abord ce qui n'est pas le personnage : en-tête, rembourrages et écarts.
+ * Les images suivent ensuite, parce qu'elles prennent la place restante (`object-fit: contain`) : sur
+ * un écran de 390 px de haut, les six cartes et leurs six noms restent donc visibles, sans défilement
+ * et sans qu'aucun visuel ne soit rogné.
+ */
+@media (max-height: 560px) {
+  .gallery {
+    padding: calc(0.25rem + env(safe-area-inset-top, 0px)) 0.3rem
+      calc(0.25rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .gallery-panel {
+    gap: 0.25rem;
+    padding: 0.3rem 0.4rem 0.35rem;
+  }
+
+  .gallery-title {
+    font-size: 0.7rem;
+  }
+
+  .gallery-close {
+    padding: 0.2rem 0.55rem;
+    font-size: 0.7rem;
+  }
+
+  .gallery-grid {
+    gap: 0.25rem;
+  }
+
+  .gallery-card {
+    gap: 0.12rem;
+    padding: 0.15rem;
+  }
+
+  .gallery-name {
+    font-size: 0.62rem;
+  }
 }
 
 /*
@@ -1278,6 +1385,22 @@ body {
     padding: 0.2rem 0.5rem;
   }
 
+  /*
+   * Passages en tête : le titre reste visible (les titres « Podium » et « Classement final » sont
+   * masqués pour gagner de la hauteur, mais celui-ci porte le sens du bloc), et les trois lignes
+   * gardent exactement la même structure qu'ailleurs — seule leur taille diminue.
+   */
+  .hud-finish-passages .hud-finish-subtitle {
+    display: block;
+  }
+
+  .hud-finish-passage {
+    grid-template-columns: 6.4em 2.2em minmax(0, 1fr);
+    gap: 0.25rem;
+    font-size: 0.9em;
+    line-height: 1.2;
+  }
+
   /* 8) Speaker : sous le classement, en colonne, jamais au-dessus d'une voie. */
   .hud-subtitle {
     grid-column: 2;
@@ -1417,17 +1540,11 @@ body {
    * Ils étaient posés au-dessus du sprite : ils consommaient donc la hauteur de la voie, et
    * interdisaient d'agrandir les personnages. Ils sont maintenant **dans la voie**, sur l'axe du
    * personnage, et **derrière lui au sens de la course** : à sa gauche, puisque la course va de gauche
-   * à droite. Le décalage horizontal vaut la **demi-largeur du sprite** plus une petite marge, donc le
-   * badge s'arrête avant l'image et ne fusionne jamais avec elle. Cette demi-largeur est exprimée en
-   * `vh` parce qu'elle suit l'échelle du canvas : `106 px logiques × 1,334 / 2`, rapportés à la hauteur
-   * logique de `720` px que le canvas compact épouse (`9,82 %` de la hauteur de la fenêtre). Le
-   * décalage est une variable, donc l'animation d'apparition suit la même position : elle ne fait que
-   * monter de `0,3rem` et grandir, sans jamais déplacer le badge vers l'avant.
+   * à droite. Le décalage horizontal est calculé par `EventFeedback` à partir de la demi-largeur
+   * **réelle** du sprite, et il est donc identique ici et sur bureau : seul le corps du texte change,
+   * pour rester lisible sur un écran de téléphone.
    */
   .hud-event {
-    --sprite-half-width: 9.82vh;
-    --event-shift: translate(calc(-100% - var(--sprite-half-width) - 0.4rem), -50%);
-    --event-shift-from: translate(calc(-100% - var(--sprite-half-width) - 0.4rem), calc(-50% + 0.3rem));
     font-size: 0.62rem;
   }
 

@@ -24,17 +24,18 @@ import {
  * constantes et sur la fonction pure, donc ils échouent **avant** qu'un réglage ne casse la mise en
  * page, et ils expliquent la contrainte plutôt que de la constater.
  *
- * ## Ce qui a changé avec la micro-correction finale
+ * ## Ce qui a changé avec la micro-correction finale, puis avec la finition 2D
  *
  * En petit paysage, le nom n'est plus posé **au-dessus** du personnage : il vit dans la voie, sur son
  * axe (`characterNameY`), et **derrière lui au sens de la course** — c'est-à-dire à sa **gauche**,
  * puisque la course va de gauche à droite (`characterNameX`). « Derrière » ne veut donc pas dire sous
  * l'image : le texte est séparé du sprite par `CHARACTER_NAME_GAP_PX` et n'est **jamais** recouvert
- * par lui, ce qui explique qu'il n'ait plus besoin de contour. La contrainte « le nom tient au-dessus
- * de la tête » disparaît au profit de deux autres, plus simples : le nom ne réserve **aucune** hauteur
- * au-dessus du sprite, et deux silhouettes voisines gardent une séparation visible. C'est ce qui permet
- * d'agrandir les personnages sans rapprocher les voies. Sur bureau, rien ne change : le nom reste
- * centré au-dessus de la tête, au-dessus du sprite.
+ * par lui, ce qui explique qu'il n'ait plus besoin de contour.
+ *
+ * La passe de finition 2D a étendu cette règle aux **formats de bureau** : il n'existe plus qu'une
+ * seule mise en place, et le format n'entre plus dans la décision. C'est ce qui a permis d'agrandir
+ * les personnages sur bureau (73 → 92 px logiques) en élargissant la zone des voies, sans rapprocher
+ * les silhouettes : le nom ne consomme plus de hauteur au-dessus du sprite.
  *
  * Le facteur `1.25` est la hauteur de ligne retenue pour le nom : c'est la valeur usuelle d'un texte
  * `system-ui` (ascendante + descendante + interligne) et elle est **conservatrice** — Phaser mesure
@@ -75,14 +76,11 @@ function laneCenters(compact: boolean): number[] {
 /**
  * Ordonnée du bord supérieur du texte du nom, en pixels logiques.
  *
- * L'origine du texte dépend du format (`characterNameOrigin`) : le nom est ancré par sa ligne de base
- * au-dessus de la tête sur bureau, et centré verticalement sur l'axe de la voie en petit paysage.
+ * L'origine du texte est la même dans tous les formats (`characterNameOrigin`) : le nom est centré
+ * verticalement sur l'axe de la voie, donc ancré par son milieu.
  */
 function nameLabelTop(centerY: number, compact: boolean): number {
-  return (
-    characterNameY(centerY, characterHeightPx(compact), compact) -
-    nameLabelHeight(compact) * characterNameOrigin(compact).y
-  );
+  return characterNameY(centerY) - nameLabelHeight(compact) * characterNameOrigin().y;
 }
 
 describe('zone des voies', () => {
@@ -120,38 +118,34 @@ describe('zone des voies', () => {
     }
   });
 
-  it('pose le nom à gauche du personnage en petit paysage, sans jamais le recouvrir', () => {
-    const compact = true;
-    const height = characterHeightPx(compact);
-    const width = height * FRAME_ASPECT;
-    const origin = characterNameOrigin(compact);
-    // Ancré par son bord **droit** et centré verticalement : le texte s'étend vers la gauche, donc sa
-    // largeur (qui dépend du nom) ne peut pas le faire entrer dans le sprite.
-    expect(origin.x).toBe(1);
-    expect(origin.y).toBe(0.5);
-    for (const center of laneCenters(compact)) {
-      const nameY = characterNameY(center, height, compact);
-      // Même axe que le personnage : le nom ne réserve donc **aucune** hauteur au-dessus de lui.
-      expect(nameY, 'le nom partage l’axe du personnage').toBe(center);
-      const nameX = characterNameX(center, width, compact);
-      expect(nameX, 'le texte s’arrête avant le début du sprite').toBeLessThanOrEqual(
-        center - width / 2,
-      );
-      expect(
-        center - width / 2 - nameX,
-        'un espace sépare la fin du texte du début du sprite',
-      ).toBeCloseTo(VIEW.CHARACTER_NAME_GAP_PX, 6);
+  it('pose le nom à gauche du personnage, dans les deux formats, sans jamais le recouvrir', () => {
+    // Une seule règle de mise en place depuis la finition 2D : le format ne la change plus. Le nom est
+    // **derrière** le personnage au sens de la course (à sa gauche), sur l'axe de sa voie.
+    expect(characterNameOrigin().x).toBe(1);
+    expect(characterNameOrigin().y).toBe(0.5);
+    for (const compact of [false, true]) {
+      const height = characterHeightPx(compact);
+      const width = height * FRAME_ASPECT;
+      for (const center of laneCenters(compact)) {
+        const nameY = characterNameY(center);
+        // Même axe que le personnage : le nom ne réserve donc **aucune** hauteur au-dessus de lui.
+        expect(nameY, 'le nom partage l’axe du personnage').toBe(center);
+        const nameX = characterNameX(center, width);
+        expect(nameX, 'le texte s’arrête avant le début du sprite').toBeLessThanOrEqual(
+          center - width / 2,
+        );
+        expect(
+          center - width / 2 - nameX,
+          'un espace sépare la fin du texte du début du sprite',
+        ).toBeCloseTo(VIEW.CHARACTER_NAME_GAP_PX, 6);
+      }
     }
     // Le nom est **au-dessus** des sprites : il n'est jamais derrière le personnage en profondeur.
     expect(VIEW.CHARACTER_NAME_DEPTH).toBeGreaterThan(VIEW.CHARACTER_SPRITE_DEPTH_BASE);
   });
 
-  it('laisse le nom centré au-dessus de la tête sur les formats de bureau', () => {
-    const height = characterHeightPx(false);
-    const first = laneCenters(false)[0] ?? 0;
-    expect(characterNameY(first, height, false)).toBe(first - height / 2 - 2);
-    expect(characterNameX(first, height * FRAME_ASPECT, false)).toBe(first);
-    expect(characterNameOrigin(false)).toStrictEqual({ x: 0.5, y: 1 });
+  it('place les effets d’événement sous les sprites, jamais devant un autre coureur', () => {
+    expect(VIEW.CHARACTER_EFFECT_DEPTH_BASE).toBeLessThan(VIEW.CHARACTER_SPRITE_DEPTH_BASE);
   });
 
   it('garde la dernière silhouette entière, dans les deux formats', () => {
@@ -194,18 +188,19 @@ describe('zone des voies', () => {
     }
   });
 
-  it('garde une séparation visible entre deux silhouettes voisines en petit paysage', () => {
-    const compact = true;
-    const centers = laneCenters(compact);
-    const height = characterHeightPx(compact);
-    const gap = (centers[1] ?? 0) - (centers[0] ?? 0);
-    // Pire cas : deux silhouettes occupant toute la hauteur visible de leur cadre (95,6 %), l'une
-    // au-dessus de l'autre. C'est cette séparation-là que l'œil juge, pas l'écart entre cadres.
-    const visibleGap = gap - height * MAX_VISIBLE_FRACTION;
-    expect(
-      visibleGap,
-      `séparation visible de ${visibleGap.toFixed(1)} px logiques entre deux voies`,
-    ).toBeGreaterThanOrEqual(10);
+  it('garde une séparation visible entre deux silhouettes voisines, dans les deux formats', () => {
+    for (const compact of [false, true]) {
+      const centers = laneCenters(compact);
+      const height = characterHeightPx(compact);
+      const gap = (centers[1] ?? 0) - (centers[0] ?? 0);
+      // Pire cas : deux silhouettes occupant toute la hauteur visible de leur cadre (95,6 %), l'une
+      // au-dessus de l'autre. C'est cette séparation-là que l'œil juge, pas l'écart entre cadres.
+      const visibleGap = gap - height * MAX_VISIBLE_FRACTION;
+      expect(
+        visibleGap,
+        `séparation visible de ${visibleGap.toFixed(1)} px logiques entre deux voies (${compact ? 'petit paysage' : 'bureau'})`,
+      ).toBeGreaterThanOrEqual(10);
+    }
   });
 
   it('agrandit les personnages en petit paysage, dans la fourchette demandée', () => {
@@ -218,6 +213,23 @@ describe('zone des voies', () => {
     // Le nom grandit aussi : le canvas d'un téléphone est réduit à ≈ 0,54, donc la police nominale
     // rendrait ≈ 7,5 px CSS, sous le plancher de lisibilité.
     expect(characterNameFontPx(true)).toBeGreaterThan(characterNameFontPx(false));
+  });
+
+  it('agrandit les personnages de bureau sans sortir du canvas', () => {
+    // Passe de finition 2D : les personnages de bureau étaient « plus petits relativement à l'espace
+    // disponible ». La taille est choisie pour 1280×720 et 1920×1080, qui partagent la même géométrie
+    // logique : 92 px de haut, soit ≈ 68 px CSS en 1280×720 et 92 px CSS en 1920×1080.
+    const height = characterHeightPx(false);
+    expect(height).toBeGreaterThanOrEqual(88);
+    expect(height).toBeLessThanOrEqual(96);
+    const centers = laneCenters(false);
+    const first = centers[0] ?? 0;
+    const last = centers[centers.length - 1] ?? 0;
+    // Les voies du haut et du bas restent entièrement dans le canvas.
+    expect(first - height / 2).toBeGreaterThanOrEqual(0);
+    expect(last + height / 2).toBeLessThanOrEqual(VIEW.BASE_HEIGHT);
+    // Le nom de la première voie ne sort pas non plus par le haut.
+    expect(nameLabelTop(first, false)).toBeGreaterThanOrEqual(0);
   });
 });
 

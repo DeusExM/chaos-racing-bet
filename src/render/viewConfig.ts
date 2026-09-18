@@ -30,7 +30,14 @@ export interface ViewConfig {
   readonly CAMERA_SPREAD_MARGIN_M: number;
   /** Lissage de la caméra : `1` = aucune inertie, `0` = figée. */
   readonly CAMERA_SMOOTHING: number;
-  /** Position verticale de la première voie, en fraction de la hauteur. */
+  /**
+   * Position verticale de la première voie, en fraction de la hauteur.
+   *
+   * La passe de finition 2D a étendu la zone des voies vers le haut et le bas (`0,24 / 0,86` →
+   * `0,20 / 0,90`) : le nom ne consomme plus de hauteur au-dessus des sprites (il est posé derrière
+   * eux, dans le sens de la course), donc l'espace noir entre les voies peut se réduire au profit de
+   * personnages plus grands. Le HUD du haut, lui, vit **au-dessus** du canvas : rien ne se recouvre.
+   */
   readonly LANE_TOP_RATIO: number;
   /** Position verticale de la dernière voie, en fraction de la hauteur. */
   readonly LANE_BOTTOM_RATIO: number;
@@ -49,13 +56,19 @@ export interface ViewConfig {
   /**
    * Hauteur affichée d'un personnage, en pixels logiques, pour l'arène de référence (1280×720).
    *
-   * C'est la hauteur de l'**image** : les illustrations comportent une marge transparente de 4 à 11 %,
-   * donc la silhouette visible mesure 65 à 70 px, pour une cible d'environ 68 px. La largeur n'est
-   * jamais une constante : elle se déduit du ratio de la texture, si bien qu'une image n'est jamais
-   * écrasée en carré et que la résolution du fichier n'est jamais une taille d'affichage.
+   * C'est la hauteur de l'**image** : les illustrations comportent une marge transparente de 4,4 à
+   * 10,6 %, donc la silhouette visible mesure 82 à 88 px à cette hauteur. La largeur n'est jamais une
+   * constante : elle se déduit du ratio de la texture, si bien qu'une image n'est jamais écrasée en
+   * carré et que la résolution du fichier n'est jamais une taille d'affichage.
    *
    * Les fichiers servis font 320 px de haut (`tools/optimizeCharacterAssets.mjs`) : le rendu les
    * réduit ici, mais garde de la marge pour les écrans à haute densité, où le canvas est agrandi.
+   *
+   * La passe de finition 2D a repris ici le principe du téléphone : le nom vit dans la voie, derrière
+   * le personnage, donc aucune hauteur n'est réservée au-dessus du sprite et la taille peut grandir
+   * (73 → 92 px). L'écart entre deux voies vaut 100,8 px logiques ; à 92 px, il reste 12,8 px entre
+   * les silhouettes **visibles** (marges transparentes comprises), ce qui garde six voies nettement
+   * séparées en 1280×720 comme en 1920×1080 — la géométrie logique est la même dans les deux cas.
    */
   readonly CHARACTER_HEIGHT_PX: number;
   /**
@@ -75,22 +88,33 @@ export interface ViewConfig {
    */
   readonly CHARACTER_HEIGHT_COMPACT_PX: number;
   /**
-   * Taille de police du nom affiché au-dessus d'un personnage, en pixels de la scène.
+   * Taille de police du nom affiché derrière un personnage, en pixels de la scène.
    *
-   * Sur un téléphone, le canvas est réduit à ≈ 0,54 : la police nominale donnerait ≈ 7,5 px CSS,
-   * sous le plancher de lisibilité. La valeur compacte est donc plus grande en pixels logiques pour
-   * rendre ≈ 11 px CSS.
+   * Le nom est désormais posé dans la voie, à côté du sprite, dans les deux formats : il ne se
+   * partage plus l'espace vertical avec lui, et la taille a été alignée sur les personnages plus
+   * grands (14 → 16 px logiques, soit ≈ 12 px CSS en 1280×720).
+   *
+   * Sur un téléphone, le canvas est réduit à ≈ 0,54 : la police nominale donnerait ≈ 8,6 px CSS, sous
+   * le plancher de lisibilité. La valeur compacte est donc plus grande en pixels logiques pour rendre
+   * ≈ 11 px CSS.
    */
   readonly CHARACTER_NAME_FONT_PX: number;
   /** Taille de police du nom au-dessus d'un personnage en petit paysage, en pixels de la scène. */
   readonly CHARACTER_NAME_FONT_COMPACT_PX: number;
   /**
-   * Espace entre la fin du nom et le début du sprite, en pixels logiques (petit paysage).
+   * Espace entre la fin du nom et le début du sprite, en pixels logiques (les deux formats).
    *
    * Le nom est posé **derrière** le personnage au sens de la course — à sa gauche, puisque la course
    * va de gauche à droite — et cet espace garantit qu'il n'est jamais recouvert par l'illustration.
    */
   readonly CHARACTER_NAME_GAP_PX: number;
+  /**
+   * Espace entre la fin du badge d'événement et le début du sprite, en pixels logiques.
+   *
+   * Les mots `TURBO !`, `BONUS !`, `MALUS !` suivent la même règle que le nom : dans la voie, à
+   * gauche du personnage, sans jamais fusionner avec l'image.
+   */
+  readonly EVENT_BADGE_GAP_PX: number;
   /**
    * Profondeur de dessin du **premier** personnage : les suivants sont posés un cran au-dessus.
    *
@@ -98,6 +122,13 @@ export interface ViewConfig {
    * devant celui de la voie du haut quand deux silhouettes se croisent.
    */
   readonly CHARACTER_SPRITE_DEPTH_BASE: number;
+  /**
+   * Profondeur de dessin des **effets** d'événement (halo, traînée) : sous tous les sprites.
+   *
+   * Un bonus ou un malus se voit autour et derrière le personnage concerné, jamais devant un autre
+   * coureur : les effets sont donc posés plus bas que le premier sprite.
+   */
+  readonly CHARACTER_EFFECT_DEPTH_BASE: number;
   /**
    * Profondeur du nom, dans les deux formats.
    *
@@ -224,16 +255,18 @@ export const VIEW: ViewConfig = Object.freeze({
   CAMERA_SPREAD_FACTOR: 1.35,
   CAMERA_SPREAD_MARGIN_M: 30,
   CAMERA_SMOOTHING: 0.15,
-  LANE_TOP_RATIO: 0.24,
-  LANE_BOTTOM_RATIO: 0.86,
+  LANE_TOP_RATIO: 0.2,
+  LANE_BOTTOM_RATIO: 0.9,
   COMPACT_LANE_TOP_RATIO: 0.1,
   COMPACT_LANE_BOTTOM_RATIO: 0.9,
-  CHARACTER_HEIGHT_PX: 73,
+  CHARACTER_HEIGHT_PX: 92,
   CHARACTER_HEIGHT_COMPACT_PX: 106,
-  CHARACTER_NAME_FONT_PX: 14,
+  CHARACTER_NAME_FONT_PX: 16,
   CHARACTER_NAME_FONT_COMPACT_PX: 20,
   CHARACTER_NAME_GAP_PX: 10,
+  EVENT_BADGE_GAP_PX: 8,
   CHARACTER_SPRITE_DEPTH_BASE: 10,
+  CHARACTER_EFFECT_DEPTH_BASE: 8,
   CHARACTER_NAME_DEPTH: 60,
   CHARACTER_MIN_HEIGHT_PX: 30,
   TRACK_TICK_STEP_M: 50,
@@ -283,42 +316,36 @@ export function characterNameFontPx(compact: boolean): number {
 }
 
 /**
- * Ordonnée du nom d'un personnage, selon le format.
+ * Ordonnée du nom d'un personnage : l'axe de sa voie, dans les deux formats.
  *
- * En **petit paysage**, le nom est dessiné **dans la voie**, sur l'axe du personnage : il ne réserve
- * donc aucune hauteur au-dessus du sprite, ce qui permet d'agrandir les personnages
- * (`CHARACTER_HEIGHT_COMPACT_PX`) sans rapprocher les voies.
- *
- * Sur les formats de bureau, rien ne change : le nom reste juste au-dessus de la tête.
+ * Le nom vit **dans la voie** et non plus au-dessus de la tête : il ne réserve donc aucune hauteur
+ * au-dessus du sprite, ce qui permet d'agrandir les personnages sans rapprocher les voies. Le format
+ * n'entre plus dans cette décision — c'est la même règle sur un téléphone et sur un bureau.
  */
-export function characterNameY(centerY: number, heightPx: number, compact: boolean): number {
-  return compact ? centerY : centerY - heightPx / 2 - 2;
+export function characterNameY(centerY: number): number {
+  return centerY;
 }
 
 /**
- * Abscisse du nom d'un personnage, selon le format.
+ * Abscisse du nom d'un personnage : **à gauche** du sprite, dans les deux formats.
  *
- * En **petit paysage**, le nom est posé **derrière** le personnage au sens de la course : la course
- * va de gauche à droite, donc le nom est à **gauche** du sprite, séparé de lui par
- * `CHARACTER_NAME_GAP_PX`. Le texte n'est ainsi jamais recouvert par l'illustration — ce que la
- * formulation « derrière le personnage » ne voulait pas dire : il ne s'agit pas d'une profondeur de
- * dessin, mais d'une position sur la piste.
- *
- * Sur les formats de bureau, le nom reste centré sur le personnage, au-dessus de sa tête.
+ * Le nom est posé **derrière** le personnage au sens de la course : la course va de gauche à droite,
+ * donc le nom est à gauche du sprite, séparé de lui par `CHARACTER_NAME_GAP_PX`. Le texte n'est ainsi
+ * jamais recouvert par l'illustration — ce que la formulation « derrière le personnage » ne voulait
+ * pas dire : il ne s'agit pas d'une profondeur de dessin, mais d'une position sur la piste.
  */
-export function characterNameX(centerX: number, widthPx: number, compact: boolean): number {
-  return compact ? centerX - widthPx / 2 - VIEW.CHARACTER_NAME_GAP_PX : centerX;
+export function characterNameX(centerX: number, widthPx: number): number {
+  return centerX - widthPx / 2 - VIEW.CHARACTER_NAME_GAP_PX;
 }
 
 /**
- * Origine du texte du nom, selon le format.
+ * Origine du texte du nom : ancré par son bord **droit**, centré verticalement sur l'axe de la voie.
  *
- * En petit paysage, le nom est ancré par son bord **droit** et centré verticalement sur l'axe de la
- * voie : son bord droit tombe donc exactement à `characterNameX`. Ailleurs, il est centré
- * horizontalement et ancré par sa ligne de base, juste au-dessus du sprite.
+ * Son bord droit tombe donc exactement à `characterNameX`, quelle que soit la longueur du nom : un
+ * nom long s'étend vers l'arrière, jamais vers le personnage.
  */
-export function characterNameOrigin(compact: boolean): { readonly x: number; readonly y: number } {
-  return compact ? { x: 1, y: 0.5 } : { x: 0.5, y: 1 };
+export function characterNameOrigin(): { readonly x: number; readonly y: number } {
+  return { x: 1, y: 0.5 };
 }
 
 /** Ordonnée écran d'une voie, répartie uniformément entre les deux ratios du format courant. */

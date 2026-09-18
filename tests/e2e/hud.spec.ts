@@ -302,38 +302,57 @@ test('les marqueurs du modèle suivent les distances du noyau à plusieurs insta
 test('le chrono et le segment suivent le noyau, sans jamais le piloter', async ({ page }) => {
   const watch = watchConsole(page);
   await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
+  await waitForHooks(page);
+
+  /**
+   * Lit l'état du noyau, le texte du DOM et le modèle du HUD **dans la même tâche**, sur la première
+   * frame qui appartient réellement au segment visé (et qui est assez avancée dedans pour que la frame
+   * affichée, qui peut avoir un pas de retard, soit déjà dans le bon segment).
+   *
+   * L'attente se fait **dans la page** : en mode accéléré, un aller-retour Playwright peut laisser
+   * passer tout un segment, et le test devenait alors intermittent sans qu'aucun code ne soit en
+   * cause. Ici, la frame mesurée est celle qui a été observée, jamais une frame plus tardive.
+   */
+  const readFrameInSegment = async (segment: number): Promise<Record<string, number | string>> =>
+    page.evaluate(
+      ({ expected, minSteps }) =>
+        new Promise<Record<string, number | string>>((resolve, reject) => {
+          const deadline = performance.now() + 30_000;
+          const tick = (): void => {
+            const api = window.__CHAOS_RACE__;
+            const view = window.__CHAOS_RACE_VIEW__;
+            if (api !== undefined && view !== undefined) {
+              const text = (testId: string): string =>
+                document.querySelector(`[data-testid="${testId}"]`)?.textContent ?? '';
+              const toNumber = (value: string): number =>
+                Number(value.replace(',', '.').replace(/[^0-9.]/g, ''));
+              const state = api.state();
+              if (api.segment() === expected && state.steps >= minSteps) {
+                resolve({
+                  tSim: state.tSim,
+                  steps: state.steps,
+                  segment: api.segment(),
+                  shownSegment: text('hud-segment'),
+                  shownTime: toNumber(text('hud-sim-time')),
+                  modelSteps: view.hud()?.steps ?? -1,
+                });
+                return;
+              }
+            }
+            if (performance.now() > deadline) {
+              reject(new Error(`segment ${String(expected)} jamais observé`));
+              return;
+            }
+            requestAnimationFrame(tick);
+          };
+          tick();
+        }),
+      { expected: segment, minSteps: (segment - 1) * RACE_CONFIG.STEPS_PER_SEGMENT + 60 },
+    );
 
   // Le segment affiché est celui du noyau, et l'instant affiché celui du noyau — jamais une horloge.
-  for (const [steps, segment] of [
-    [300, 1],
-    [RACE_CONFIG.STEPS_PER_SEGMENT + 60, 2],
-    [2 * RACE_CONFIG.STEPS_PER_SEGMENT + 60, 3],
-  ] as const) {
-    await expect.poll(() => currentSteps(page), { timeout: 30_000 }).toBeGreaterThanOrEqual(steps);
-
-    // État du noyau, texte du DOM et modèle du HUD sont lus **dans la même tâche** : la seule
-    // différence possible entre eux est l'âge de la frame affichée, pas le temps qui passe entre deux
-    // allers-retours Playwright.
-    const frame = await page.evaluate(() => {
-      const api = window.__CHAOS_RACE__;
-      const view = window.__CHAOS_RACE_VIEW__;
-      if (api === undefined || view === undefined) {
-        throw new Error('hooks absents');
-      }
-      const text = (testId: string): string =>
-        document.querySelector(`[data-testid="${testId}"]`)?.textContent ?? '';
-      const toNumber = (value: string): number =>
-        Number(value.replace(',', '.').replace(/[^0-9.]/g, ''));
-      const state = api.state();
-      return {
-        tSim: state.tSim,
-        steps: state.steps,
-        segment: api.segment(),
-        shownSegment: text('hud-segment'),
-        shownTime: toNumber(text('hud-sim-time')),
-        modelSteps: view.hud()?.steps ?? -1,
-      };
-    });
+  for (const segment of [1, 2, 3] as const) {
+    const frame = await readFrameInSegment(segment);
 
     expect(frame.segment).toBe(segment);
     expect(frame.shownSegment).toBe(
@@ -344,14 +363,14 @@ test('le chrono et le segment suivent le noyau, sans jamais le piloter', async (
     // `maxStepsPerFrame` pas simulés : la borne est donc déterministe, jamais une marge au hasard.
     const maxFrameAgeS = SIM_CONFIG.maxStepsPerFrame * RACE_CONFIG.DT_S;
     expect(frame.shownTime, 'le HUD ne peut pas afficher un temps futur').toBeLessThanOrEqual(
-      frame.tSim + 0.05,
+      Number(frame.tSim) + 0.05,
     );
     expect(
       frame.shownTime,
       'le chrono ne peut pas être plus vieux que la frame affichée',
-    ).toBeGreaterThanOrEqual(frame.tSim - maxFrameAgeS - 0.05);
+    ).toBeGreaterThanOrEqual(Number(frame.tSim) - maxFrameAgeS - 0.05);
     expect(frame.modelSteps, 'la frame affichée date bien du noyau').toBeLessThanOrEqual(
-      frame.steps,
+      Number(frame.steps),
     );
   }
 
@@ -789,6 +808,9 @@ test('les bonus et malus s’affichent sur le bon personnage, puis disparaissent
     const coreEvents = new Set<string>();
     const coreMagnitudes = new Map<string, { magnitude: number; target: string }>();
     let maxSimultaneous = 0;
+    /** Effets visuels réellement appliqués aux sprites, comparés à l'événement actif du noyau. */
+    const effectFrames = { withEvent: 0, withoutEvent: 0 };
+    const effectMismatches: string[] = [];
 
     for (let frame = 0; frame < 20_000; frame += 1) {
       const api = window.__CHAOS_RACE__;
@@ -797,6 +819,45 @@ test('les bonus et malus s’affichent sur le bon personnage, puis disparaissent
       }
       const state = api.state();
       const canvas = document.querySelector('#game canvas')?.getBoundingClientRect() ?? null;
+
+      // 0) Effets visuels (passe de finition 2D) : l'état du sprite doit suivre **exactement** le signe
+      //    de la magnitude de l'événement actif. Un effet sans événement, ou un effet du mauvais sens,
+      //    serait un mensonge visuel ; et comme ces effets ne font que lire l'état, la course doit
+      //    rester identique (vérifié plus bas contre le résultat du noyau seul).
+      const sprites = window.__CHAOS_RACE_VIEW__?.sprites() ?? [];
+      for (const character of state.characters) {
+        const sprite = sprites.find((candidate) => candidate.id === character.id);
+        if (sprite === undefined) {
+          continue;
+        }
+        const event = character.activeEvent;
+        if (event === null) {
+          effectFrames.withoutEvent += 1;
+          if (sprite.eventKind !== 'none' || sprite.auraAlpha !== 0 || sprite.trailAlpha !== 0) {
+            effectMismatches.push(`${character.id} : effet sans événement`);
+          }
+          continue;
+        }
+        effectFrames.withEvent += 1;
+        const expected = event.magnitude > 0 ? 'bonus' : 'malus';
+        if (sprite.eventKind !== expected) {
+          effectMismatches.push(
+            `${character.id} : ${sprite.eventKind} au lieu de ${expected} (magnitude ${String(event.magnitude)})`,
+          );
+        }
+        if (!(sprite.auraAlpha > 0) || !(sprite.trailAlpha > 0)) {
+          effectMismatches.push(`${character.id} : effet invisible pendant un événement`);
+        }
+        if (!(sprite.trailOffset >= 0)) {
+          effectMismatches.push(`${character.id} : traînée devant le personnage`);
+        }
+        if (expected === 'bonus' && sprite.spriteTint !== 0xffffff) {
+          effectMismatches.push(`${character.id} : un bonus repeint le personnage`);
+        }
+        if (expected === 'malus' && sprite.spriteTint === 0xffffff) {
+          effectMismatches.push(`${character.id} : un malus ne teinte pas le personnage`);
+        }
+      }
 
       // 1) Ce que le noyau déclare **réellement** à cette frame.
       for (const character of state.characters) {
@@ -875,6 +936,8 @@ test('les bonus et malus s’affichent sur le bon personnage, puis disparaissent
       coreEvents: [...coreEvents],
       coreMagnitudes: [...coreMagnitudes],
       maxSimultaneous,
+      effectFrames,
+      effectMismatches,
       remaining: document.querySelectorAll('[data-testid="event-badge"]').length,
       phases: window.__CHAOS_RACE__?.phase() ?? '',
     };
@@ -915,6 +978,11 @@ test('les bonus et malus s’affichent sur le bon personnage, puis disparaissent
   // Le retour est **temporaire** : plus aucun badge une fois la course terminée.
   expect(observed.remaining, 'aucun badge ne survit à la fin de son événement').toBe(0);
 
+  // Les effets visuels ont réellement été appliqués, et ils ont suivi l'événement réel du noyau : au
+  // moins une frame avec événement (sinon le test ne prouverait rien) et aucune incohérence.
+  expect(observed.effectFrames.withEvent, 'des effets ont été observés').toBeGreaterThan(0);
+  expect(observed.effectMismatches, 'les effets suivent l’événement réel').toEqual([]);
+
   // Preuve d'invariance : cette course truffée de badges donne exactement le résultat du noyau seul.
   const reference = await referenceResult(page, OVERTAKE_SEED);
   const final = await page.evaluate(() => {
@@ -928,8 +996,12 @@ test('les bonus et malus s’affichent sur le bon personnage, puis disparaissent
       steps: api.state().steps,
     };
   });
-  expect(final.distances, 'les badges ne modifient aucune distance').toEqual(reference.distances);
-  expect(final.ranking, 'les badges ne modifient aucun classement').toEqual(reference.ranking);
+  expect(final.distances, 'les badges et les effets ne modifient aucune distance').toEqual(
+    reference.distances,
+  );
+  expect(final.ranking, 'les badges et les effets ne modifient aucun classement').toEqual(
+    reference.ranking,
+  );
   expect(final.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
 
   expectNoErrors(watch);

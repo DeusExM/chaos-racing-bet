@@ -1,5 +1,6 @@
 import type { CharacterId, CharacterState } from '../../core/types';
 import type { UiText } from '../uiText';
+import { VIEW } from '../viewConfig';
 import {
   buildEventBadges,
   type EventBadge,
@@ -42,6 +43,9 @@ export class EventFeedback {
   /** Occurrence affichée par personnage : évite de réécrire un badge qui n'a pas changé. */
   private readonly shown = new Map<CharacterId, string>();
 
+  /** Recul horizontal déjà écrit par personnage, en pixels CSS : évite une écriture par image. */
+  private readonly shiftBack = new Map<CharacterId, number>();
+
   constructor(root: HTMLElement, text: UiText) {
     this.text = text;
 
@@ -68,6 +72,9 @@ export class EventFeedback {
   ): void {
     const badges = buildEventBadges(characters, positions, layout, this.text);
     const active = new Set<CharacterId>();
+    // Échelle réelle de l'arène : le modèle raisonne en pixels **logiques**, le DOM en pixels CSS. La
+    // couche couvre exactement la piste, donc ce rapport suffit — il n'y a pas de seconde géométrie.
+    const scale = layout.width > 0 ? this.root.clientWidth / layout.width : 0;
 
     for (const badge of badges) {
       active.add(badge.id);
@@ -78,7 +85,21 @@ export class EventFeedback {
         this.writeContent(element, badge);
       }
 
-      // Le libellé suit le personnage : il est posé juste au-dessus de son sprite.
+      // Le mot suit le personnage : il est posé **derrière** lui au sens de la course, sur l'axe de sa
+      // voie. Le recul vaut la demi-largeur réelle du sprite plus une petite marge, exprimée en pixels
+      // CSS ; il est borné pour qu'un personnage tout à l'arrière de la piste garde un badge visible.
+      const position = positions.find((candidate) => candidate.id === badge.id);
+      const desiredShift =
+        position === undefined ? 0 : (position.halfWidth + VIEW.EVENT_BADGE_GAP_PX) * scale;
+      const anchorPx = (badge.leftPercent / 100) * this.root.clientWidth;
+      const maxShift = anchorPx + element.offsetWidth * 0.5;
+      const shift = Math.max(0, Math.min(desiredShift, maxShift));
+      if (this.shiftBack.get(badge.id) !== shift) {
+        // Une seule écriture par badge, et seulement quand la valeur change : la mesure reste une
+        // lecture, jamais une boucle de mise en page à chaque image.
+        this.shiftBack.set(badge.id, shift);
+        element.style.setProperty('--badge-back', `${shift.toFixed(2)}px`);
+      }
       element.style.left = `${badge.leftPercent.toFixed(3)}%`;
       element.style.top = `${badge.topPercent.toFixed(3)}%`;
     }
@@ -88,6 +109,7 @@ export class EventFeedback {
         element.remove();
         this.badges.delete(id);
         this.shown.delete(id);
+        this.shiftBack.delete(id);
       }
     }
   }

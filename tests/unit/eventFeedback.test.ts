@@ -49,6 +49,8 @@ function positions(): readonly EventBadgePosition[] {
     id: character_.id,
     screenX: 128 * (index + 1),
     screenY: 72 * (index + 1),
+    // Demi-largeur d'un sprite de bureau : c'est elle qui recule le mot derrière le personnage.
+    halfWidth: 46,
   }));
 }
 
@@ -124,13 +126,14 @@ describe('passe corrective : modèle du retour visuel d’événement', () => {
     const target = 'c1';
     const badges = buildEventBadges(
       [character(target, activeEvent({ target }))],
-      [{ id: target, screenX: 320, screenY: 180 }],
+      [{ id: target, screenX: 320, screenY: 180, halfWidth: 46 }],
       LAYOUT,
       UI_TEXT_FR,
     );
 
     // 320 / 1280 = 25 %, 180 / 720 = 25 % : la conversion est exacte, donc indépendante de la
-    // résolution réelle (l'arène est toujours le canvas, `Scale.FIT`).
+    // résolution réelle (l'arène est toujours le canvas, `Scale.FIT`). L'ancre reste le **centre** du
+    // sprite : c'est le décalage CSS, calculé depuis la demi-largeur réelle, qui place le mot derrière.
     expect(badges[0]?.leftPercent).toBe(25);
     expect(badges[0]?.topPercent).toBe(25);
   });
@@ -139,8 +142,8 @@ describe('passe corrective : modèle du retour visuel d’événement', () => {
     const badges = buildEventBadges(
       [character('c1', activeEvent()), character('c2', activeEvent({ target: 'c2' }))],
       [
-        { id: 'c1', screenX: -400, screenY: 3600 },
-        { id: 'c2', screenX: 5000, screenY: -20 },
+        { id: 'c1', screenX: -400, screenY: 3600, halfWidth: 46 },
+        { id: 'c2', screenX: 5000, screenY: -20, halfWidth: 46 },
       ],
       LAYOUT,
       UI_TEXT_FR,

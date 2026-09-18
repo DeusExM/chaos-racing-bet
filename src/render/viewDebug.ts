@@ -48,6 +48,21 @@ export interface SpriteView {
    * qu'aucun sprite ne soit dessiné sous la bande réservée au classement (passe corrective 2).
    */
   readonly drawn: boolean;
+  /**
+   * Nature de l'effet d'événement réellement appliqué au sprite : `none`, `bonus` ou `malus`.
+   *
+   * Elle est déduite du **signe de la magnitude** de l'événement actif du noyau : le rendu ne classe
+   * jamais un événement « gentil » ou « méchant » par une table écrite à la main.
+   */
+  readonly eventKind: 'none' | 'bonus' | 'malus';
+  /** Opacité réellement appliquée au halo : nulle hors événement, non nulle pendant un bonus/malus. */
+  readonly auraAlpha: number;
+  /** Opacité réellement appliquée à la traînée d'effet. */
+  readonly trailAlpha: number;
+  /** Décalage réel de la traînée vers l'arrière, en pixels logiques (toujours ≥ 0). */
+  readonly trailOffset: number;
+  /** Teinte réellement appliquée au sprite (`0xffffff` = aucune). */
+  readonly spriteTint: number;
 }
 
 export type { HudDebugSnapshot };

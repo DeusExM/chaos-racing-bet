@@ -23,6 +23,7 @@ import {
 } from '../view/finishModel';
 import { Hud } from '../view/Hud';
 import { buildHudModel } from '../view/hudModel';
+import { PassageRecorder } from '../view/passageModel';
 import { SubtitleBanner } from '../view/SubtitleBanner';
 import { buildSubtitleModel, subtitleLineView } from '../view/subtitleModel';
 import { TrackView } from '../view/TrackView';
@@ -159,6 +160,15 @@ export class RaceScene extends Scene {
    */
   private finishSnapshot: FinishSnapshot | null = null;
 
+  /**
+   * Historique des passages en tête, alimenté **en lecture** au moment où le noyau annonce une borne.
+   *
+   * Il ne connaît ni distance ni position d'écran : il note le premier du classement existant
+   * (`sim/leaderboard.ts`) à l'instant mesuré de la borne, et se vide de lui-même dès qu'une nouvelle
+   * course démarre.
+   */
+  private readonly passages = new PassageRecorder();
+
   /** Temps **réel** écoulé depuis l'arrivée, en millisecondes : il ne pilote que la décélération. */
   private finishElapsedMs = 0;
 
@@ -274,6 +284,13 @@ export class RaceScene extends Scene {
             nameDepth: sprite.nameDepth,
             depth: sprite.depth,
             drawn: sprite.drawn,
+            // Effet d'événement réellement appliqué : il ne peut venir que de l'événement actif du
+            // noyau, et il est nul dès qu'aucun événement n'est en cours.
+            eventKind: sprite.eventKind,
+            auraAlpha: sprite.auraAlpha,
+            trailAlpha: sprite.trailAlpha,
+            trailOffset: sprite.trailOffset,
+            spriteTint: sprite.spriteTint,
           })),
         camera: () => ({ leftM: this.rig.left, windowM: this.rig.span }),
         subtitle: () => this.subtitle?.visibleText() ?? '',
@@ -334,6 +351,13 @@ export class RaceScene extends Scene {
     const phase = this.options.simulation.phase;
     const checkpoint = this.options.simulation.checkpoint;
 
+    // 2 bis. Passages en tête (passe de finition 2D) : quand le noyau annonce une borne, le premier de
+    // son classement est noté. C'est une **lecture** du classement existant, faite une fois par borne :
+    // aucun second moteur de classement n'est créé, et une borne non franchie n'est jamais complétée.
+    if (phase !== 'finished') {
+      this.passages.observe(state, checkpoint);
+    }
+
     // 2 bis. Relecture (passe corrective 2) : le curseur suit la pause manuelle, et l'instant consulté
     // est lu dans l'historique du noyau. Aucun pas n'est exécuté, aucun fait n'est produit, aucun
     // tirage n'a lieu : on **regarde** un instant déjà calculé.
@@ -378,6 +402,9 @@ export class RaceScene extends Scene {
         continue;
       }
       const screenX = this.rig.toScreenX(distance, this.trackWidth);
+      // L'effet d'événement est décidé **avant** la pose : il ne fait que lire l'état déjà calculé de
+      // cette frame, et il ne peut donc ni déplacer le personnage ni changer sa vitesse.
+      sprite.updateEventVisual(character, delta);
       sprite.place(screenX, this.layoutHeight, this.compactLayout);
       // Un personnage hors du champ est **masqué** : il n'est jamais dessiné sous la bande réservée au
       // classement permanent, pas même partiellement. La décision se prend sur la **taille réellement
@@ -417,6 +444,9 @@ export class RaceScene extends Scene {
         id: sprite.id,
         screenX: sprite.screenX,
         screenY: sprite.screenY,
+        // La demi-largeur réelle du sprite : c'est elle qui place le mot **derrière** le personnage,
+        // sans jamais mordre sur l'illustration.
+        halfWidth: sprite.halfWidth,
       })),
       { width: this.trackWidth, height: this.layoutHeight },
     );
@@ -426,7 +456,11 @@ export class RaceScene extends Scene {
     this.finish?.update(
       this.finishSnapshot === null
         ? null
-        : buildFinishModel(this.finishSnapshot, this.options.commentary?.arrivalFact() ?? null),
+        : buildFinishModel(
+            this.finishSnapshot,
+            this.options.commentary?.arrivalFact() ?? null,
+            this.passages.rows(),
+          ),
     );
 
     // Le `tSim` courant vient de l'instantané déjà lu : le commentaire n'a aucun accès au moteur,

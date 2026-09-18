@@ -58,6 +58,22 @@ export interface FinishPhotoFinish {
   readonly secondId: CharacterId;
 }
 
+/**
+ * Une borne de la course, avec le leader observé à cet instant.
+ *
+ * `checkpoint` vaut `1` ou `2` pour un checkpoint intermédiaire, et `null` pour l'**arrivée** : c'est
+ * la troisième borne, et il n'en existe pas d'autre (`RACE_CONFIG.SEGMENT_COUNT = 3`). Aucun
+ * « checkpoint 3 » n'est donc jamais présenté.
+ */
+export interface FinishPassage {
+  /** Numéro de checkpoint, ou `null` quand la borne est l'arrivée. */
+  readonly checkpoint: number | null;
+  /** Instant simulé réellement mesuré par le noyau (`20`, `40`, `60`). */
+  readonly tSim: number;
+  readonly characterId: CharacterId;
+  readonly name: string;
+}
+
 /** Tout ce que l'écran d'arrivée présente, déjà dérivé du noyau. */
 export interface FinishModel {
   readonly seed: string;
@@ -69,6 +85,14 @@ export interface FinishModel {
   readonly podium: readonly LeaderboardRow[];
   /** Les six marcheurs, dans l'ordre exact du classement final. */
   readonly rows: readonly LeaderboardRow[];
+  /**
+   * Passages en tête : les checkpoints **réellement observés**, puis l'arrivée.
+   *
+   * Les checkpoints viennent d'un relevé du classement au moment où le noyau annonçait la borne
+   * (`passageModel.ts`), l'arrivée du classement final figé. Aucune de ces lignes n'est recalculée
+   * depuis une position d'écran.
+   */
+  readonly passages: readonly FinishPassage[];
   /** `PHOTO_FINISH` a-t-il réellement eu lieu ? `null` sinon — aucune mention n'est alors affichée. */
   readonly photoFinish: FinishPhotoFinish | null;
 }
@@ -195,10 +219,15 @@ export function photoFinishOf(arrival: RaceFact | null): FinishPhotoFinish | nul
  *
  * Le podium est le **début** de la liste du noyau, pas une sélection : il ne décide donc jamais qui
  * gagne. Un instantané sans les six marcheurs est refusé plutôt que complété.
+ *
+ * Les `passages` reçus sont ceux **réellement observés** aux checkpoints (`passageModel.ts`) ; la
+ * dernière ligne — l'arrivée — est ajoutée ici à partir du classement final figé, donc du même
+ * vainqueur que le podium. L'ordre est celui des bornes, jamais un tri.
  */
 export function buildFinishModel(
   snapshot: FinishSnapshot,
   arrival: RaceFact | null,
+  passages: readonly FinishPassage[] = [],
 ): FinishModel {
   const winner = snapshot.rows[0];
   if (winner === undefined || snapshot.rows.length === 0) {
@@ -206,6 +235,7 @@ export function buildFinishModel(
   }
 
   const podiumSize = Math.max(1, Math.min(VIEW.FINISH_PODIUM_SIZE, snapshot.rows.length));
+  const orderedPassages = [...passages].sort((left, right) => left.tSim - right.tSim);
 
   return Object.freeze({
     seed: snapshot.seed,
@@ -214,6 +244,15 @@ export function buildFinishModel(
     winner,
     podium: Object.freeze(snapshot.rows.slice(0, podiumSize)),
     rows: snapshot.rows,
+    passages: Object.freeze([
+      ...orderedPassages,
+      Object.freeze({
+        checkpoint: null,
+        tSim: snapshot.tSim,
+        characterId: winner.id,
+        name: winner.name,
+      }),
+    ]),
     photoFinish: photoFinishOf(arrival),
   });
 }

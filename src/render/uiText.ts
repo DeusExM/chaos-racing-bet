@@ -62,8 +62,6 @@ export interface UiText {
   readonly checkpointTitle: string;
   /** Libellé du split de tête dans le bandeau de checkpoint. */
   readonly checkpointLeaderSplit: string;
-  /** Libellé du repère décoratif de l'échelle nominale, dessiné sur la piste. */
-  readonly nominalScale: string;
   /** Libellé du bouton qui lance la course. */
   readonly startButton: string;
   /** Libellé du bouton qui rejoue la même course. */
@@ -121,6 +119,13 @@ export interface UiText {
   readonly finishPodiumTitle: string;
   /** Titre de la section classement complet (les 6). */
   readonly finishRankingTitle: string;
+  /**
+   * Titre de la section des passages en tête (passe de finition 2D).
+   *
+   * Les lignes qui la composent nomment les deux checkpoints (`checkpointTitle` + numéro) et
+   * l'arrivée (`finishTitle`) : aucune borne n'est inventée, et la troisième est bien l'arrivée.
+   */
+  readonly finishPassagesTitle: string;
   /** Mention mise en avant quand le noyau a réellement produit `PHOTO_FINISH`. */
   readonly finishPhotoBadge: string;
   /** Libellé du bouton qui rejoue **exactement** la même seed. */

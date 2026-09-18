@@ -6,12 +6,14 @@ import { VIEW, laneRatios, laneY } from '../viewConfig';
 import type { CameraRig } from './CameraRig';
 
 /**
- * Décor de la piste : voies, graduations de distance, repère de l'échelle nominale.
+ * Décor de la piste : voies et graduations de distance.
  *
  * **Décor uniquement.** Ces repères ne conditionnent ni la fin de la course ni le classement, et
  * aucun d'eux n'est lu par `src/core/` ni `src/sim/` : ils sont dessinés à partir du cadrage de la
  * caméra, jamais l'inverse. Il n'existe ici aucune ligne d'arrivée — la course se termine à
- * `tSim = 60 s`, quel que soit l'endroit où se trouve chaque personnage.
+ * `tSim = 60 s`, quel que soit l'endroit où se trouve chaque personnage — et le repère d'« échelle
+ * nominale » a été retiré de la piste : plus épais que les autres, il se lisait comme une ligne
+ * d'arrivée et induisait en erreur.
  */
 export class TrackView {
   private readonly lanes: GameObjects.Graphics;
@@ -103,13 +105,10 @@ export class TrackView {
       this.ticks.lineBetween(x, top, x, bottom);
     }
 
-    // Repère décoratif de l'échelle nominale : la longueur qu'aurait la piste à `SPEED.BASE`.
-    if (VIEW.NOMINAL_SCALE_M >= leftM && VIEW.NOMINAL_SCALE_M <= rightM) {
-      const x = rig.toScreenX(VIEW.NOMINAL_SCALE_M, this.widthPx);
-      this.ticks.lineStyle(2, 0x4a5c94, 1);
-      this.ticks.lineBetween(x, top, x, bottom);
-    }
-
+    // Aucun repère « d'échelle nominale » n'est plus dessiné ici : un trait vertical plus épais au
+    // milieu de la piste se lisait comme une ligne d'arrivée, alors que la course se termine
+    // exclusivement au temps (`tSim = 60 s`) et qu'aucune distance n'est une fin de course. La piste
+    // ne montre donc plus que des graduations régulières, identiques entre elles.
     let used = 0;
     const firstLabel = Math.ceil(leftM / VIEW.TRACK_LABEL_STEP_M) * VIEW.TRACK_LABEL_STEP_M;
     for (let metre = firstLabel; metre <= rightM; metre += VIEW.TRACK_LABEL_STEP_M) {
@@ -121,20 +120,6 @@ export class TrackView {
       label.setText(`${String(Math.round(metre))}${this.text.metres}`);
       label.setPosition(x, top - 6);
       label.setVisible(true);
-      used += 1;
-    }
-
-    // Le repère de l'échelle nominale n'est étiqueté que si aucune graduation ne l'occupe déjà.
-    const nominalLabel = this.labels[used];
-    if (
-      nominalLabel !== undefined &&
-      VIEW.NOMINAL_SCALE_M >= leftM &&
-      VIEW.NOMINAL_SCALE_M <= rightM &&
-      VIEW.NOMINAL_SCALE_M % VIEW.TRACK_LABEL_STEP_M !== 0
-    ) {
-      nominalLabel.setText(this.text.nominalScale);
-      nominalLabel.setPosition(rig.toScreenX(VIEW.NOMINAL_SCALE_M, this.widthPx), bottom + 20);
-      nominalLabel.setVisible(true);
       used += 1;
     }
 

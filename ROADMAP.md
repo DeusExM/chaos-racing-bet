@@ -1185,6 +1185,30 @@ après relecture et reprise (distances finales **identiques bit à bit**, classe
 `3600` pas), géométrie du classement en 1280×720, 1920×1080 et 844×390 (aucun personnage dessiné sous
 le panneau), et `Terminé` à l'arrivée.
 
+> **Note (passe de finition de la version 2D, avant de la figer).** Dernière passe de finition
+> **avant** le jalon P013.5, demandée explicitement après un test manuel sur PC **et** sur iPhone.
+> Comme `P013-cor` et `P013-cor2`, ce n'est **pas** une étape : elle ne renumérote rien, ne change
+> **aucune constante de simulation** (`SPEED.*`, `DRIFT.*`, `SURGE.*`, `EVENT.*`, `OVERTAKE.*`,
+> `RACE_CONFIG`, `SIM_CONFIG` sont intacts), ne relance pas le corpus d'équilibrage et ne touche ni au
+> RNG, ni au nombre de pas, ni à la durée, ni aux checkpoints, ni au classement, ni au speaker. Tout
+> est **présentation, lecture ou historique de résultats déjà calculés**. Elle traite six points :
+> les textes attachés aux personnages (nom et mots d'événement) appliquent désormais **sur bureau** la
+> règle déjà en vigueur en petit paysage — dans la voie, sur l'axe du personnage, **derrière lui au
+> sens de la course** (à sa gauche), jamais recouverts par l'image ; les personnages de bureau passent
+> de `73` à **`92` px logiques** (voies étendues, marge noire réduite, séparation visible ≥ 10 px
+> logiques, aucun PNG modifié) ; l'écran d'arrivée gagne une section `Passages en tête`
+> (`Checkpoint 1 · 20 s`, `Checkpoint 2 · 40 s`, `Arrivée · 60 s`) alimentée **exclusivement** par des
+> classements réellement observés pendant la course — le classement du noyau reste l'unique source de
+> vérité, aucun second moteur de classement, et pas de « Checkpoint 3 » ; le bouton principal
+> `Rejouer` **tire une nouvelle seed** et relance la course par le mécanisme existant (le bouton
+> explicite de l'écran d'arrivée garde la même seed) ; les bonus et malus reçoivent un retour
+> **purement visuel** sur le personnage (halo pour un bonus, teinte et traînée sombres pour un malus)
+> qui ne déplace rien, ne change aucune vitesse et ne tire aucun nombre aléatoire ; le panneau
+> `Persos` tient enfin **entièrement** dans l'écran en paysage de téléphone (844×390 et 926×428), sa
+> rangée de grille n'étant plus dimensionnée par la hauteur de ses six images. Le repère d'« échelle
+> nominale » de la piste est supprimé (il ressemblait à une ligne d'arrivée) sans que la logique
+> d'arrivée — qui reste **temporelle** — soit touchée. Voir `GAME_DESIGN.md` §5.2.
+
 ---
 
 ### P013.5 — Jalon 3D : prototype de rendu et choix du moteur `[ ]`

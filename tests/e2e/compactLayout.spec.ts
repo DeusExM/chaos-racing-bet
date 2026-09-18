@@ -601,97 +601,171 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
  * Le panneau est une surcouche d'interface : les images sont celles du projet (les mêmes fichiers que
  * le rendu), les noms sont ceux du roster, et la course continue derrière — le test vérifie donc aussi
  * que la piste, la colonne et le noyau sont dans le même état avant et après.
+ *
+ * Depuis la passe de finition 2D, le test tourne sur les **deux** formats d'iPhone paysage réellement
+ * utilisés (844×390 et 926×428) et prouve géométriquement que le panneau tient **entièrement** dans
+ * l'écran : les six cartes, les six noms et le bouton « Fermer » sont dans la fenêtre, sans défilement.
  */
-test('le bouton persos ouvre les six personnages en grand en 844×390', async ({ page }) => {
-  const watch = watchConsole(page);
-  await page.setViewportSize({ width: 844, height: 390 });
-  await page.goto(raceUrl({ seed: SEED, fast: true, autostart: false }));
-  await waitForHooks(page);
+for (const phone of [
+  { name: '844×390', width: 844, height: 390 },
+  { name: '926×428', width: 926, height: 428 },
+] as const) {
+  test(`le bouton persos ouvre les six personnages en grand en ${phone.name}`, async ({ page }) => {
+    const watch = watchConsole(page);
+    await page.setViewportSize({ width: phone.width, height: phone.height });
+    await page.goto(raceUrl({ seed: SEED, fast: true, autostart: false }));
+    await waitForHooks(page);
 
-  await page.evaluate(() => {
-    window.__CHAOS_RACE__?.start();
+    await page.evaluate(() => {
+      window.__CHAOS_RACE__?.start();
+    });
+    await expect(page.getByTestId('gallery-button')).toBeVisible();
+    await expect(page.getByTestId('gallery')).toBeHidden();
+
+    const before = await page.evaluate(() => ({
+      arena: window.__CHAOS_RACE_VIEW__?.track().arenaWidth ?? -1,
+      steps: window.__CHAOS_RACE__?.state().steps ?? -1,
+      canvas: document.querySelector('#game canvas')?.getBoundingClientRect().width ?? -1,
+    }));
+
+    await page.getByTestId('gallery-button').click();
+    await expect(page.getByTestId('gallery')).toBeVisible();
+
+    const panel = await page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll('[data-testid="gallery-card"]'));
+      const overlay = document.querySelector('[data-testid="gallery"]');
+      const rect = overlay?.getBoundingClientRect();
+      const panelElement = document.querySelector('.gallery-panel');
+      const panelRect = panelElement?.getBoundingClientRect();
+      const close = document.querySelector('[data-testid="gallery-close"]');
+      const closeRect = close?.getBoundingClientRect();
+      const boxOf = (element: Element | null | undefined): Box => {
+        const box = element?.getBoundingClientRect();
+        const left = box?.left ?? -1;
+        const top = box?.top ?? -1;
+        const right = box?.right ?? -1;
+        const bottom = box?.bottom ?? -1;
+        return { left, top, right, bottom, width: right - left, height: bottom - top };
+      };
+      return {
+        cards: cards.length,
+        names: cards.map((card) => card.querySelector('.gallery-name')?.textContent ?? ''),
+        cardBoxes: cards.map((card) => boxOf(card)),
+        nameBoxes: cards.map((card) => boxOf(card.querySelector('.gallery-name'))),
+        images: cards.map((card) => {
+          const image = card.querySelector('img');
+          return image === null
+            ? { complete: false, width: 0, height: 0, src: '' }
+            : {
+                complete: image.complete && image.naturalWidth > 0,
+                width: image.getBoundingClientRect().width,
+                height: image.getBoundingClientRect().height,
+                src: image.getAttribute('src') ?? '',
+              };
+        }),
+        overlay: {
+          left: rect?.left ?? -1,
+          top: rect?.top ?? -1,
+          right: rect?.right ?? -1,
+          bottom: rect?.bottom ?? -1,
+        },
+        panel: {
+          left: panelRect?.left ?? -1,
+          top: panelRect?.top ?? -1,
+          right: panelRect?.right ?? -1,
+          bottom: panelRect?.bottom ?? -1,
+        },
+        close: {
+          left: closeRect?.left ?? -1,
+          top: closeRect?.top ?? -1,
+          right: closeRect?.right ?? -1,
+          bottom: closeRect?.bottom ?? -1,
+        },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      };
+    });
+
+    // Les six personnages, avec les noms du roster et les images du projet.
+    expect(panel.cards, 'six personnages').toBe(CHARACTER_IDS.length);
+    expect(
+      panel.names,
+      'les noms affichés sont exactement ceux du roster, dans l’ordre',
+    ).toStrictEqual(CHARACTERS.map((character) => character.name));
+    for (const image of panel.images) {
+      expect(image.complete, `image chargée : ${image.src}`).toBe(true);
+      expect(image.src, 'les images sont celles du projet').toContain('assets/characters/');
+      expect(image.width, 'l’image est affichée en grand').toBeGreaterThan(40);
+      expect(image.height, 'l’image est affichée en grand').toBeGreaterThan(40);
+    }
+    // Le panneau couvre l'écran sans sortir de l'écran.
+    expect(panel.overlay.left).toBeLessThanOrEqual(1);
+    expect(panel.overlay.top).toBeLessThanOrEqual(1);
+    expect(panel.overlay.right).toBeGreaterThanOrEqual(phone.width - 1);
+    expect(panel.overlay.bottom).toBeGreaterThanOrEqual(phone.height - 1);
+
+    // Le panneau lui-même ne dépasse jamais la fenêtre : c'est la preuve que le bas n'est pas sous la
+    // barre d'outils d'iOS (d'où `100dvh` et les marges de sécurité).
+    expect(panel.panel.left, 'le panneau commence dans la fenêtre').toBeGreaterThanOrEqual(-1);
+    expect(panel.panel.top, 'le panneau commence dans la fenêtre').toBeGreaterThanOrEqual(-1);
+    expect(panel.panel.right, 'le panneau ne sort pas à droite').toBeLessThanOrEqual(
+      panel.viewport.width + 1,
+    );
+    expect(panel.panel.bottom, 'le panneau ne sort pas en bas').toBeLessThanOrEqual(
+      panel.viewport.height + 1,
+    );
+
+    // **Les six cartes sont entièrement visibles** : première et dernière comprises, y compris la
+    // deuxième rangée, qui était coupée sur un vrai iPhone.
+    for (const [index, box] of panel.cardBoxes.entries()) {
+      expect(box.left, `carte ${String(index)} dans la fenêtre (gauche)`).toBeGreaterThanOrEqual(-1);
+      expect(box.right, `carte ${String(index)} dans la fenêtre (droite)`).toBeLessThanOrEqual(
+        panel.viewport.width + 1,
+      );
+      expect(box.top, `carte ${String(index)} dans la fenêtre (haut)`).toBeGreaterThanOrEqual(-1);
+      expect(
+        box.bottom,
+        `carte ${String(index)} entièrement visible (bas ${box.bottom.toFixed(1)} sur ${String(panel.viewport.height)})`,
+      ).toBeLessThanOrEqual(panel.viewport.height + 1);
+    }
+    // Les six noms sont visibles, pas seulement présents dans le DOM.
+    for (const [index, box] of panel.nameBoxes.entries()) {
+      expect(box.bottom, `nom ${String(index)} visible`).toBeLessThanOrEqual(
+        panel.viewport.height + 1,
+      );
+      expect(box.top).toBeGreaterThanOrEqual(-1);
+      expect(box.right - box.left, `nom ${String(index)} non écrasé`).toBeGreaterThan(8);
+    }
+    // Le bouton « Fermer » est entièrement dans la fenêtre, et donc réellement utilisable au doigt.
+    expect(panel.close.top).toBeGreaterThanOrEqual(-1);
+    expect(panel.close.left).toBeGreaterThanOrEqual(-1);
+    expect(panel.close.bottom).toBeLessThanOrEqual(panel.viewport.height + 1);
+    expect(panel.close.right).toBeLessThanOrEqual(panel.viewport.width + 1);
+
+    // Fermeture par le bouton, puis par le fond, puis par `Échap`.
+    await page.getByTestId('gallery-close').click();
+    await expect(page.getByTestId('gallery')).toBeHidden();
+    await page.getByTestId('gallery-button').click();
+    await expect(page.getByTestId('gallery')).toBeVisible();
+    await page.mouse.click(8, Math.round(phone.height / 2));
+    await expect(page.getByTestId('gallery')).toBeHidden();
+    await page.getByTestId('gallery-button').click();
+    await expect(page.getByTestId('gallery')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('gallery')).toBeHidden();
+
+    // Le panneau n'a rien changé : même piste, même canvas, et le noyau n'a jamais reculé.
+    const after = await page.evaluate(() => ({
+      arena: window.__CHAOS_RACE_VIEW__?.track().arenaWidth ?? -1,
+      steps: window.__CHAOS_RACE__?.state().steps ?? -1,
+      canvas: document.querySelector('#game canvas')?.getBoundingClientRect().width ?? -1,
+    }));
+    expect(after.arena).toBe(before.arena);
+    expect(after.canvas).toBe(before.canvas);
+    expect(after.steps).toBeGreaterThanOrEqual(before.steps - 1);
+
+    expectNoErrors(watch);
   });
-  await expect(page.getByTestId('gallery-button')).toBeVisible();
-  await expect(page.getByTestId('gallery')).toBeHidden();
-
-  const before = await page.evaluate(() => ({
-    arena: window.__CHAOS_RACE_VIEW__?.track().arenaWidth ?? -1,
-    steps: window.__CHAOS_RACE__?.state().steps ?? -1,
-    canvas: document.querySelector('#game canvas')?.getBoundingClientRect().width ?? -1,
-  }));
-
-  await page.getByTestId('gallery-button').click();
-  await expect(page.getByTestId('gallery')).toBeVisible();
-
-  const panel = await page.evaluate(() => {
-    const cards = Array.from(document.querySelectorAll('[data-testid="gallery-card"]'));
-    const overlay = document.querySelector('[data-testid="gallery"]');
-    const rect = overlay?.getBoundingClientRect();
-    return {
-      cards: cards.length,
-      names: cards.map((card) => card.querySelector('.gallery-name')?.textContent ?? ''),
-      images: cards.map((card) => {
-        const image = card.querySelector('img');
-        return image === null
-          ? { complete: false, width: 0, height: 0, src: '' }
-          : {
-              complete: image.complete && image.naturalWidth > 0,
-              width: image.getBoundingClientRect().width,
-              height: image.getBoundingClientRect().height,
-              src: image.getAttribute('src') ?? '',
-            };
-      }),
-      overlay: {
-        left: rect?.left ?? -1,
-        top: rect?.top ?? -1,
-        right: rect?.right ?? -1,
-        bottom: rect?.bottom ?? -1,
-      },
-    };
-  });
-
-  // Les six personnages, avec les noms du roster et les images du projet.
-  expect(panel.cards, 'six personnages').toBe(CHARACTER_IDS.length);
-  expect(
-    panel.names,
-    'les noms affichés sont exactement ceux du roster, dans l’ordre',
-  ).toStrictEqual(CHARACTERS.map((character) => character.name));
-  for (const image of panel.images) {
-    expect(image.complete, `image chargée : ${image.src}`).toBe(true);
-    expect(image.src, 'les images sont celles du projet').toContain('assets/characters/');
-    expect(image.width, 'l’image est affichée en grand').toBeGreaterThan(40);
-    expect(image.height, 'l’image est affichée en grand').toBeGreaterThan(40);
-  }
-  // Le panneau couvre l'écran sans sortir de l'écran.
-  expect(panel.overlay.left).toBeLessThanOrEqual(1);
-  expect(panel.overlay.top).toBeLessThanOrEqual(1);
-  expect(panel.overlay.right).toBeGreaterThanOrEqual(843);
-  expect(panel.overlay.bottom).toBeGreaterThanOrEqual(389);
-
-  // Fermeture par le bouton, puis par le fond, puis par `Échap`.
-  await page.getByTestId('gallery-close').click();
-  await expect(page.getByTestId('gallery')).toBeHidden();
-  await page.getByTestId('gallery-button').click();
-  await expect(page.getByTestId('gallery')).toBeVisible();
-  await page.mouse.click(8, 195);
-  await expect(page.getByTestId('gallery')).toBeHidden();
-  await page.getByTestId('gallery-button').click();
-  await expect(page.getByTestId('gallery')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByTestId('gallery')).toBeHidden();
-
-  // Le panneau n'a rien changé : même piste, même canvas, et le noyau n'a jamais reculé.
-  const after = await page.evaluate(() => ({
-    arena: window.__CHAOS_RACE_VIEW__?.track().arenaWidth ?? -1,
-    steps: window.__CHAOS_RACE__?.state().steps ?? -1,
-    canvas: document.querySelector('#game canvas')?.getBoundingClientRect().width ?? -1,
-  }));
-  expect(after.arena).toBe(before.arena);
-  expect(after.canvas).toBe(before.canvas);
-  expect(after.steps).toBeGreaterThanOrEqual(before.steps - 1);
-
-  expectNoErrors(watch);
-});
+}
 
 /**
  * Les mots d'événement (`TURBO !`, `BONUS !`, `MALUS !`) restent **dans la voie** en 844×390.

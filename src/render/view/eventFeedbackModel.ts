@@ -22,6 +22,14 @@ export interface EventBadgePosition {
   readonly id: CharacterId;
   readonly screenX: number;
   readonly screenY: number;
+  /**
+   * Demi-largeur réellement dessinée du sprite, en pixels logiques.
+   *
+   * Elle sert à reculer le badge **derrière** le personnage : la course va de gauche à droite, donc
+   * le mot est posé à gauche du sprite, séparé de lui par `EVENT_BADGE_GAP_PX`. Sans cette mesure, le
+   * rendu devrait supposer une largeur, et le badge pourrait mordre sur l'illustration.
+   */
+  readonly halfWidth: number;
 }
 
 /** Dimensions logiques de l'arène : elles servent à convertir une position d'écran en pourcentage. */

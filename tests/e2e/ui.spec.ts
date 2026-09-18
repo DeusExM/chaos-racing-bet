@@ -1,12 +1,16 @@
 import { expect, test } from '@playwright/test';
 
 import { CHARACTER_IDS } from '../../src/core/characters';
+import { RACE_CONFIG } from '../../src/core/config';
 import { OVERTAKE_SEED } from '../fixtures/seeds';
 import {
   currentSteps,
   expectNoErrors,
   raceUrl,
+  readFinishCore,
   readLeaderboard,
+  referenceResult,
+  waitForFinished,
   watchConsole,
 } from './helpers';
 
@@ -17,9 +21,7 @@ import {
  * compte ici est le comportement de l'interface, pas le résultat de la course.
  */
 
-test('Lancer démarre la course, Rejouer la reprend depuis le début avec la même seed', async ({
-  page,
-}) => {
+test('Lancer démarre la course, Rejouer tire une nouvelle seed et la relance', async ({ page }) => {
   const watch = watchConsole(page);
   await page.goto(raceUrl({ seed: OVERTAKE_SEED }));
 
@@ -39,11 +41,53 @@ test('Lancer démarre la course, Rejouer la reprend depuis le début avec la mê
   const beforeReplay = await currentSteps(page);
 
   await page.getByTestId('replay-button').click();
-  await expect.poll(() => currentSteps(page), { timeout: 10_000 }).toBeLessThan(beforeReplay);
 
-  // La seed affichée n'a pas changé : « Rejouer » rejoue la même course, compte à rebours compris.
-  await expect(page.getByTestId('seed-value')).toHaveText(OVERTAKE_SEED);
+  // 1) La course repart **réellement** de zéro : le compteur de pas retombe.
+  await expect.poll(() => currentSteps(page), { timeout: 10_000 }).toBeLessThan(beforeReplay);
   await expect(page.getByTestId('race-status')).toHaveText('Départ imminent');
+
+  // 2) Une **nouvelle** seed a été tirée : elle diffère de la précédente, et elle est valide.
+  const seedAfter = await page.getByTestId('seed-value').textContent();
+  expect(seedAfter, 'la seed affichée a changé').not.toBe(OVERTAKE_SEED);
+  expect(seedAfter, 'la nouvelle seed respecte le contrat P003').toMatch(/^[0-9A-HJKMNP-TV-Z]{8}$/);
+
+  // 3) L'URL est synchronisée avec la seed réellement jouée : recopier l'adresse reproduit la course.
+  const url = new URL(page.url());
+  expect(url.searchParams.get('seed'), 'l’URL porte la nouvelle seed').toBe(seedAfter);
+
+  // 4) Le noyau joue bien cette nouvelle seed, et la course repart.
+  const coreSeed = await page.evaluate(() => window.__CHAOS_RACE__?.seed() ?? '');
+  expect(coreSeed).toBe(seedAfter);
+  await expect.poll(() => currentSteps(page), { timeout: 15_000 }).toBeGreaterThan(0);
+
+  expectNoErrors(watch);
+});
+
+test('Rejouer la même seed, sur l’écran d’arrivée, garde exactement la même course', async ({
+  page,
+}) => {
+  const watch = watchConsole(page);
+  await page.goto(raceUrl({ seed: OVERTAKE_SEED, fast: true, autostart: true }));
+  await waitForFinished(page);
+
+  // Résultat de référence de cette seed, calculé par le noyau seul, sans aucun rendu.
+  const reference = await referenceResult(page, OVERTAKE_SEED);
+
+  await page.getByTestId('finish-replay-same').click();
+
+  // La course repart réellement de zéro — le compteur de pas retombe — et la seed ne change pas.
+  await expect
+    .poll(() => currentSteps(page), { timeout: 15_000 })
+    .toBeLessThan(RACE_CONFIG.TOTAL_STEPS);
+  await expect(page.getByTestId('seed-value')).toHaveText(OVERTAKE_SEED);
+
+  // Elle se termine exactement comme la référence : même seed, donc même course, bit à bit.
+  await waitForFinished(page);
+  const replayed = await readFinishCore(page);
+  expect(replayed.seed).toBe(OVERTAKE_SEED);
+  expect(replayed.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
+  expect([...replayed.distances]).toEqual(reference.distances);
+  expect(replayed.ranks.map((row) => row.id)).toEqual(reference.ranking);
 
   expectNoErrors(watch);
 });

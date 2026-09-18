@@ -1,7 +1,8 @@
 import type { CharacterId } from '../../core/types';
 import type { LeaderboardRow } from '../../sim/leaderboard';
 import type { UiText } from '../uiText';
-import type { FinishModel, FinishPhotoFinish } from './finishModel';
+import { formatSecondsFr } from '../format';
+import type { FinishModel, FinishPassage, FinishPhotoFinish } from './finishModel';
 import { formatDecimalFr, formatGapMeters } from './Hud';
 
 /**
@@ -41,6 +42,18 @@ export interface FinishDebugSnapshot {
     readonly gapMeters: number;
   }[];
   readonly photoFinish: FinishPhotoFinish | null;
+  /**
+   * Passages en tête réellement affichés : les checkpoints observés, puis l'arrivée.
+   *
+   * `checkpoint` vaut `null` pour l'arrivée. Un test peut donc comparer ces lignes au classement du
+   * noyau relevé au même instant, sans dépendre du texte affiché.
+   */
+  readonly passages: readonly {
+    readonly checkpoint: number | null;
+    readonly tSim: number;
+    readonly id: CharacterId;
+    readonly name: string;
+  }[];
   readonly visible: boolean;
 }
 
@@ -57,7 +70,10 @@ function signatureOf(model: FinishModel): string {
   return model.rows
     .map((row) => `${row.id}:${String(row.rank)}:${row.distance}:${row.gapMeters}`)
     .join('|')
-    .concat(`#${model.photoFinish === null ? 'none' : String(model.photoFinish.gapMeters)}`);
+    .concat(
+      `#${model.photoFinish === null ? 'none' : String(model.photoFinish.gapMeters)}`,
+      `#${model.passages.map((passage) => `${String(passage.checkpoint)}:${passage.characterId}:${String(passage.tSim)}`).join('|')}`,
+    );
 }
 
 export class FinishPanel {
@@ -72,6 +88,8 @@ export class FinishPanel {
   private readonly podiumRows: HTMLElement;
 
   private readonly rankingRows: HTMLElement;
+
+  private readonly passageRows: HTMLElement;
 
   private readonly replayButton: HTMLButtonElement;
 
@@ -133,6 +151,19 @@ export class FinishPanel {
 
     body.append(podiumSection, rankingSection);
 
+    // Passages en tête : un rappel court de qui menait aux deux checkpoints, puis à l'arrivée. Les
+    // lignes viennent de relevés réels (`passageModel.ts`) et du classement final figé, jamais d'un
+    // recalcul depuis les positions d'écran ; une borne non observée n'est simplement pas listée.
+    const passagesSection = document.createElement('section');
+    passagesSection.className = 'hud-finish-section hud-finish-passages';
+    passagesSection.dataset['testid'] = 'finish-passages';
+    const passagesTitle = document.createElement('p');
+    passagesTitle.className = 'hud-finish-subtitle';
+    passagesTitle.textContent = text.finishPassagesTitle;
+    this.passageRows = document.createElement('ol');
+    this.passageRows.className = 'hud-finish-list hud-finish-passage-list';
+    passagesSection.append(passagesTitle, this.passageRows);
+
     const footer = document.createElement('div');
     footer.className = 'hud-finish-actions';
 
@@ -147,7 +178,7 @@ export class FinishPanel {
     this.newRaceButton.textContent = text.finishNewRace;
 
     footer.append(this.replayButton, this.newRaceButton);
-    section.append(head, body, footer);
+    section.append(head, body, passagesSection, footer);
 
     this.replayButton.addEventListener('click', () => {
       actions.replaySameSeed();
@@ -196,6 +227,9 @@ export class FinishPanel {
     this.rankingRows.replaceChildren(
       ...model.rows.map((row) => this.rowElement(row, 'finish-row')),
     );
+    this.passageRows.replaceChildren(
+      ...model.passages.map((passage) => this.passageElement(passage)),
+    );
   }
 
   /** Photographie de l'écran réellement affiché, `null` tant qu'aucune arrivée n'est présentée. */
@@ -216,6 +250,12 @@ export class FinishPanel {
         gapMeters: row.gapMeters,
       })),
       photoFinish: this.lastModel.photoFinish,
+      passages: this.lastModel.passages.map((passage) => ({
+        checkpoint: passage.checkpoint,
+        tSim: passage.tSim,
+        id: passage.characterId,
+        name: passage.name,
+      })),
       visible: this.visible,
     };
   }
@@ -276,6 +316,40 @@ export class FinishPanel {
     return element;
   }
 
+  /**
+   * Une ligne de passage : la borne, son instant **mesuré**, et le nom du leader observé.
+   *
+   * L'instant vient du noyau (`20`, `40`, `60` s) : il n'est jamais recopié depuis une constante, et
+   * une borne non observée n'est jamais complétée. La dernière ligne est l'arrivée, et il n'existe pas
+   * de « checkpoint 3 ».
+   */
+  private passageElement(passage: FinishPassage): HTMLElement {
+    const element = document.createElement('li');
+    element.className = 'hud-finish-passage';
+    element.dataset['testid'] = 'finish-passage';
+    element.dataset['characterId'] = passage.characterId;
+    element.dataset['tSim'] = String(passage.tSim);
+    element.dataset['bound'] = passage.checkpoint === null ? 'arrival' : String(passage.checkpoint);
+
+    const bound = document.createElement('span');
+    bound.className = 'hud-finish-passage-bound';
+    bound.textContent =
+      passage.checkpoint === null
+        ? this.text.finishTitle
+        : `${this.text.checkpointTitle} ${String(passage.checkpoint)}`;
+
+    const instant = document.createElement('span');
+    instant.className = 'hud-finish-passage-time';
+    instant.textContent = formatSecondsFr(passage.tSim);
+
+    const name = document.createElement('span');
+    name.className = 'hud-finish-passage-name';
+    name.textContent = passage.name;
+
+    element.append(bound, instant, name);
+    return element;
+  }
+
   private show(): void {
     this.visible = true;
     this.root.hidden = false;
@@ -292,5 +366,6 @@ export class FinishPanel {
     this.winnerLine.textContent = '';
     this.podiumRows.replaceChildren();
     this.rankingRows.replaceChildren();
+    this.passageRows.replaceChildren();
   }
 }

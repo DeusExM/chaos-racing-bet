@@ -1,5 +1,6 @@
 import { SEED_TEXT_LENGTH, seedTextFromBytes } from '../core/seed';
 import { createGame } from '../render/Game';
+import { CharacterGallery } from '../render/view/CharacterGallery';
 import { RaceSimulation } from '../sim/RaceSimulation';
 import { SIM_PRESETS } from '../sim/config';
 import { installTestHooks, testHooksEnabled } from '../sim/testHooks';
@@ -124,14 +125,10 @@ function bootstrap(): void {
   }
 
   const params = new URLSearchParams(window.location.search);
+  // La seed affichée est celle du noyau (`state.seed`), écrite par le HUD : `app/` reste la seule
+  // couche qui décide de la seed (elle la passe à `RaceSimulation`), le HUD ne fait que l'afficher —
+  // et c'est le seul affichage de seed de l'application, sur tous les formats.
   const seedText = resolveSeedText();
-
-  // La seed affichée est écrite ici, une seule fois : le HUD la recopie ensuite depuis son propre
-  // élément. `app/` reste donc la seule couche qui décide de la seed, et le HUD ne fait que l'afficher.
-  const seedValue = elementById('seed-value');
-  if (seedValue !== null) {
-    seedValue.textContent = seedText;
-  }
 
   // Le mode test ne touche pas au noyau : il ne change que le temps réel.
   const preset = params.get(FAST_PARAM) === '1' ? SIM_PRESETS.fast : SIM_PRESETS.normal;
@@ -207,6 +204,15 @@ function bootstrap(): void {
     });
   }
 
+  // Panneau « persos » (micro-correction responsive) : le bouton vit dans le HUD (déclaré par
+  // `index.html`, visible seulement en petit paysage), le panneau est monté par `app/`, comme les
+  // réglages. Il ne reçoit ni simulation, ni speaker, ni relecture : il ne peut donc rien changer à
+  // la course, qui continue derrière lui.
+  const galleryButton = elementById('gallery-button');
+  if (galleryButton !== null) {
+    new CharacterGallery(galleryButton, UI_TEXT_FR);
+  }
+
   createGame({
     parent,
     simulation,
@@ -215,7 +221,10 @@ function bootstrap(): void {
     status: elementById('race-status'),
     banner: elementById('checkpoint-banner'),
     leaderboard: elementById('leaderboard'),
-    seedValue,
+    // La seed affichée appartient au HUD : son élément n'est plus déclaré dans `index.html` (il n'y a
+    // qu'**un** affichage de seed, dans la colonne du HUD), et le HUD le crée lui-même. `app/` ne lui
+    // passe donc rien : c'est le noyau (`state.seed`) qui fait foi, et le HUD le recopie.
+    seedValue: null,
     pauseButton,
     replayBar: elementById('replay-bar'),
     debugPanel: params.get(DEBUG_PARAM) === '1' ? elementById('debug') : null,
@@ -249,14 +258,12 @@ function bootstrap(): void {
    *
    * Le tirage passe par le mécanisme existant de `app/` (`createRandomSeedText`), donc il n'existe
    * qu'un seul système de seed dans le projet. La seed précédente n'est jamais réutilisée : elle est
-   * remplacée partout à la fois — URL, HUD, moteur, commentaire — avant le départ.
+   * remplacée partout à la fois — URL, moteur, commentaire, et affichage (le HUD recopie `state.seed`)
+   * — avant le départ.
    */
   function startNewRace(): void {
     const nextSeed = createRandomSeedText();
     writeSeedToUrl(nextSeed);
-    if (seedValue !== null) {
-      seedValue.textContent = nextSeed;
-    }
     simulation.restart(nextSeed);
     commentary.reset(simulation.view.seedValue);
     simulation.start();

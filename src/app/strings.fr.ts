@@ -112,6 +112,12 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   finishPhotoBadge: 'Photo finish',
   finishReplaySameSeed: 'Rejouer la même seed',
   finishNewRace: 'Nouvelle course',
+
+  // Panneau « persos » (micro-correction responsive) : un bouton discret à côté de la seed ouvre les
+  // six personnages en grand. Ces libellés décrivent l'interface ; ils ne sont jamais prononcés.
+  galleryButton: 'Persos',
+  galleryTitle: 'Les personnages',
+  galleryClose: 'Fermer',
 });
 
 // -------------------------------------------------------------------------------------------

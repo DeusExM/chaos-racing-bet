@@ -43,7 +43,18 @@
             hidden
           ></p>
           <div id="leaderboard" class="hud-panel" data-testid="leaderboard"></div>
-          <p class="seed">Seed : <span id="seed-value" data-testid="seed-value">—</span></p>
+          <!--
+            Bouton « persos » (micro-correction responsive) : discret, il ouvre les six personnages en
+            grand. Son libellé est écrit par `app/`, comme les autres boutons, et il n'est visible
+            qu'en petit paysage (la feuille de style le masque ailleurs). Il n'a donc aucun effet sur
+            la mise en page de bureau.
+          -->
+          <button
+            id="gallery-button"
+            class="hud-seed-gallery"
+            type="button"
+            data-testid="gallery-button"
+          ></button>
         </div>
         <!--
           Les retours d'événement (bonus/malus attachés aux personnages) et les réglages sont créés

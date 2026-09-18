@@ -127,4 +127,10 @@ export interface UiText {
   readonly finishReplaySameSeed: string;
   /** Libellé du bouton qui tire une nouvelle seed et démarre réellement une nouvelle course. */
   readonly finishNewRace: string;
+  /** Libellé du bouton discret qui ouvre le panneau des personnages (petit paysage). */
+  readonly galleryButton: string;
+  /** Titre du panneau des personnages, également son nom accessible. */
+  readonly galleryTitle: string;
+  /** Libellé du bouton qui referme le panneau des personnages. */
+  readonly galleryClose: string;
 }

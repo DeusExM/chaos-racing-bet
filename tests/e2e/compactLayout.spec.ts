@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { CHARACTER_IDS } from '../../src/core/characters';
+import { CHARACTERS, CHARACTER_IDS } from '../../src/core/characters';
 import { characterHeightPx } from '../../src/render/viewConfig';
 import { REPLAY_STEP_STEPS } from '../../src/render/view/replayModel';
 import { expectNoErrors, raceUrl, waitForHooks, watchConsole } from './helpers';
@@ -62,6 +62,9 @@ interface CompactLayout {
   readonly leaderboard: Box;
   readonly subtitle: Box | null;
   readonly seed: Box;
+  /** Nombre de blocs qui affichent la seed : il doit valoir 1 (aucun doublon). */
+  readonly seedDisplays: number;
+  readonly galleryButton: Box;
   readonly controls: Box;
   readonly buttons: readonly { readonly id: string; readonly box: Box }[];
   readonly logicalArenaWidth: number;
@@ -162,6 +165,9 @@ async function measure(page: Page): Promise<CompactLayout> {
       leaderboard: required('[data-testid="leaderboard"]'),
       subtitle: box('[data-testid="subtitle"]'),
       seed: required('[data-testid="hud-seed"]'),
+      /** Nombre de blocs qui affichent la seed : il doit valoir 1 (aucun doublon). */
+      seedDisplays: document.querySelectorAll('.seed, [data-testid="hud-seed"]').length,
+      galleryButton: required('[data-testid="gallery-button"]'),
       controls: required('.controls'),
       buttons: ['start-button', 'pause-button', 'replay-button'].map((id) => ({
         id,
@@ -247,6 +253,7 @@ for (const viewport of VIEWPORTS) {
       ['ligne d’état', layout.topline],
       ['classement', layout.leaderboard],
       ['seed', layout.seed],
+      ['bouton persos', layout.galleryButton],
     ] as const) {
       expect(element.left, `${name} ne recouvre pas la piste`).toBeGreaterThanOrEqual(
         layout.canvas.right - 1,
@@ -255,6 +262,23 @@ for (const viewport of VIEWPORTS) {
         layout.viewport.width + 1,
       );
     }
+
+    // 5 bis) La seed n'est affichée qu'**une** fois : le doublon déclaré dans `index.html` a été
+    // supprimé, et le bloc du HUD (dans la colonne) est le seul porteur — il n'y a donc rien à
+    // afficher deux fois, ni en haut à gauche de la piste, ni ailleurs.
+    expect(layout.seedDisplays, 'un seul affichage de seed').toBe(1);
+    expect(layout.seed.left, 'la seed est dans la colonne, pas sur la piste').toBeGreaterThanOrEqual(
+      layout.canvas.right - 1,
+    );
+    // Le bouton « persos » est à côté de la seed, sur la même rangée, sans la recouvrir.
+    expect(
+      overlaps(layout.galleryButton, layout.seed),
+      'le bouton persos ne recouvre pas la seed',
+    ).toBe(false);
+    expect(
+      Math.abs(layout.galleryButton.top - layout.seed.top),
+      'le bouton persos est sur la rangée de la seed',
+    ).toBeLessThanOrEqual(6);
     if (layout.subtitle !== null) {
       expect(layout.subtitle.left, 'le speaker ne recouvre pas la piste').toBeGreaterThanOrEqual(
         layout.canvas.right - 1,
@@ -281,9 +305,11 @@ for (const viewport of VIEWPORTS) {
       layout.viewport.height - 2,
     );
 
-    // 7) Commandes tactiles, dans la colonne, sur deux rangées (Lancer · Pause, puis Rejouer).
+    // 7) Commandes tactiles, dans la colonne, sur **une seule rangée** (Lancer · Pause · Rejouer), et
+    // la bande réservée sous elles ne garde pas la place d'une barre de relecture absente.
     for (const button of layout.buttons) {
-      expect(button.box.height, `${button.id} est tactile`).toBeGreaterThanOrEqual(36);
+      expect(button.box.height, `${button.id} est tactile`).toBeGreaterThanOrEqual(34);
+      expect(button.box.height, `${button.id} reste compact`).toBeLessThanOrEqual(40);
       expect(button.box.width, `${button.id} est tactile`).toBeGreaterThanOrEqual(60);
       expect(button.box.left, `${button.id} est dans la colonne`).toBeGreaterThanOrEqual(
         layout.canvas.right - 1,
@@ -293,10 +319,24 @@ for (const viewport of VIEWPORTS) {
       );
     }
     const [start, pause, replay] = layout.buttons;
-    expect(start?.box.top ?? 0).toBeCloseTo(pause?.box.top ?? 0, 0);
-    expect(replay?.box.top ?? 0, '« Rejouer » est sur sa propre rangée').toBeGreaterThanOrEqual(
-      (start?.box.bottom ?? 0) - 1,
+    expect(start?.box.top ?? 0, '« Lancer » et « Pause » sont sur la même rangée').toBeCloseTo(
+      pause?.box.top ?? 0,
+      0,
     );
+    expect(replay?.box.top ?? 0, '« Rejouer » est sur la même rangée').toBeCloseTo(
+      start?.box.top ?? 0,
+      0,
+    );
+    expect(start?.box.left ?? 0, '« Lancer » est à gauche').toBeLessThan(pause?.box.left ?? 0);
+    expect(pause?.box.left ?? 0, '« Rejouer » est à droite').toBeLessThan(replay?.box.left ?? 0);
+    expect(
+      layout.controls.height,
+      'la bande des commandes se limite aux boutons quand la relecture est masquée',
+    ).toBeLessThanOrEqual(48);
+    expect(
+      overlaps(layout.controls, layout.seed),
+      'les commandes ne recouvrent pas la seed',
+    ).toBe(false);
 
     // 8) Les personnages sont plus grands qu'au format de bureau, et les six voies restent séparées.
     const scale = layout.canvas.width / layout.logicalArenaWidth;
@@ -333,18 +373,71 @@ for (const viewport of VIEWPORTS) {
 }
 
 /**
- * La barre de relecture (pause manuelle) tient dans la colonne.
+ * La barre de relecture (pause manuelle) prend sa place dans la colonne.
  *
- * Elle apparaît sous les trois boutons, donc **dans** la colonne de droite : elle ne doit ni sortir de
- * l'écran, ni recouvrir la seed, ni pousser les commandes hors du bas. Le contrôle est fait pendant
- * une vraie pause, et le pas reculé est relu sur le hook du rendu — la barre ne peut pas mentir sur
- * l'instant qu'elle consulte.
+ * Elle apparaît **sous** la rangée des trois boutons, donc dans la colonne de droite : elle ne doit
+ * ni sortir de l'écran, ni recouvrir la seed, le speaker ou les boutons, ni pousser les commandes
+ * hors du bas. La place qu'elle occupe est réservée pendant qu'elle est là (`:has`), ce que le test
+ * vérifie en comparant la hauteur réservée à celle de la barre. Le pas reculé, lui, est relu sur le
+ * hook du rendu — la barre ne peut pas mentir sur l'instant qu'elle consulte.
  */
-test('la barre de relecture tient dans la colonne de droite en 844×390', async ({ page }) => {
+test('la barre de relecture prend sa place dans la colonne en 844×390', async ({ page }) => {
   const watch = watchConsole(page);
   await page.setViewportSize({ width: 844, height: 390 });
   await page.goto(raceUrl({ seed: SEED, fast: true, autostart: false }));
   await waitForHooks(page);
+
+  /** Mesure la bande des commandes, la barre et ses voisins immédiats. */
+  const readCommands = async (): Promise<{
+    readonly controls: Box;
+    readonly bar: Box | null;
+    readonly seed: Box;
+    readonly speaker: Box;
+    readonly buttons: readonly Box[];
+    readonly reserved: string;
+  }> =>
+    page.evaluate(() => {
+      const box = (selector: string): Box | null => {
+        const element = document.querySelector(selector);
+        if (element === null) {
+          return null;
+        }
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
+      };
+      const required = (selector: string): Box => {
+        const found = box(selector);
+        if (found === null) {
+          throw new Error(`élément absent : ${selector}`);
+        }
+        return found;
+      };
+      return {
+        controls: required('.controls'),
+        bar: box('[data-testid="replay-bar"]'),
+        seed: required('[data-testid="hud-seed"]'),
+        speaker: required('[data-testid="subtitle"]'),
+        buttons: ['start-button', 'pause-button', 'replay-button'].map((id) =>
+          required(`[data-testid="${id}"]`),
+        ),
+        reserved: getComputedStyle(document.documentElement).getPropertyValue(
+          '--hud-mobile-controls',
+        ),
+      };
+    });
+
+  // Avant la pause : aucune barre, et la bande des commandes se limite à la rangée de boutons (pas de
+  // place laissée vide pour une barre absente).
+  const idle = await readCommands();
+  expect(idle.bar?.height ?? 0, 'la barre est masquée hors pause').toBe(0);
+  expect(idle.controls.height, 'aucune bande vide pour la barre absente').toBeLessThanOrEqual(48);
 
   await page.evaluate(() => {
     const api = window.__CHAOS_RACE__;
@@ -366,56 +459,46 @@ test('la barre de relecture tient dans la colonne de droite en 844×390', async 
     .toBe('userPaused');
   await expect(page.getByTestId('replay-bar')).toBeVisible();
 
-  const measured = await page.evaluate(() => {
-    const box = (selector: string): Box => {
-      const element = document.querySelector(selector);
-      if (element === null) {
-        throw new Error(`élément absent : ${selector}`);
-      }
-      const rect = element.getBoundingClientRect();
-      return {
-        left: rect.left,
-        right: rect.right,
-        top: rect.top,
-        bottom: rect.bottom,
-        width: rect.width,
-        height: rect.height,
-      };
-    };
-    return {
-      viewport: { width: window.innerWidth, height: window.innerHeight },
-      canvas: box('#game canvas'),
-      bar: box('[data-testid="replay-bar"]'),
-      controls: box('.controls'),
-      seed: box('[data-testid="hud-seed"]'),
-      speaker: box('[data-testid="subtitle"]'),
-      viewedStep: window.__CHAOS_RACE_VIEW__?.replay()?.viewedStep ?? -1,
-      hudPaddingBottom:
-        document.querySelector('.hud') === null
-          ? ''
-          : getComputedStyle(document.querySelector('.hud') as HTMLElement).paddingBottom,
-      reserved: getComputedStyle(document.documentElement).getPropertyValue('--hud-mobile-controls'),
-    };
-  });
+  const paused = await readCommands();
+  const bar = paused.bar;
+  expect(bar, 'la barre est affichée pendant la pause').not.toBeNull();
+  if (bar === null) {
+    throw new Error('barre absente pendant la pause');
+  }
 
   // La barre est dans la colonne : à droite de la piste, et entièrement dans l'écran.
-  expect(measured.bar.left, 'la barre est dans la colonne').toBeGreaterThanOrEqual(
-    measured.canvas.right - 1,
+  expect(paused.controls.bottom, 'les commandes restent dans l’écran').toBeLessThanOrEqual(
+    390 + 1,
   );
-  expect(measured.bar.right).toBeLessThanOrEqual(measured.viewport.width + 1);
-  expect(measured.controls.bottom, 'les commandes restent dans l’écran').toBeLessThanOrEqual(
-    measured.viewport.height + 1,
+  expect(bar.left).toBeGreaterThanOrEqual(0);
+  expect(bar.right).toBeLessThanOrEqual(844 + 1);
+  expect(bar.height, 'la barre a sa vraie hauteur').toBeGreaterThanOrEqual(20);
+
+  // Elle ne recouvre **rien** : ni les boutons (elle est en dessous), ni la seed, ni le speaker.
+  for (const [name, neighbour] of [
+    ['la seed', paused.seed],
+    ['le speaker', paused.speaker],
+  ] as const) {
+    expect(
+      overlaps(paused.controls, neighbour),
+      `les commandes ne recouvrent pas ${name} (réserve ${paused.reserved})`,
+    ).toBe(false);
+  }
+  expect(overlaps(bar, paused.seed), 'la barre ne recouvre pas la seed').toBe(false);
+  expect(overlaps(bar, paused.speaker), 'la barre ne recouvre pas le speaker').toBe(false);
+  for (const [index, button] of paused.buttons.entries()) {
+    expect(overlaps(bar, button), `la barre ne recouvre pas le bouton ${String(index)}`).toBe(false);
+    expect(bar.top, 'la barre est sous les boutons').toBeGreaterThanOrEqual(button.bottom - 1);
+  }
+  // La place réservée a grandi pour elle : la barre passe de la rangée de boutons à la colonne.
+  expect(paused.controls.height, 'la bande des commandes accueille la barre').toBeGreaterThan(
+    idle.controls.height,
   );
-  expect(
-    overlaps(measured.controls, measured.seed),
-    `la seed reste visible sous la pause (contrôles ${measured.controls.top.toFixed(1)}→${measured.controls.bottom.toFixed(1)}, seed ${measured.seed.top.toFixed(1)}→${measured.seed.bottom.toFixed(1)}, réserve ${measured.hudPaddingBottom}, barre ${measured.bar.height.toFixed(1)})`,
-  ).toBe(false);
-  expect(
-    overlaps(measured.controls, measured.speaker),
-    'le speaker n’est pas recouvert par les commandes',
-  ).toBe(false);
 
   // La barre est utilisable : « −2 s » recule réellement le curseur, et la course reste gelée.
+  const before = await page.evaluate(
+    () => window.__CHAOS_RACE_VIEW__?.replay()?.viewedStep ?? -1,
+  );
   await page.getByTestId('replay-back').click();
   const afterBack = await page.evaluate(() => ({
     viewedStep: window.__CHAOS_RACE_VIEW__?.replay()?.viewedStep ?? -1,
@@ -424,8 +507,116 @@ test('la barre de relecture tient dans la colonne de droite en 844×390', async 
   }));
   expect(afterBack.phase).toBe('userPaused');
   expect(afterBack.viewedStep).toBe(
-    Math.max(0, Math.min(measured.viewedStep, afterBack.pauseStep) - REPLAY_STEP_STEPS),
+    Math.max(0, Math.min(before, afterBack.pauseStep) - REPLAY_STEP_STEPS),
   );
+
+  // Après la reprise, la barre disparaît et la place réservée redescend : rien ne reste vide.
+  await page.getByTestId('pause-button').click();
+  await expect
+    .poll(async () => page.evaluate(() => window.__CHAOS_RACE__?.phase() ?? ''))
+    .not.toBe('userPaused');
+  await expect(page.getByTestId('replay-bar')).toBeHidden();
+  const resumed = await readCommands();
+  expect(resumed.bar?.height ?? 0, 'la barre disparaît à la reprise').toBe(0);
+  expect(resumed.controls.height, 'la bande vide disparaît avec la barre').toBeLessThanOrEqual(48);
+
+  expectNoErrors(watch);
+});
+
+/**
+ * Bouton « persos » : il ouvre les six personnages en grand, et il ne touche à rien d'autre.
+ *
+ * Le panneau est une surcouche d'interface : les images sont celles du projet (les mêmes fichiers que
+ * le rendu), les noms sont ceux du roster, et la course continue derrière — le test vérifie donc aussi
+ * que la piste, la colonne et le noyau sont dans le même état avant et après.
+ */
+test('le bouton persos ouvre les six personnages en grand en 844×390', async ({ page }) => {
+  const watch = watchConsole(page);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.goto(raceUrl({ seed: SEED, fast: true, autostart: false }));
+  await waitForHooks(page);
+
+  await page.evaluate(() => {
+    window.__CHAOS_RACE__?.start();
+  });
+  await expect(page.getByTestId('gallery-button')).toBeVisible();
+  await expect(page.getByTestId('gallery')).toBeHidden();
+
+  const before = await page.evaluate(() => ({
+    arena: window.__CHAOS_RACE_VIEW__?.track().arenaWidth ?? -1,
+    steps: window.__CHAOS_RACE__?.state().steps ?? -1,
+    canvas: document.querySelector('#game canvas')?.getBoundingClientRect().width ?? -1,
+  }));
+
+  await page.getByTestId('gallery-button').click();
+  await expect(page.getByTestId('gallery')).toBeVisible();
+
+  const panel = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('[data-testid="gallery-card"]'));
+    const overlay = document.querySelector('[data-testid="gallery"]');
+    const rect = overlay?.getBoundingClientRect();
+    return {
+      cards: cards.length,
+      names: cards.map((card) => card.querySelector('.gallery-name')?.textContent ?? ''),
+      images: cards.map((card) => {
+        const image = card.querySelector('img');
+        return image === null
+          ? { complete: false, width: 0, height: 0, src: '' }
+          : {
+              complete: image.complete && image.naturalWidth > 0,
+              width: image.getBoundingClientRect().width,
+              height: image.getBoundingClientRect().height,
+              src: image.getAttribute('src') ?? '',
+            };
+      }),
+      overlay: {
+        left: rect?.left ?? -1,
+        top: rect?.top ?? -1,
+        right: rect?.right ?? -1,
+        bottom: rect?.bottom ?? -1,
+      },
+    };
+  });
+
+  // Les six personnages, avec les noms du roster et les images du projet.
+  expect(panel.cards, 'six personnages').toBe(CHARACTER_IDS.length);
+  expect(
+    panel.names,
+    'les noms affichés sont exactement ceux du roster, dans l’ordre',
+  ).toStrictEqual(CHARACTERS.map((character) => character.name));
+  for (const image of panel.images) {
+    expect(image.complete, `image chargée : ${image.src}`).toBe(true);
+    expect(image.src, 'les images sont celles du projet').toContain('assets/characters/');
+    expect(image.width, 'l’image est affichée en grand').toBeGreaterThan(40);
+    expect(image.height, 'l’image est affichée en grand').toBeGreaterThan(40);
+  }
+  // Le panneau couvre l'écran sans sortir de l'écran.
+  expect(panel.overlay.left).toBeLessThanOrEqual(1);
+  expect(panel.overlay.top).toBeLessThanOrEqual(1);
+  expect(panel.overlay.right).toBeGreaterThanOrEqual(843);
+  expect(panel.overlay.bottom).toBeGreaterThanOrEqual(389);
+
+  // Fermeture par le bouton, puis par le fond, puis par `Échap`.
+  await page.getByTestId('gallery-close').click();
+  await expect(page.getByTestId('gallery')).toBeHidden();
+  await page.getByTestId('gallery-button').click();
+  await expect(page.getByTestId('gallery')).toBeVisible();
+  await page.mouse.click(8, 195);
+  await expect(page.getByTestId('gallery')).toBeHidden();
+  await page.getByTestId('gallery-button').click();
+  await expect(page.getByTestId('gallery')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('gallery')).toBeHidden();
+
+  // Le panneau n'a rien changé : même piste, même canvas, et le noyau n'a jamais reculé.
+  const after = await page.evaluate(() => ({
+    arena: window.__CHAOS_RACE_VIEW__?.track().arenaWidth ?? -1,
+    steps: window.__CHAOS_RACE__?.state().steps ?? -1,
+    canvas: document.querySelector('#game canvas')?.getBoundingClientRect().width ?? -1,
+  }));
+  expect(after.arena).toBe(before.arena);
+  expect(after.canvas).toBe(before.canvas);
+  expect(after.steps).toBeGreaterThanOrEqual(before.steps - 1);
 
   expectNoErrors(watch);
 });

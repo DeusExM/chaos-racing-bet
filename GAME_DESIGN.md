@@ -292,8 +292,9 @@ La disposition compacte est donc devenue, pour la même course :
 * **aucune marge extérieure** : l'arène occupe l'écran entier et la piste commence au bord gauche ;
 * **une seule zone réservée**, la colonne de droite (`--hud-mobile-column`, 32 % de la largeur), qui
   porte de haut en bas : la **ligne d'état** (état · segment · chrono · son · commentateur, sur une
-  seule ligne), le badge de checkpoint, le **classement**, l'écran d'arrivée, le **speaker**, la seed,
-  puis les **commandes** (`Lancer` · `Pause`, puis `Rejouer`) ;
+  seule ligne), le badge de checkpoint, le **classement**, l'écran d'arrivée, le **speaker**, la seed
+  (avec un bouton **`Persos`** à sa droite), puis les **commandes** (`Lancer` · `Pause` · `Rejouer`
+  sur **une seule rangée**, ~35 px de haut chacune) ;
 * **la piste n'a plus aucun HUD textuel superposé** : les badges d'événement restent la seule
   surimpression, et ils sont attachés aux personnages ;
 * **les personnages grandissent** : la hauteur récupérée revient aux voies, qui s'étendent
@@ -301,6 +302,16 @@ La disposition compacte est donc devenue, pour la même course :
   `CHARACTER_HEIGHT_PX = 73` à `CHARACTER_HEIGHT_COMPACT_PX = 84` px logiques (nom compris, police
   `CHARACTER_NAME_FONT_COMPACT_PX = 20`) — la plus grande valeur qui laisse le nom de la première voie
   entier et une séparation nette entre voisines.
+
+Deux précisions issues de la micro-correction suivante. La **seed n'est affichée qu'une fois** : son
+ancien doublon déclaré dans `index.html` a été supprimé, le HUD (dans la colonne) en est le seul
+porteur, sur tous les formats. Et **aucune place n'est réservée à une barre de relecture absente** : la
+hauteur de la barre n'est ajoutée à la colonne que pendant une pause manuelle (`:has`), et le reste du
+temps l'espace libre de la colonne se trouve juste au-dessus des commandes — c'est précisément la place
+que la barre occupe quand on met Pause. Le bouton **`Persos`** ouvre enfin un panneau qui montre les six
+personnages **en grand**, avec leur nom, en réutilisant les images déjà servies au rendu : c'est une
+surcouche d'interface pure, sans aucun effet sur la course (elle ne connaît ni la simulation, ni le
+speaker, ni la relecture).
 
 Techniquement, la piste n'a plus le rapport 16:9 de l'arène de bureau : la **largeur logique du canvas**
 est donc déduite du rapport réel de la piste (`viewport.arenaBaseSize`), pour que le canvas et la

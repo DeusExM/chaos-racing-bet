@@ -451,6 +451,37 @@ body {
 }
 
 /*
+ * Bouton « persos » (micro-correction responsive) : déclaré par `index.html`, il vit dans la rangée de
+ * la seed et n'apparaît qu'en petit paysage (voir la requête média). Sur les autres formats il est en
+ * `display: none` : il n'occupe donc aucune cellule de la grille du HUD et la mise en page de bureau
+ * reste identique.
+ */
+.hud-seed-gallery {
+  display: none;
+  align-items: center;
+  /* Le HUD ne capture aucun clic (`pointer-events: none`) : ce bouton, lui, doit le recevoir. */
+  pointer-events: auto;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #16203c;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.hud-seed-gallery:hover,
+.hud-seed-gallery:focus-visible {
+  border-color: var(--accent);
+}
+
+.hud-seed-gallery:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/*
  * Bandeau de commentaire (P012, transformé en **sous-titre sportif** par la passe corrective).
  *
  * Le premier test joueur a jugé que le bloc précédent masquait l'action : il occupait une boîte
@@ -856,6 +887,117 @@ body {
 
 /*
  * ============================================================================================
+ * Panneau « persos » (micro-correction responsive)
+ * ============================================================================================
+ *
+ * Il montre les six personnages en grand, par-dessus le jeu. C'est une **surcouche d'interface** :
+ * elle est en `position: fixed` et masquée (`hidden`), donc elle ne participe à aucune grille et ne
+ * peut pas déplacer un bloc — ni en petit paysage, ni sur bureau. Les images prennent la hauteur
+ * disponible (`object-fit: contain`) : un écran court réduit donc les visuels au lieu de déborder.
+ *
+ * Le bouton qui l'ouvre est masqué hors petit paysage (`.hud-seed-gallery`, plus bas dans la requête
+ * média) : sur bureau, ni le bouton ni le panneau ne sont visibles, et la mise en page est inchangée.
+ */
+.gallery {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 0.5rem;
+  background: #05070fd9;
+}
+
+.gallery[hidden] {
+  display: none;
+}
+
+.gallery-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: min(46rem, 100%);
+  height: min(24rem, 100%);
+  padding: 0.5rem 0.6rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.gallery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.gallery-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.gallery-close {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #16203c;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.gallery-close:hover,
+.gallery-close:focus-visible {
+  border-color: var(--accent);
+}
+
+.gallery-grid {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gallery-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 0;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #101627;
+}
+
+.gallery-image {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.gallery-name {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--text);
+  font-size: 0.7rem;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * ============================================================================================
  * Téléphone en paysage : la piste à gauche, le HUD dans une colonne à droite
  * ============================================================================================
  *
@@ -874,10 +1016,19 @@ body {
  *    gauche. Il n'y a donc plus de bande vide à gauche.
  * 3. **Une seule zone réservée : la colonne de droite**, large de `--hud-mobile-column`. Elle porte,
  *    de haut en bas : la ligne d'état, le badge de checkpoint, le classement, l'écran d'arrivée, le
- *    speaker, la seed, et tout en bas les commandes.
+ *    speaker, la seed (avec le bouton « persos » à sa droite), et tout en bas les commandes.
  * 4. **Le HUD supérieur tient sur une ligne** : état · segment · chrono · son · commentateur.
  * 5. **Les voies s'étendent** (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO` côté rendu) et
  *    les personnages grossissent : la hauteur récupérée leur revient.
+ *
+ * ## Micro-correction : commandes, espace libre, seed unique
+ *
+ * Les trois commandes tiennent sur **une seule rangée** (`Lancer` · `Pause` · `Rejouer`, ~35 px de
+ * haut), et la hauteur ainsi rendue est celle que la barre de relecture occupe pendant une pause : la
+ * place est **réservée quand la barre est là** (`:has` sur `#replay-bar`), rendue à la colonne quand
+ * elle n'y est pas. L'espace libre de la colonne est donc en bas, juste au-dessus des commandes — la
+ * place de la barre — et non plus entre le speaker et la seed. La seed, elle, n'est affichée qu'**une
+ * fois** : son ancien doublon déclaré dans `index.html` a été supprimé, le HUD est son seul porteur.
  *
  * ## Pourquoi la colonne 1 de la grille est exactement la piste
  *
@@ -904,10 +1055,12 @@ body {
      */
     --hud-mobile-column: clamp(11rem, 32%, 18rem);
     /*
-     * Hauteur réservée aux commandes au bas de la colonne : deux rangées de boutons tactiles
-     * (Lancer · Pause, puis Rejouer), plus la barre de relecture quand une pause manuelle l'affiche.
+     * Hauteur réservée aux commandes, au bas de la colonne : une seule rangée de trois boutons
+     * (`Lancer` · `Pause` · `Rejouer`). La barre de relecture n'occupe cette place que pendant une
+     * pause manuelle — sa hauteur est alors réservée (`:has`, plus bas) au lieu de rester vide le
+     * reste du temps.
      */
-    --hud-mobile-controls: 5.8rem;
+    --hud-mobile-controls: 2.6rem;
   }
 
   .shell {
@@ -948,7 +1101,7 @@ body {
   /* 3) La grille du HUD : colonne 1 = la piste (vide), colonne 2 = la colonne du HUD. */
   .hud {
     grid-template-columns: minmax(0, 1fr) var(--hud-mobile-column);
-    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr);
     column-gap: 0;
     row-gap: 0.15rem;
     align-items: start;
@@ -1122,7 +1275,7 @@ body {
     padding: 0.02rem 0.3rem;
   }
 
-  /* 9) Seed : discrète, au bas de la colonne, au-dessus des commandes. */
+  /* 9) Seed : discrète, sous le speaker, avec le bouton « persos » à sa droite. */
   .hud-seed {
     grid-column: 2;
     grid-row: 6;
@@ -1134,8 +1287,23 @@ body {
   }
 
   /*
-   * 10) Commandes : au bas de la colonne, sur deux rangées (Lancer · Pause, puis Rejouer). Elles ne
-   * prennent plus aucune place au-dessus ni au-dessous de la piste.
+   * Le bouton « persos » partage la rangée de la seed : seed à gauche, bouton à droite. Les deux
+   * occupent la même cellule de grille sans se recouvrir (`justify-self` opposés).
+   */
+  .hud-seed-gallery {
+    display: inline-flex;
+    grid-column: 2;
+    grid-row: 6;
+    justify-self: end;
+    align-self: end;
+    min-height: 1.4rem;
+    font-size: 0.55rem;
+  }
+
+  /*
+   * 10) Commandes : au bas de la colonne, sur **une seule rangée** (`Lancer` · `Pause` · `Rejouer`).
+   * Elles ne prennent aucune place au-dessus ni au-dessous de la piste, et la hauteur rendue par la
+   * rangée unique revient à la barre de relecture (voir `:has`, plus bas).
    */
   .controls {
     grid-column: 2;
@@ -1143,28 +1311,25 @@ body {
     z-index: 3;
     align-self: end;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.25rem;
-    padding: 0 0.25rem calc(0.25rem + env(safe-area-inset-bottom, 0px)) 0.25rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.2rem;
+    padding: 0 0.25rem calc(0.2rem + env(safe-area-inset-bottom, 0px)) 0.25rem;
     background: #05070fcc;
     border-top: 1px solid var(--border);
   }
 
   /*
-   * Les trois commandes de course occupent toute la largeur de la colonne. Le sélecteur vise les
+   * Les trois commandes de course se partagent la largeur de la colonne. Le sélecteur vise les
    * **enfants directs** : les boutons de la barre de relecture sont eux aussi des `button` de
    * `.controls`, et ils doivent garder leur largeur naturelle (sinon ils passent à la ligne).
+   * `2.2rem` ≈ 35 px : au-dessus du minimum tactile de 34 px, sans manger la hauteur de la colonne.
    */
   .controls > button {
     width: 100%;
     min-width: 0;
-    min-height: 2.6rem;
-    padding: 0.35rem 0.4rem;
-    font-size: 0.78rem;
-  }
-
-  .controls #replay-button {
-    grid-column: 1 / -1;
+    min-height: 2.2rem;
+    padding: 0.2rem 0.25rem;
+    font-size: 0.72rem;
   }
 
   /*
@@ -1209,11 +1374,12 @@ body {
 
   /*
    * La barre de relecture n'existe que pendant une pause manuelle : tant qu'elle est affichée, sa
-   * hauteur est réservée dans la colonne (`:has`), sinon les commandes recouvriraient la seed. Hors
-   * pause, la place reste rendue au speaker.
+   * hauteur réelle est réservée dans la colonne (`:has`), sinon les commandes recouvriraient la seed.
+   * Hors pause, la place est rendue à la colonne : aucune bande vide n'est laissée pour une barre qui
+   * n'est pas là.
    */
   .shell:has(#replay-bar:not([hidden])) {
-    --hud-mobile-controls: 7.8rem;
+    --hud-mobile-controls: 4.6rem;
   }
 
   /*

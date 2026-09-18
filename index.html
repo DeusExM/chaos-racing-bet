@@ -5,9 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="Course humoristique à 6 personnages, 100 % locale et reproductible par seed." />
     <title>Chaos Race</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
+    <!--
+      Écran de rotation (correction iPhone ciblée) : sur un téléphone tenu droit, la course n'est pas
+      affichée — cet écran plein la remplace, et le noyau ne reçoit alors aucun pas. Sa visibilité
+      vient d'une **seule** règle (`render/viewportWatch.ts` pose `data-rotation-gate` sur `<html>`),
+      et son texte est écrit par `app/` depuis `strings.fr.ts`, comme les autres libellés.
+    -->
+    <section class="rotation-gate" data-testid="rotation-gate" role="status">
+      <svg class="rotation-gate-icon" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <rect x="8" y="26" width="48" height="26" rx="5" />
+        <line x1="26" y1="47" x2="38" y2="47" />
+        <path d="M18 18a16 16 0 0 1 28 0" />
+        <polygon points="18,18 13,9 23,10" />
+      </svg>
+      <p class="rotation-gate-title" data-testid="rotation-gate-title"></p>
+      <p class="rotation-gate-hint" data-testid="rotation-gate-hint"></p>
+    </section>
     <main class="shell">
       <header class="head">
         <h1 class="title">Chaos Race</h1>

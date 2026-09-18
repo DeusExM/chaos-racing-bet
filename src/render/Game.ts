@@ -30,6 +30,25 @@ export interface GameOptions {
   readonly commentary: CommentaryView | null;
   /** Actions de l'écran d'arrivée (P013), fournies par `app/` : seed, URL et redémarrage. */
   readonly finishActions: FinishActions;
+  /**
+   * Vrai quand la course peut avancer.
+   *
+   * `app/` la rend fausse quand l'écran de rotation recouvre tout (téléphone tenu droit) : le noyau ne
+   * reçoit alors **aucun** pas, exactement comme pendant une pause, et la course ne peut donc pas se
+   * jouer derrière l'écran. Le rendu ne fait que **lire** cette permission.
+   */
+  readonly allowsGameplay: () => boolean;
+}
+
+/**
+ * Poignée rendue par `createGame` : de quoi réappliquer le cadrage sans recréer le jeu.
+ *
+ * C'est `app/` qui décide **quand** (`viewportWatch` annonce une taille stabilisée) ; le rendu décide
+ * **comment**. Aucun module n'écoute donc la fenêtre pour son propre compte.
+ */
+export interface GameHandle {
+  /** Réapplique la taille logique de l'arène d'après la boîte réellement occupée par la piste. */
+  refreshScale(): void;
 }
 
 /**
@@ -49,8 +68,15 @@ export interface GameOptions {
  * posés en pourcentage de la piste, seraient décalés. La taille est réajustée au redimensionnement
  * (rotation du téléphone, barre d'URL qui se replie), sans jamais toucher à la simulation : seuls le
  * cadrage et la taille des sprites changent.
+ *
+ * ## Qui décide du moment
+ *
+ * Pas ce module : Phaser écoute la fenêtre pour son propre compte, et sur iOS cette écoute arrive
+ * pendant la rotation, quand la taille annoncée n'est pas encore la bonne. `app/` attend donc une
+ * taille **stabilisée** (`viewportWatch`) puis appelle `refreshScale()` — c'est la seule différence
+ * avec l'ancien `addEventListener('resize')` local, qui recadrait sur la première valeur venue.
  */
-export function createGame(options: GameOptions): void {
+export function createGame(options: GameOptions): GameHandle {
   const raceScene = new RaceScene({
     simulation: options.simulation,
     text: options.text,
@@ -66,6 +92,7 @@ export function createGame(options: GameOptions): void {
     exposeView: options.exposeView,
     commentary: options.commentary,
     finishActions: options.finishActions,
+    allowsGameplay: options.allowsGameplay,
   });
 
   const base = arenaBaseSizeFor(options.parent);
@@ -85,18 +112,61 @@ export function createGame(options: GameOptions): void {
   });
 
   // Le canvas suit la boîte de la piste tant qu'elle change : la mise en page CSS décide, le rendu
-  // s'aligne. `setGameSize` est l'API prévue pour `Scale.FIT` (elle change la taille **de base**,
-  // pas la taille du canvas), et la scène relit `scale.width/height` à la frame suivante.
-  window.addEventListener('resize', () => {
-    const next = arenaBaseSizeFor(options.parent);
+  // s'aligne. `setGameSize` est l'API prévue pour `Scale.FIT` (elle change la taille **de base**, pas
+  // la taille du canvas), et la scène relit `scale.width/height` à la frame suivante.
+  //
+  // ## Pourquoi la taille logique est calculée sur une boîte **arrondie vers le bas**
+  //
+  // En mode `FIT`, Phaser déduit la taille d'affichage du canvas de la taille du parent et du **rapport
+  // de la taille logique**, avec des arrondis internes (`Math.floor`). Une taille logique calculée sur
+  // une largeur fractionnaire — le moteur de rendu en produit (573,921875 px pour la colonne du HUD à
+  // 844 × 390) — donnait donc un canvas d'un pixel plus petit que sa boîte, et **pas toujours le même**
+  // selon l'instant de la mesure : c'est ce qui faisait différer le cadrage d'un lancement direct de
+  // celui d'un retour de rotation, pour le même écran. En arrondissant la boîte **vers le bas**, dans
+  // le même sens que Phaser, la taille logique devient déterministe — et tout ce qui en découle aussi.
+  //
+  // La boîte arrondie sert **uniquement** à choisir la taille logique : elle n'est jamais imposée à
+  // Phaser (`setParentSize`), car un rapport d'aspect légèrement plus étroit que celui de l'arène
+  // ferait rétrécir la hauteur du canvas d'un pixel — un défaut pire que celui qu'on corrige.
+  //
+  // ## Pourquoi `refresh` est rappelé **après** `setGameSize`
+  //
+  // `ScaleManager.refresh` fait deux choses dans cet ordre : il recalcule la taille d'affichage à
+  // partir de la taille de parent **mémorisée**, puis il relit la boîte réelle. Le `refresh` déclenché
+  // par `setGameSize` travaille donc sur une taille de parent périmée — celle mesurée avant la
+  // rotation — et laisse un canvas d'un pixel de travers, que rien ne venait ensuite corriger. Le
+  // `refresh` explicite qui suit relit la boîte à jour : le cadrage d'un retour de rotation devient
+  // alors identique, au pixel près, à celui d'un lancement direct.
+  const applyScale = (): { readonly width: number; readonly height: number } => {
+    const box = options.parent.getBoundingClientRect();
+    const width = Math.floor(box.width);
+    const height = Math.floor(box.height);
+    const next = arenaBaseSize(width, height, isCompactViewport());
     if (next.width !== game.scale.width || next.height !== game.scale.height) {
       game.scale.setGameSize(next.width, next.height);
     }
-  });
+    game.scale.refresh();
+    return { width, height };
+  };
+
+  return {
+    refreshScale: () => {
+      const applied = applyScale();
+      // **Une seule** vérification, à la frame suivante : après une rotation, la mesure peut avoir été
+      // prise juste avant que la feuille de style ne se stabilise, et la boîte gagne alors le pixel qui
+      // manquait. C'est le repli borné de cette passe : on recalcule une fois, on ne recharge jamais.
+      window.requestAnimationFrame(() => {
+        const box = options.parent.getBoundingClientRect();
+        if (Math.floor(box.width) !== applied.width || Math.floor(box.height) !== applied.height) {
+          applyScale();
+        }
+      });
+    },
+  };
 }
 
 /** Taille logique de l'arène d'après la boîte réellement occupée par la piste. */
 function arenaBaseSizeFor(parent: HTMLElement): ArenaSize {
   const box = parent.getBoundingClientRect();
-  return arenaBaseSize(box.width, box.height, isCompactViewport());
+  return arenaBaseSize(Math.floor(box.width), Math.floor(box.height), isCompactViewport());
 }

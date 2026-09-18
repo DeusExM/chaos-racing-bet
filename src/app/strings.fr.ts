@@ -122,6 +122,12 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   galleryButton: 'Persos',
   galleryTitle: 'Les personnages',
   galleryClose: 'Fermer',
+
+  // Écran de rotation (correction iPhone ciblée) : sur un téléphone tenu droit, la course n'est pas
+  // affichée du tout — cet écran plein la remplace, et aucun pas n'est exécuté pendant ce temps. La
+  // phrase est celle demandée mot pour mot ; la seconde ligne dit seulement ce qui va se passer.
+  rotationGateTitle: 'Tourne ton iPhone en paysage pour jouer',
+  rotationGateHint: 'La course reprend là où elle en est.',
 });
 
 // -------------------------------------------------------------------------------------------

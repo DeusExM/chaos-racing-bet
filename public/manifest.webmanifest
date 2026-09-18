@@ -1,0 +1,12 @@
+{
+  "name": "Chaos Race",
+  "short_name": "Chaos Race",
+  "description": "Course humoristique à 6 personnages, 100 % locale et reproductible par seed.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0b0f1e",
+  "theme_color": "#0b0f1e"
+}

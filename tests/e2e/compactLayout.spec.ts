@@ -429,10 +429,14 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
     readonly controls: Box;
     readonly bar: Box | null;
     readonly range: Box | null;
+    readonly readout: Box | null;
+    readonly back: Box | null;
+    readonly forward: Box | null;
     readonly seed: Box;
     readonly speaker: Box;
     readonly buttons: readonly Box[];
     readonly reserved: string;
+    readonly hudPaddingBottom: string;
   }> =>
     page.evaluate(() => {
       const box = (selector: string): Box | null => {
@@ -457,10 +461,14 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
         }
         return found;
       };
+      const hud = document.querySelector('.hud');
       return {
         controls: required('.controls'),
         bar: box('[data-testid="replay-bar"]'),
         range: box('[data-testid="replay-range"]'),
+        readout: box('[data-testid="replay-readout"]'),
+        back: box('[data-testid="replay-back"]'),
+        forward: box('[data-testid="replay-forward"]'),
         seed: required('[data-testid="hud-seed"]'),
         speaker: required('[data-testid="subtitle"]'),
         buttons: ['start-button', 'pause-button', 'replay-button'].map((id) =>
@@ -469,6 +477,9 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
         reserved: getComputedStyle(document.documentElement).getPropertyValue(
           '--hud-mobile-controls',
         ),
+        // La bande réellement réservée dans la colonne : c'est le rembourrage bas du HUD, qui doit
+        // couvrir toute la hauteur des commandes pour qu'aucun bloc ne passe dessous.
+        hudPaddingBottom: hud === null ? '' : getComputedStyle(hud).paddingBottom,
       };
     });
 
@@ -541,9 +552,9 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
 
   /*
    * La timeline est **réellement attrapable au doigt** : c'est la correction demandée après le test
-   * sur un vrai iPhone, où le curseur natif était trop bas et trop fin. Trois mesures le prouvent :
-   * une zone tactile d'au moins 28 px de haut, une barre remontée du bord bas de l'écran, et une
-   * rangée de boutons elle aussi remontée.
+   * sur un vrai iPhone, où le curseur natif était trop bas et trop fin. Quatre mesures le prouvent :
+   * une zone tactile d'au moins 28 px de haut, une largeur qui laisse glisser le doigt, une barre
+   * remontée du bord bas de l'écran, et une rangée de boutons elle aussi remontée.
    */
   const range = paused.range;
   expect(range, 'la timeline existe pendant la pause').not.toBeNull();
@@ -566,6 +577,64 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
     buttonsBottomMargin,
     `la rangée de boutons est remontée au-dessus de la timeline (marge ${buttonsBottomMargin.toFixed(1)} px)`,
   ).toBeGreaterThanOrEqual(38);
+
+  /*
+   * Correction iPhone ciblée : la zone de relecture était **encore trop basse**, et le curseur trop
+   * court pour être visé au doigt. La bande des commandes lui réserve maintenant une vraie hauteur,
+   * le curseur occupe **toute la largeur** de la colonne sur sa propre ligne, et le bloc entier est
+   * remonté du bord physique — celui où Safari capte les gestes du bas de l'écran.
+   */
+  expect(
+    range.width,
+    `le curseur occupe la largeur de la colonne (${range.width.toFixed(1)} px)`,
+  ).toBeGreaterThanOrEqual(200);
+  const barBottomMargin = 390 - bar.bottom;
+  expect(
+    barBottomMargin,
+    `la zone de relecture est remontée du bord bas (marge ${barBottomMargin.toFixed(1)} px)`,
+  ).toBeGreaterThanOrEqual(16);
+  expect(
+    rangeBottomMargin,
+    `le curseur ne touche plus la bande système du bas (marge ${rangeBottomMargin.toFixed(1)} px)`,
+  ).toBeGreaterThanOrEqual(20);
+
+  // Ordre demandé : rangée `Lancer / Reprendre / Rejouer`, **puis** la timeline, puis les commandes
+  // fines de relecture — jamais l'inverse, et jamais sur la même ligne que les trois boutons.
+  const back = paused.back;
+  const forward = paused.forward;
+  expect(back, 'le bouton de recul existe pendant la pause').not.toBeNull();
+  expect(forward, 'le bouton d’avance existe pendant la pause').not.toBeNull();
+  if (back === null || forward === null) {
+    throw new Error('commandes de relecture absentes pendant la pause');
+  }
+  expect(range.top, 'la timeline est sous la rangée de boutons').toBeGreaterThanOrEqual(
+    Math.max(...paused.buttons.map((button) => button.bottom)) - 1,
+  );
+  for (const [name, step] of [
+    ['recul', back],
+    ['avance', forward],
+  ] as const) {
+    expect(step.top, `la commande de ${name} est sous la timeline`).toBeGreaterThanOrEqual(
+      range.bottom - 1,
+    );
+  }
+
+  /*
+   * La bande réservée est **réellement** réservée : le rembourrage bas du HUD couvre toute la hauteur
+   * des commandes. Sans cela, la seed ou le speaker pourraient passer sous la barre de relecture.
+   */
+  const hudPaddingBottom = Number.parseFloat(paused.hudPaddingBottom);
+  expect(Number.isFinite(hudPaddingBottom), `rembourrage du HUD lisible (${paused.hudPaddingBottom})`).toBe(
+    true,
+  );
+  expect(
+    hudPaddingBottom,
+    `la colonne réserve la hauteur des commandes (${String(hudPaddingBottom)} px)`,
+  ).toBeGreaterThanOrEqual(paused.controls.height);
+  expect(
+    paused.controls.height,
+    'la bande réservée accueille la timeline sur deux lignes',
+  ).toBeGreaterThanOrEqual(120);
 
   // La barre est utilisable : « −2 s » recule réellement le curseur, et la course reste gelée.
   const before = await page.evaluate(

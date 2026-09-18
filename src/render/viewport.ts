@@ -60,3 +60,37 @@ export function arenaBaseSize(
     height: VIEW.BASE_HEIGHT,
   };
 }
+
+/**
+ * Orientation d'une fenêtre, dans le sens où les requêtes média de `styles.css` l'entendent.
+ *
+ * Le carré est traité comme du **paysage** : c'est le cas où l'écran est le plus large possible sans
+ * être plus haut que large, donc celui où la piste a le plus de place. Aucun téléphone réel n'est
+ * carré, cette branche n'existe que pour rendre la fonction totale.
+ */
+export type ViewportOrientation = 'portrait' | 'landscape';
+
+/** Orientation déduite de la taille de **mise en page** (celle que lisent les requêtes média). */
+export function orientationOf(layoutWidth: number, layoutHeight: number): ViewportOrientation {
+  return layoutWidth < layoutHeight ? 'portrait' : 'landscape';
+}
+
+/**
+ * Vrai quand l'écran est un **téléphone tenu droit** : la course ne s'y joue pas.
+ *
+ * ## Pourquoi la largeur, et pas seulement l'orientation
+ *
+ * Une fenêtre de bureau étroite et haute est « en portrait » elle aussi. La bloquer serait une
+ * régression : le seuil de largeur reprend donc exactement celui du format « petit paysage »
+ * (`VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX`) — dans les deux cas, c'est le **côté court** de l'écran qui
+ * décide, et la constante est lue, jamais recopiée. Un téléphone tenu droit (390 × 844) est donc
+ * bloqué, une fenêtre de bureau haute (700 × 900) ne l'est pas.
+ *
+ * Fonction **pure** : elle ne lit ni `window` ni le DOM.
+ */
+export function isPortraitPhone(layoutWidth: number, layoutHeight: number): boolean {
+  return (
+    orientationOf(layoutWidth, layoutHeight) === 'portrait' &&
+    layoutWidth <= VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX
+  );
+}

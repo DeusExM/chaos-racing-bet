@@ -1232,6 +1232,53 @@ le panneau), et `Terminé` à l'arrivée.
 >    (34,04 % des courses) et **normale** : elle est la conséquence directe de l'avance acquise, pas
 >    d'un biais. Voir `GAME_DESIGN.md` §13.
 
+> **Note (correction iPhone ciblée : portrait, retour de rotation, bande de relecture).** Même nature
+> que les passes précédentes : ce n'est **pas** une étape, rien n'est renuméroté, et **aucune**
+> constante de simulation n'est touchée (`SPEED.*`, `DRIFT.*`, `SURGE.*`, `EVENT.*`, `OVERTAKE.*`,
+> `RACE_CONFIG`, `SIM_CONFIG` sont intacts) — aucun tirage aléatoire déplacé, aucun seuil
+> d'équilibrage modifié, corpus d'équilibrage non relancé. Cinq points, tous de **présentation** :
+>
+> 1. **Portrait : la course n'est pas affichée.** Sur téléphone tenu droit, un écran plein la remplace
+>    (*« Tourne ton iPhone en paysage pour jouer »*, avec une icône de rotation) et **aucun pas de
+>    noyau n'est exécuté** : `RaceScene` n'appelle pas `RaceSimulation.update()`, ce qui est le
+>    mécanisme de pause du projet — `tSim`, `x` et `v` restent gelés, la reprise ne rattrape rien, et
+>    la reproductibilité est intacte. `screen.orientation.lock()` n'est **pas** utilisé. Le prédicat
+>    (`render/viewport.ts#isPortraitPhone` : portrait **et** largeur de mise en page ≤ 560) n'existe
+>    qu'une fois, publié en `data-rotation-gate` sur `<html>` ; `styles.css` ne fait que le styler.
+>    Une fenêtre de bureau haute et étroite (700×900) n'est donc pas bloquée — vérifié par test.
+> 2. **Retour en paysage : une seule taille, stabilisée.** La surveillance de la fenêtre est
+>    **unique** (`render/viewportWatch.ts` + `render/viewportSettle.ts`, fonction pure testée hors
+>    navigateur) : `orientationchange`, `resize` et `visualViewport.resize` arment la même attente, la
+>    taille n'est publiée qu'après trois mesures identiques (≈ 50 ms), et la hauteur **réellement
+>    visible** est publiée en `--app-height` — `100vh` vaut la fenêtre *large* sur iOS, d'où une page
+>    plus haute que l'écran et un recadrage après rotation. Repli borné : au bout de 600 ms la
+>    dernière mesure est acceptée, et **aucun rechargement n'est jamais déclenché** — une course en
+>    cours ne peut pas être perdue. Côté Phaser, la taille logique est calculée sur une boîte
+>    **arrondie vers le bas** et `ScaleManager.refresh` est rappelé **après** `setGameSize` (dont le
+>    `refresh` interne travaille sur une taille de parent périmée) : c'est ce qui rend le cadrage
+>    d'un retour de rotation **identique au pixel** à celui d'un lancement direct.
+> 3. **Manifeste.** `public/manifest.webmanifest` déclare `"orientation": "landscape"` **uniquement**
+>    comme préférence d'affichage de la web app installée. Aucun service worker, aucun cache hors
+>    ligne : **P016 reste intacte**.
+> 4. **Bande de relecture.** En paysage de téléphone pendant la pause, la zone de relecture est
+>    remontée et sa bande verticale est réellement réservée (`--hud-mobile-controls = 8.5rem` pendant
+>    la pause, marge basse de `1.3rem` + zone protégée) : la rangée `Lancer` · `Pause` · `Rejouer`,
+>    **puis** la timeline sur toute la largeur de la colonne (≈ 250 px, 32 px de zone tactile), **puis**
+>    ≈ 24 px avant le bord physique — hors de la bande où Safari capte les gestes du bas. Hors pause,
+>    la hauteur des commandes est **inchangée**.
+> 5. **Non touché** : galerie `Persos`, marges de zone protégée de l'écran d'arrivée (Dynamic Island),
+>    gameplay, RNG, speaker, équilibrage.
+>
+> Résultats réels : `npm run verify` **vert** — `typecheck` 0 erreur ; **714 tests unitaires** (48
+> fichiers, dont 16 nouveaux dans `tests/unit/viewportOrientation.test.ts`) ; `vite build` OK ;
+> **103 tests E2E** OK, dont **7 nouveaux** (`tests/e2e/orientation.spec.ts`) et la barre de relecture
+> étendue dans `tests/e2e/compactLayout.spec.ts`, sans aucune erreur console. Les sept tests couvrent
+> exactement les cas demandés : lancement direct en 844×390 et 926×428, portrait (écran affiché, canvas
+> entièrement recouvert, **pas de pas exécuté**), `paysage → portrait → paysage` **et**
+> `portrait → paysage` depuis un démarrage à froid, avec égalité **au pixel** de la géométrie
+> (canvas, arène, largeur de piste, format et les six voies) entre le retour et la référence mesurée
+> dans la même session. Voir `GAME_DESIGN.md` §5.2.
+
 ---
 
 ### P013.5 — Jalon 3D : prototype de rendu et choix du moteur `[ ]`
@@ -1359,6 +1406,13 @@ Si le jalon retient une option 3D, cette étape s'appuie dessus ; sinon elle res
 * Hors ligne : après un premier chargement, `context.setOffline(true)` puis rechargement ⇒ le jeu
   démarre et une course complète se déroule.
 * Aucune requête vers un domaine externe (assertion sur les requêtes interceptées).
+
+> **Déjà livré par la correction iPhone ciblée, à ne pas refaire.** Deux des points ci-dessus existent
+> désormais, parce qu'ils étaient nécessaires **avant** P016 : l'**écran de rotation** en portrait
+> (`render/viewportWatch.ts` + `styles.css`, testé en 844×390 et 926×428, course gelée) et un
+> `public/manifest.webmanifest` minimal dont `"orientation": "landscape"` n'est qu'une **préférence**
+> d'affichage. P016 reste propriétaire du reste : `vite-plugin-pwa`, icônes 192/512/maskable, service
+> worker et précache, UI d'installation, tests hors ligne. Aucun service worker n'existe aujourd'hui.
 
 ---
 

@@ -138,4 +138,8 @@ export interface UiText {
   readonly galleryTitle: string;
   /** Libellé du bouton qui referme le panneau des personnages. */
   readonly galleryClose: string;
+  /** Phrase de l'écran qui demande de tourner le téléphone (petit écran tenu droit). */
+  readonly rotationGateTitle: string;
+  /** Seconde ligne de l'écran de rotation : ce qui se passera une fois le téléphone tourné. */
+  readonly rotationGateHint: string;
 }

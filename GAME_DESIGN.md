@@ -330,11 +330,18 @@ HUD) : ils sont recentrés sur l'axe de la voie et reculés de la **demi-largeur
 une petite marge (`EVENT_BADGE_GAP_PX`), sans jamais fusionner avec l'image. Le recul est calculé en
 pixels CSS, jamais en pourcentage : il reste donc exact à toutes les échelles de canvas.
 
-**Timeline de pause, en petit paysage.** La barre de relecture est **remontée** du bord bas de l'écran
-(marge de sécurité de `0.6rem` en plus de `env(safe-area-inset-bottom)`), et sa **zone tactile fait
-30 px de haut** alors que la piste visible reste fine (4 px) : le curseur natif de Safari, haut de
-~16 px et collé au bord, n'était pas attrapable au doigt. Le dessin du curseur est redéfini pour
-WebKit et pour Gecko, uniquement dans la requête média compacte.
+**Timeline de pause, en petit paysage.** La barre de relecture est **remontée** du bord bas de l'écran :
+elle est réservée dans une **bande verticale réelle** de la colonne (`--hud-mobile-controls = 8.5rem`
+pendant la pause, au lieu de `5.4rem`), la bande des commandes reçoit une marge basse de `1.3rem` **en
+plus** de `env(safe-area-inset-bottom)` — le curseur se retrouve donc à ≈ 24 px du bord physique, hors
+de la zone où Safari capte les gestes du bas — et sa **zone tactile fait 32 px de haut** alors que la
+piste visible reste fine (4 px). Le curseur occupe en outre **toute la largeur de la colonne**
+(≈ 250 px à 844×390, ≈ 270 px à 926×428) sur sa propre ligne : c'est ce qui le rend posable au doigt.
+L'ordre de la bande est celui demandé — la rangée `Lancer` · `Pause` · `Rejouer`, **puis** la timeline,
+**puis** la marge basse — et les commandes fines (`−2 s` · `+2 s`) passent sur la seconde ligne de la
+barre, sous le curseur. Le dessin du curseur est redéfini pour WebKit et pour Gecko, uniquement dans la
+requête média compacte. Hors pause, la bande n'est pas réservée : la hauteur des commandes est
+**inchangée** (`≤ 48 px`), vérifié par test.
 
 Techniquement, la piste n'a plus le rapport 16:9 de l'arène de bureau : la **largeur logique du canvas**
 est donc déduite du rapport réel de la piste (`viewport.arenaBaseSize`), pour que le canvas et la
@@ -343,6 +350,42 @@ piste, seraient décalés. La **hauteur logique reste 720** : toute la géométr
 et seule la correspondance mètres → pixels change, comme elle le fait déjà à chaque cadrage. Rien de
 tout cela ne touche la simulation : ce sont des décisions de **présentation**, prises dans `render/` et
 `styles.css`.
+
+**Téléphone tenu droit : la course n'est pas affichée (correction iPhone ciblée).** En orientation
+portrait sur téléphone, l'application ne tente **pas** de présenter la course : un écran plein la
+remplace — *« Tourne ton iPhone en paysage pour jouer »*, avec une petite icône de rotation — et
+**aucun pas de noyau n'est exécuté** pendant ce temps. Le prédicat est unique et vit dans
+`render/viewport.ts` (`isPortraitPhone` : orientation portrait **et** largeur de mise en page ≤
+`VIEW.COMPACT_VIEWPORT_MAX_HEIGHT_PX`, donc une fenêtre de bureau haute et étroite n'est pas bloquée) ;
+il est publié une seule fois, sous forme de `data-rotation-gate` sur `<html>`, et `styles.css` ne fait
+que styler cet écran : il n'existe aucune seconde copie du seuil, ni dans une requête média, ni dans un
+test. Le gel de la course n'introduit **aucun concept nouveau** : c'est le mécanisme de pause du projet
+— `RaceScene` n'appelle simplement pas `RaceSimulation.update()`, donc `tSim`, `x` et `v` sont
+strictement gelés et la reprise ne rattrape rien. `screen.orientation.lock()` n'est **pas** utilisé.
+Rien de la galerie `Persos`, de l'écran d'arrivée ni de ses marges de zone protégée n'est touché.
+
+**Retour en paysage : une seule taille, stabilisée (correction iPhone ciblée).** Sur iOS, une rotation
+est une **séquence** — `orientationchange`, plusieurs `resize`, des `visualViewport.resize` pendant que
+la barre d'URL se replace — et chaque mesure intermédiaire décrit une fenêtre qui n'existe plus :
+recalculer la mise en page sur la première valeur venue donnait une arène cadrée pour l'orientation
+précédente (piste zoomée, voies du haut et du bas hors de l'écran). La surveillance de la fenêtre est
+donc **une seule** (`render/viewportWatch.ts`) : elle écoute les trois sources, attend que la taille se
+répète (`render/viewportSettle.ts`, 3 mesures ≈ 50 ms), puis publie une fois. Elle écrit
+`--app-height` — la hauteur **réellement visible**, qui remplace `100dvh` en petit paysage : `100vh`
+vaut la fenêtre *large*, donc après un retour en paysage la page était plus haute que l'écran et se
+retrouvait recadrée. Le repli, si WebKit n'arrête jamais de changer de taille, est d'accepter la
+dernière mesure connue au bout de 600 ms : **aucun rechargement n'est jamais déclenché**, une course en
+cours ne peut pas être perdue. Côté rendu, la taille logique de l'arène est calculée sur une boîte
+**arrondie vers le bas** (dans le même sens que Phaser) et `ScaleManager.refresh` est rappelé **après**
+`setGameSize`, dont le `refresh` interne travaille sur une taille de parent périmée : le cadrage d'un
+retour de rotation est ainsi **identique au pixel** à celui d'un lancement direct. Vérifié en E2E sur
+844×390 et 926×428, pour les trois chemins (direct, portrait → paysage, paysage → portrait → paysage) :
+même arène, même piste, même canvas, mêmes six voies.
+
+**Manifeste.** `public/manifest.webmanifest` déclare `"orientation": "landscape"` **uniquement** comme
+préférence d'affichage de la web app installée : ce n'est ni un verrou d'exécution, ni une bascule
+d'orientation, et l'application fonctionne à l'identique sans lui. Aucun service worker, aucun cache
+hors ligne n'est introduit : l'étape P016 reste intacte.
 
 **Visuels des personnages (passe visuelle).** Les six coureurs ne sont plus des formes géométriques
 provisoires : chacun affiche son **illustration** (`public/assets/characters/`, une par personnage,

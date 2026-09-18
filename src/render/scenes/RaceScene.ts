@@ -96,6 +96,15 @@ export interface RaceSceneOptions {
    * donne, il ne fabrique jamais une seed et ne décide jamais d'une nouvelle course.
    */
   readonly finishActions: FinishActions;
+  /**
+   * Vrai quand la course peut avancer.
+   *
+   * Rendue fausse par `app/` pendant que l'écran de rotation recouvre tout : la scène n'appelle alors
+   * **pas** `simulation.update()`, donc aucun pas n'est exécuté — même mécanisme qu'une pause, aucun
+   * nouveau concept dans le noyau, et `tSim` reste strictement gelé. Le rendu continue de dessiner
+   * l'instant figé, sous l'écran qui le masque.
+   */
+  readonly allowsGameplay: () => boolean;
 }
 
 /** Libellé d'état correspondant à une phase temps réel. Exhaustif par construction. */
@@ -344,7 +353,13 @@ export class RaceScene extends Scene {
     // 1. Le temps réel ne sert qu'ici, et il ne fait qu'autoriser des pas de taille fixe. Une fois la
     // course terminée, `RaceSimulation.update()` ne fait plus rien : le noyau ne reçoit donc plus
     // aucun pas, et c'est cette seule ligne qui garantit qu'il n'y a pas de « course après la course ».
-    this.options.simulation.update(delta);
+    //
+    // L'écran de rotation (téléphone tenu droit) coupe exactement ici : l'écran recouvre la course, et
+    // la course ne doit donc pas se jouer derrière lui. Ne pas appeler `update()` est le mécanisme de
+    // pause du projet — aucun pas n'est exécuté, `tSim` est gelé, et la reprise ne rattrape rien.
+    if (this.options.allowsGameplay()) {
+      this.options.simulation.update(delta);
+    }
 
     // 2. Un unique instantané, lu par toutes les vues de cette frame.
     const state = this.options.simulation.view;

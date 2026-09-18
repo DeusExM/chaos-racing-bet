@@ -1,6 +1,7 @@
 import { SEED_TEXT_LENGTH, seedTextFromBytes } from '../core/seed';
-import { createGame } from '../render/Game';
+import { createGame, type GameHandle } from '../render/Game';
 import { CharacterGallery } from '../render/view/CharacterGallery';
+import { installViewportWatch } from '../render/viewportWatch';
 import { RaceSimulation } from '../sim/RaceSimulation';
 import { SIM_PRESETS } from '../sim/config';
 import { installTestHooks, testHooksEnabled } from '../sim/testHooks';
@@ -213,7 +214,31 @@ function bootstrap(): void {
     new CharacterGallery(galleryButton, UI_TEXT_FR);
   }
 
-  createGame({
+  // Écran de rotation (correction iPhone ciblée) : son texte appartient à `app/`, comme tous les
+  // libellés visibles, et sa visibilité est décidée par la surveillance de la fenêtre ci-dessous.
+  const rotationGateTitle = querySelector('[data-testid="rotation-gate-title"]');
+  const rotationGateHint = querySelector('[data-testid="rotation-gate-hint"]');
+  if (rotationGateTitle !== null) {
+    rotationGateTitle.textContent = UI_TEXT_FR.rotationGateTitle;
+  }
+  if (rotationGateHint !== null) {
+    rotationGateHint.textContent = UI_TEXT_FR.rotationGateHint;
+  }
+
+  // Surveillance de la fenêtre : **une seule** pour tout le projet. Elle publie une taille stabilisée
+  // (voir `viewportWatch.ts`) — le cadrage Phaser s'y réapplique, et la course est gelée tant que
+  // l'écran de rotation recouvre tout. La poignée du jeu est prise après coup : la première mesure est
+  // publiée avant que le jeu n'existe, et c'est voulu (l'écran de rotation ne doit pas attendre).
+  let gameplayAllowed = true;
+  let game: GameHandle | null = null;
+  installViewportWatch(window, {
+    onStable: (metrics) => {
+      gameplayAllowed = !metrics.rotationGate;
+      game?.refreshScale();
+    },
+  });
+
+  game = createGame({
     parent,
     simulation,
     text: UI_TEXT_FR,
@@ -231,6 +256,7 @@ function bootstrap(): void {
     debug: params.get(DEBUG_PARAM) === '1',
     exposeView: hooksEnabled,
     commentary,
+    allowsGameplay: () => gameplayAllowed,
     finishActions: {
       replaySameSeed: () => {
         startSameSeedRace();
@@ -240,6 +266,13 @@ function bootstrap(): void {
       },
     },
   });
+
+  // Le tout premier cadrage est recalculé **une fois** : Phaser mesure la boîte de la piste pendant la
+  // construction du jeu, donc avant que la feuille de style et `--app-height` n'aient fini de
+  // s'appliquer. Sans cet appel, un lancement direct pouvait garder un canvas d'un pixel plus petit
+  // que sa boîte — c'est-à-dire un cadrage différent de celui d'un retour de rotation, pour le même
+  // écran. Le rendu reste inchangé ensuite : seules les tailles stabilisées le rappellent.
+  game.refreshScale();
 
   /**
    * Repart de zéro avec **exactement** la seed source (P013).

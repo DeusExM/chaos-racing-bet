@@ -915,6 +915,73 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * Écran de rotation (correction iPhone ciblée) : sur un téléphone tenu droit, la course n'est pas
+ * affichée du tout — cet écran plein la remplace, et le noyau ne reçoit aucun pas pendant ce temps.
+ *
+ * Il est **masqué par défaut** et ne s'affiche que sur la décision de `render/viewportWatch.ts`
+ * (`data-rotation-gate="on"` sur `<html>`) : le prédicat n'existe donc qu'une seule fois dans le
+ * projet, et il n'y a aucune requête média à tenir synchronisée avec lui.
+ *
+ * Il couvre **tout** : fond opaque, au-dessus du HUD (3), de l'écran d'arrivée et du panneau
+ * `Persos` (60). Rien de la course ne peut rester visible derrière.
+ *
+ * Sa hauteur est celle **réellement visible** (`--app-height`, publiée par le même module) : un
+ * `inset: 0` sur `position: fixed` se cale sur la grande fenêtre d'iOS, et le texte pourrait donc
+ * être centré sous la barre d'outils.
+ */
+.rotation-gate {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 90;
+  height: var(--app-height, 100dvh);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  padding: calc(1.5rem + env(safe-area-inset-top, 0px)) 1.5rem
+    calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  background: var(--bg);
+  text-align: center;
+}
+
+[data-rotation-gate='on'] .rotation-gate {
+  display: flex;
+}
+
+.rotation-gate-icon {
+  width: 4.5rem;
+  height: 4.5rem;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+/* La pointe de la flèche est pleine : c'est elle qui donne le sens de rotation. */
+.rotation-gate-icon polygon {
+  fill: var(--accent);
+  stroke: none;
+}
+
+.rotation-gate-title {
+  margin: 0;
+  max-width: 22rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.rotation-gate-hint {
+  margin: 0;
+  max-width: 22rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .debug {
   width: min(100%, 1280px);
   padding: 0.6rem 0.8rem;
@@ -1199,6 +1266,14 @@ body {
     padding: 0;
     height: 100vh;
     height: 100dvh;
+    /*
+     * Hauteur **réellement visible**, mesurée par `render/viewportWatch.ts` et publiée à chaque taille
+     * stabilisée. C'est le remède à la rotation sur iPhone : `100vh` vaut la fenêtre *large* (barres
+     * d'outils repliées), donc après un retour en paysage la page était plus haute que l'écran et se
+     * retrouvait recadrée, voies du haut et du bas sortant du viewport. `100dvh` reste le repli pour
+     * les navigateurs sans `visualViewport` (et avant la première mesure).
+     */
+    height: var(--app-height, 100dvh);
     min-height: 0;
     overflow: hidden;
   }
@@ -1494,14 +1569,22 @@ body {
   }
 
   /*
-   * Barre de relecture : dans la colonne, sur une seule ligne. Le titre disparaît (les libellés
-   * `−2 s` / `+2 s` portent déjà le contexte) et le curseur prend la place restante : sans cela, la
-   * barre se replierait sur trois lignes dans une colonne de 32 %.
+   * Barre de relecture : dans la colonne, **sous** la rangée des trois boutons.
+   *
+   * ## Pourquoi elle passe sur deux lignes
+   *
+   * Elle tenait sur une seule ligne (`−2 s` · curseur · `+2 s` · temps), ce qui ne laissait au curseur
+   * que ≈ 100 px de large dans une colonne de 32 % — trop peu pour le poser au doigt. Le curseur prend
+   * donc **toute la largeur** de la colonne, sur sa propre ligne, et les commandes fines se rangent
+   * dessous : c'est aussi l'ordre demandé (`Lancer / Reprendre / Rejouer`, puis la timeline, puis la
+   * marge basse). Le titre reste masqué, les libellés `−2 s` / `+2 s` portant déjà le contexte.
    */
   .replay {
     grid-column: 1 / -1;
-    flex-wrap: nowrap;
-    gap: 0.2rem;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.2rem 0.35rem;
     padding: 0.2rem 0.25rem;
     font-size: 0.68rem;
   }
@@ -1511,7 +1594,8 @@ body {
   }
 
   .replay-readout {
-    flex: 0 0 auto;
+    grid-row: 2;
+    justify-self: end;
     min-width: 0;
     font-size: 0.9em;
   }
@@ -1519,11 +1603,13 @@ body {
   /*
    * `.replay .replay-step` et non `.replay-step` : la règle de bureau `.controls button` (largeur
    * minimale de 7rem, rembourrage large) vise ces boutons-là aussi, et il faut la battre pour que la
-   * barre tienne sur une ligne dans une colonne de 32 %.
+   * barre tienne dans une colonne de 32 %. `1.9rem` ≈ 30 px : ces commandes sont secondaires (le
+   * curseur porte le geste principal) mais restent au-dessus de la cible tactile minimale.
    */
   .replay .replay-step {
-    flex: 0 0 auto;
+    grid-row: 2;
     min-width: 2.4rem;
+    min-height: 1.9rem;
     padding: 0.15rem 0.3rem;
   }
 
@@ -1531,11 +1617,21 @@ body {
    * La barre de relecture n'existe que pendant une pause manuelle : tant qu'elle est affichée, sa
    * hauteur réelle est réservée dans la colonne (`:has`), sinon les commandes recouvriraient la seed.
    * Hors pause, la place est rendue à la colonne : aucune bande vide n'est laissée pour une barre qui
-   * n'est pas là. `5.4rem` couvre la rangée de boutons (35 px), la barre avec sa zone tactile de
-   * 30 px, et la marge basse de sécurité.
+   * n'est pas là. `8.5rem` couvre la rangée de boutons (35 px), la barre sur deux lignes (curseur
+   * tactile de 32 px, commandes de 30 px), la marge basse de sécurité, et l'arrondi.
    */
   .shell:has(#replay-bar:not([hidden])) {
-    --hud-mobile-controls: 5.4rem;
+    --hud-mobile-controls: 8.5rem;
+  }
+
+  /*
+   * Marge basse **de la pause** : elle n'est ajoutée que lorsque la barre est là, pour que la bande
+   * des commandes hors pause garde exactement la hauteur qu'elle avait (et que la place rendue à la
+   * colonne reste la même). Le curseur se retrouve ainsi à ≈ 24 px du bord physique, plus la zone
+   * protégée de l'iPhone : il ne touche plus la bande système du bas, celle où Safari capte les gestes.
+   */
+  .shell:has(#replay-bar:not([hidden])) .controls {
+    padding-bottom: calc(1.3rem + env(safe-area-inset-bottom, 0px));
   }
 
   /*
@@ -1565,14 +1661,16 @@ body {
    *
    * Sur un vrai iPhone, elle était trop basse et trop fine : le curseur natif de Safari mesure ≈ 16 px
    * de haut, sous la cible tactile, et la barre se trouvait collée au bord de l'écran. La zone
-   * tactile fait donc 30 px de haut (`height`), tandis que la piste **visible** reste fine (4 px) :
-   * c'est le dessin du curseur qui est redéfini, pas la place qu'il occupe.
+   * tactile fait donc 32 px de haut (`height`), tandis que la piste **visible** reste fine (4 px) :
+   * c'est le dessin du curseur qui est redéfini, pas la place qu'il occupe. Elle occupe en plus
+   * **toute la largeur** de la colonne (`grid-column: 1 / -1`) : c'est ce qui la rend facile à viser.
    */
   .replay-range {
-    flex: 1 1 auto;
-    width: auto;
-    min-width: 2.5rem;
-    height: 1.9rem;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    width: 100%;
+    min-width: 0;
+    height: 2rem;
     margin: 0;
     padding: 0;
     appearance: none;

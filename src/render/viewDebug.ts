@@ -24,6 +24,17 @@ export interface SpriteView {
   /** Hauteur réellement dessinée, en pixels logiques du canvas. */
   readonly height: number;
   /**
+   * Ordonnée réellement dessinée du **nom**, en pixels logiques du canvas.
+   *
+   * En petit paysage, elle est égale à `screenY` : le nom vit dans la voie, sur l'axe du personnage,
+   * et ne réserve donc aucune hauteur au-dessus du sprite (micro-correction finale).
+   */
+  readonly nameY: number;
+  /** Profondeur du nom. Inférieure à `depth` en petit paysage : le nom passe **derrière** le sprite. */
+  readonly nameDepth: number;
+  /** Profondeur du sprite. */
+  readonly depth: number;
+  /**
    * Vrai si le personnage est réellement dessiné dans cette frame.
    *
    * Un personnage sorti du champ de la caméra est masqué — son marqueur de bord le représente — pour

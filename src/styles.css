@@ -358,8 +358,16 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 0.05rem;
-  /* Posé juste au-dessus du sprite, et recentré : le personnage reste visible. */
-  transform: translate(-50%, -160%);
+  /*
+   * Position du badge, exprimée en deux variables : le badge est ancré sur le sprite (le modèle donne
+   * le pourcentage de son centre), et c'est ce décalage qui décide s'il est au-dessus ou dans la voie.
+   * Sur bureau, il reste juste au-dessus du sprite et apparaît en montant ; en petit paysage, la
+   * requête média le ramène sur l'axe de la voie (voir plus bas), sans qu'aucune coordonnée ne soit
+   * recalculée. `--event-shift-from` est la position de départ de l'animation d'apparition.
+   */
+  --event-shift: translate(-50%, -160%);
+  --event-shift-from: translate(-50%, -120%);
+  transform: var(--event-shift);
   font-size: clamp(0.5rem, 1vw, 0.72rem);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -401,12 +409,12 @@ body {
 @keyframes hud-event-pop {
   from {
     opacity: 0;
-    transform: translate(-50%, -120%) scale(0.9);
+    transform: var(--event-shift-from) scale(0.9);
   }
 
   to {
     opacity: 1;
-    transform: translate(-50%, -160%) scale(1);
+    transform: var(--event-shift) scale(1);
   }
 }
 
@@ -1021,7 +1029,7 @@ body {
  * 5. **Les voies s'étendent** (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO` côté rendu) et
  *    les personnages grossissent : la hauteur récupérée leur revient.
  *
- * ## Micro-correction : commandes, espace libre, seed unique
+ * ## Micro-corrections : commandes, timeline, seed unique, textes dans la voie
  *
  * Les trois commandes tiennent sur **une seule rangée** (`Lancer` · `Pause` · `Rejouer`, ~35 px de
  * haut), et la hauteur ainsi rendue est celle que la barre de relecture occupe pendant une pause : la
@@ -1029,6 +1037,15 @@ body {
  * elle n'y est pas. L'espace libre de la colonne est donc en bas, juste au-dessus des commandes — la
  * place de la barre — et non plus entre le speaker et la seed. La seed, elle, n'est affichée qu'**une
  * fois** : son ancien doublon déclaré dans `index.html` a été supprimé, le HUD est son seul porteur.
+ *
+ * La timeline de la pause est **remontée** (marge basse de `0.6rem` plus `safe-area-inset-bottom`) et
+ * sa **zone tactile fait 30 px**, même si la piste visible reste fine : c'est ce qui la rend
+ * utilisable au doigt sur un vrai iPhone, où le curseur natif était trop bas et trop fin.
+ *
+ * Enfin, les textes attachés aux personnages — le **nom** (dessiné par le rendu, voir
+ * `characterNameY`) et les mots d'événement (`TURBO !`, `BONUS !`, `MALUS !`) — sont ramenés **dans
+ * la voie**, sur l'axe du personnage : ils ne réservent plus aucune hauteur au-dessus du sprite, ce
+ * qui permet d'agrandir les personnages (`CHARACTER_HEIGHT_COMPACT_PX`) sans rapprocher les voies.
  *
  * ## Pourquoi la colonne 1 de la grille est exactement la piste
  *
@@ -1056,11 +1073,11 @@ body {
     --hud-mobile-column: clamp(11rem, 32%, 18rem);
     /*
      * Hauteur réservée aux commandes, au bas de la colonne : une seule rangée de trois boutons
-     * (`Lancer` · `Pause` · `Rejouer`). La barre de relecture n'occupe cette place que pendant une
-     * pause manuelle — sa hauteur est alors réservée (`:has`, plus bas) au lieu de rester vide le
-     * reste du temps.
+     * (`Lancer` · `Pause` · `Rejouer`) et la marge basse de sécurité. La barre de relecture n'occupe
+     * cette place que pendant une pause manuelle — sa hauteur est alors réservée (`:has`, plus bas) au
+     * lieu de rester vide le reste du temps.
      */
-    --hud-mobile-controls: 2.6rem;
+    --hud-mobile-controls: 2.8rem;
   }
 
   .shell {
@@ -1313,7 +1330,13 @@ body {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.2rem;
-    padding: 0 0.25rem calc(0.2rem + env(safe-area-inset-bottom, 0px)) 0.25rem;
+    /*
+     * Marge basse : `env(safe-area-inset-bottom)` couvre la barre d'accueil de l'iPhone, et les
+     * `0.6rem` (≈ 10 px) ajoutés par la micro-correction finale remontent la rangée de boutons **et**
+     * la timeline au-dessus de la zone où Safari capte les gestes du bas de l'écran. C'était la cause
+     * du « je n'arrive pas à cliquer sur la timeline » sur un vrai téléphone.
+     */
+    padding: 0 0.25rem calc(0.6rem + env(safe-area-inset-bottom, 0px)) 0.25rem;
     background: #05070fcc;
     border-top: 1px solid var(--border);
   }
@@ -1341,18 +1364,12 @@ body {
     grid-column: 1 / -1;
     flex-wrap: nowrap;
     gap: 0.2rem;
-    padding: 0.15rem 0.25rem;
+    padding: 0.2rem 0.25rem;
     font-size: 0.68rem;
   }
 
   .replay-title {
     display: none;
-  }
-
-  .replay-range {
-    flex: 1 1 auto;
-    width: auto;
-    min-width: 2.5rem;
   }
 
   .replay-readout {
@@ -1376,10 +1393,11 @@ body {
    * La barre de relecture n'existe que pendant une pause manuelle : tant qu'elle est affichée, sa
    * hauteur réelle est réservée dans la colonne (`:has`), sinon les commandes recouvriraient la seed.
    * Hors pause, la place est rendue à la colonne : aucune bande vide n'est laissée pour une barre qui
-   * n'est pas là.
+   * n'est pas là. `5.4rem` couvre la rangée de boutons (35 px), la barre avec sa zone tactile de
+   * 30 px, et la marge basse de sécurité.
    */
   .shell:has(#replay-bar:not([hidden])) {
-    --hud-mobile-controls: 4.6rem;
+    --hud-mobile-controls: 5.4rem;
   }
 
   /*
@@ -1388,5 +1406,73 @@ body {
    */
   .hud-events {
     width: calc(100% - var(--hud-mobile-column));
+  }
+
+  /*
+   * 12) Les textes temporaires (`TURBO !`, `BONUS !`, `MALUS !`) entrent dans la voie.
+   *
+   * Ils étaient posés au-dessus du sprite : ils consommaient donc la hauteur de la voie, et
+   * interdisaient d'agrandir les personnages. Ils sont maintenant **sur l'axe de la voie**, recentrés
+   * verticalement et décalés vers l'arrière du personnage (à gauche, puisqu'il avance vers la
+   * droite) : ils restent dans la bande de la voie, ne réservent aucune hauteur, et ne recouvrent ni
+   * la silhouette ni le visage — le décalage vaut la demi-largeur du sprite à l'échelle du téléphone.
+   * Le décalage est celui d'une variable, donc l'animation d'apparition suit la même position sans
+   * être réécrite.
+   */
+  .hud-event {
+    --event-shift: translate(calc(-100% - 2.2rem), -50%);
+    --event-shift-from: translate(calc(-100% - 1.7rem), -50%);
+    font-size: 0.62rem;
+  }
+
+  /*
+   * 13) La timeline de la pause doit être **réellement attrapable au doigt**.
+   *
+   * Sur un vrai iPhone, elle était trop basse et trop fine : le curseur natif de Safari mesure ≈ 16 px
+   * de haut, sous la cible tactile, et la barre se trouvait collée au bord de l'écran. La zone
+   * tactile fait donc 30 px de haut (`height`), tandis que la piste **visible** reste fine (4 px) :
+   * c'est le dessin du curseur qui est redéfini, pas la place qu'il occupe.
+   */
+  .replay-range {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 2.5rem;
+    height: 1.9rem;
+    margin: 0;
+    padding: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+  }
+
+  .replay-range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 999px;
+    background: #2b3a5c;
+  }
+
+  .replay-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 22px;
+    height: 22px;
+    margin-top: -9px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .replay-range::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+    background: #2b3a5c;
+  }
+
+  .replay-range::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--accent);
   }
 }

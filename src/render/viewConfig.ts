@@ -63,10 +63,14 @@ export interface ViewConfig {
    *
    * Le test joueur sur iPhone a jugé les personnages encore trop petits : le titre, les marges
    * extérieures et le HUD supérieur libèrent de la hauteur, et les voies s'étendent
-   * (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO`) pour accueillir cette hauteur. La
-   * borne haute (88 px logiques) est celle qui laisse encore le nom de la première voie entier et
-   * une séparation nette entre voisines ; `84` est la plus grande valeur qui tient avec de la marge
-   * aux deux extrémités.
+   * (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO`) pour accueillir cette hauteur.
+   *
+   * La micro-correction finale a **sorti le nom de l'espace vertical du sprite** (il est désormais
+   * dessiné dans la voie, sur l'axe du personnage : voir `characterNameY`). La contrainte n'est donc
+   * plus « le nom tient au-dessus de la tête » mais « deux cadres voisins ne se touchent pas ». À
+   * 100 px, l'écart entre deux voies (115,2 px logiques) laisse encore 15 px entre les cadres — et
+   * davantage entre les silhouettes visibles, les images ayant 4 à 11 % de marge transparente. C'est
+   * la plus grande valeur de la fourchette demandée (94–100) qui reste confortable.
    */
   readonly CHARACTER_HEIGHT_COMPACT_PX: number;
   /**
@@ -79,6 +83,32 @@ export interface ViewConfig {
   readonly CHARACTER_NAME_FONT_PX: number;
   /** Taille de police du nom au-dessus d'un personnage en petit paysage, en pixels de la scène. */
   readonly CHARACTER_NAME_FONT_COMPACT_PX: number;
+  /**
+   * Épaisseur du contour du nom, en pixels, **quand il est dessiné derrière le personnage**.
+   *
+   * En petit paysage, le nom partage l'axe du sprite et passe donc sous lui : sans contour, la partie
+   * recouverte se confondrait avec l'illustration et le nom deviendrait illisible. Le contour est
+   * appliqué au texte, pas à sa boîte : il ne change aucune mesure de mise en page.
+   */
+  readonly CHARACTER_NAME_STROKE_PX: number;
+  /** Couleur du contour du nom : celle du fond de l'arène, pour un détachement sans halo clair. */
+  readonly CHARACTER_NAME_STROKE_COLOR: string;
+  /**
+   * Profondeur de dessin du **premier** personnage : les suivants sont posés un cran au-dessus.
+   *
+   * Les voies sont dessinées dans l'ordre du roster, donc un personnage de la voie du bas passe
+   * devant celui de la voie du haut quand deux silhouettes se croisent.
+   */
+  readonly CHARACTER_SPRITE_DEPTH_BASE: number;
+  /**
+   * Profondeur du nom quand il est dessiné **derrière** le personnage (petit paysage).
+   *
+   * Elle est inférieure à `CHARACTER_SPRITE_DEPTH_BASE` : le nom est sous **tous** les sprites, et le
+   * personnage peut donc passer devant une partie de son propre nom.
+   */
+  readonly CHARACTER_NAME_DEPTH_BEHIND: number;
+  /** Profondeur du nom quand il est dessiné **au-dessus** du personnage (formats de bureau). */
+  readonly CHARACTER_NAME_DEPTH_ABOVE: number;
   /**
    * Hauteur affichée **minimale** d'un personnage, en pixels logiques.
    *
@@ -202,9 +232,14 @@ export const VIEW: ViewConfig = Object.freeze({
   COMPACT_LANE_TOP_RATIO: 0.1,
   COMPACT_LANE_BOTTOM_RATIO: 0.9,
   CHARACTER_HEIGHT_PX: 73,
-  CHARACTER_HEIGHT_COMPACT_PX: 84,
+  CHARACTER_HEIGHT_COMPACT_PX: 100,
   CHARACTER_NAME_FONT_PX: 14,
   CHARACTER_NAME_FONT_COMPACT_PX: 20,
+  CHARACTER_NAME_STROKE_PX: 3,
+  CHARACTER_NAME_STROKE_COLOR: '#05070f',
+  CHARACTER_SPRITE_DEPTH_BASE: 10,
+  CHARACTER_NAME_DEPTH_BEHIND: 5,
+  CHARACTER_NAME_DEPTH_ABOVE: 60,
   CHARACTER_MIN_HEIGHT_PX: 30,
   TRACK_TICK_STEP_M: 50,
   TRACK_LABEL_STEP_M: 250,
@@ -250,6 +285,30 @@ export function characterHeightPx(compact: boolean): number {
 /** Taille de police du nom d'un personnage, en pixels logiques, selon le format. */
 export function characterNameFontPx(compact: boolean): number {
   return compact ? VIEW.CHARACTER_NAME_FONT_COMPACT_PX : VIEW.CHARACTER_NAME_FONT_PX;
+}
+
+/**
+ * Ordonnée du nom d'un personnage, selon le format.
+ *
+ * En **petit paysage**, le nom est dessiné **dans la voie**, sur l'axe du personnage : il ne réserve
+ * donc plus aucune hauteur au-dessus du sprite. C'est ce qui permet d'agrandir les personnages
+ * (`CHARACTER_HEIGHT_COMPACT_PX`) sans rapprocher les voies : le nom et le personnage occupent la
+ * même bande, et c'est le personnage qui passe devant (voir `characterNameDepth`).
+ *
+ * Sur les formats de bureau, rien ne change : le nom reste juste au-dessus de la tête.
+ */
+export function characterNameY(centerY: number, heightPx: number, compact: boolean): number {
+  return compact ? centerY : centerY - heightPx / 2 - 2;
+}
+
+/** Profondeur du nom : sous les sprites en petit paysage, au-dessus d'eux ailleurs. */
+export function characterNameDepth(compact: boolean): number {
+  return compact ? VIEW.CHARACTER_NAME_DEPTH_BEHIND : VIEW.CHARACTER_NAME_DEPTH_ABOVE;
+}
+
+/** Épaisseur du contour du nom : il n'en a besoin que lorsqu'il passe **derrière** le personnage. */
+export function characterNameStrokePx(compact: boolean): number {
+  return compact ? VIEW.CHARACTER_NAME_STROKE_PX : 0;
 }
 
 /** Ordonnée écran d'une voie, répartie uniformément entre les deux ratios du format courant. */

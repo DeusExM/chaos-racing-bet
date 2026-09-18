@@ -77,7 +77,12 @@ interface CompactLayout {
   readonly toplineWidths: string;
   readonly sprites: readonly {
     readonly id: string;
+    readonly screenX: number;
     readonly screenY: number;
+    readonly nameY: number;
+    readonly nameDepth: number;
+    readonly depth: number;
+    readonly width: number;
     readonly height: number;
     readonly drawn: boolean;
   }[];
@@ -181,7 +186,12 @@ async function measure(page: Page): Promise<CompactLayout> {
       toplineWidths,
       sprites: view.sprites().map((sprite) => ({
         id: sprite.id,
+        screenX: sprite.screenX,
         screenY: sprite.screenY,
+        nameY: sprite.nameY,
+        nameDepth: sprite.nameDepth,
+        depth: sprite.depth,
+        width: sprite.width,
         height: sprite.height,
         drawn: sprite.drawn,
       })),
@@ -345,11 +355,13 @@ for (const viewport of VIEWPORTS) {
       characterHeightPx(true),
       0,
     );
+    expect(characterHeightPx(true), 'fourchette demandée sur téléphone').toBeGreaterThanOrEqual(94);
+    expect(characterHeightPx(true), 'fourchette demandée sur téléphone').toBeLessThanOrEqual(100);
     expect(characterHeightPx(true)).toBeGreaterThan(characterHeightPx(false));
     expect(
       spriteHeight * scale,
-      'un personnage affiché mesure au moins 42 px CSS',
-    ).toBeGreaterThanOrEqual(42);
+      'un personnage affiché mesure au moins 50 px CSS',
+    ).toBeGreaterThanOrEqual(50);
 
     expect(layout.sprites, 'les six voies sont suivies').toHaveLength(CHARACTER_IDS.length);
     const laneYs = [...layout.sprites].map((sprite) => sprite.screenY).sort((a, b) => a - b);
@@ -366,6 +378,18 @@ for (const viewport of VIEWPORTS) {
           'deux voies voisines ne se chevauchent pas',
         ).toBeGreaterThanOrEqual(spriteHeight);
       }
+    }
+
+    // 9) Le nom vit **dans** la voie, sur l'axe du personnage, et passe **derrière** lui : il ne
+    // réserve donc aucune hauteur au-dessus du sprite. C'est ce qui autorise la taille ci-dessus.
+    for (const sprite of layout.sprites) {
+      expect(sprite.nameY, `le nom de ${sprite.id} est sur l’axe du personnage`).toBeCloseTo(
+        sprite.screenY,
+        3,
+      );
+      expect(sprite.nameDepth, `le nom de ${sprite.id} passe derrière le sprite`).toBeLessThan(
+        sprite.depth,
+      );
     }
 
     expectNoErrors(watch);
@@ -391,6 +415,7 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
   const readCommands = async (): Promise<{
     readonly controls: Box;
     readonly bar: Box | null;
+    readonly range: Box | null;
     readonly seed: Box;
     readonly speaker: Box;
     readonly buttons: readonly Box[];
@@ -422,6 +447,7 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
       return {
         controls: required('.controls'),
         bar: box('[data-testid="replay-bar"]'),
+        range: box('[data-testid="replay-range"]'),
         seed: required('[data-testid="hud-seed"]'),
         speaker: required('[data-testid="subtitle"]'),
         buttons: ['start-button', 'pause-button', 'replay-button'].map((id) =>
@@ -438,6 +464,11 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
   const idle = await readCommands();
   expect(idle.bar?.height ?? 0, 'la barre est masquée hors pause').toBe(0);
   expect(idle.controls.height, 'aucune bande vide pour la barre absente').toBeLessThanOrEqual(48);
+  const idleButtonsMargin = 390 - Math.max(...idle.buttons.map((button) => button.bottom));
+  expect(
+    idleButtonsMargin,
+    `la rangée de boutons est remontée du bord bas (marge ${idleButtonsMargin.toFixed(1)} px)`,
+  ).toBeGreaterThanOrEqual(8);
 
   await page.evaluate(() => {
     const api = window.__CHAOS_RACE__;
@@ -494,6 +525,34 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
   expect(paused.controls.height, 'la bande des commandes accueille la barre').toBeGreaterThan(
     idle.controls.height,
   );
+
+  /*
+   * La timeline est **réellement attrapable au doigt** : c'est la correction demandée après le test
+   * sur un vrai iPhone, où le curseur natif était trop bas et trop fin. Trois mesures le prouvent :
+   * une zone tactile d'au moins 28 px de haut, une barre remontée du bord bas de l'écran, et une
+   * rangée de boutons elle aussi remontée.
+   */
+  const range = paused.range;
+  expect(range, 'la timeline existe pendant la pause').not.toBeNull();
+  if (range === null) {
+    throw new Error('timeline absente pendant la pause');
+  }
+  expect(range.height, 'la zone tactile de la timeline fait au moins 28 px').toBeGreaterThanOrEqual(
+    28,
+  );
+  expect(range.width, 'la timeline est assez large pour glisser le doigt').toBeGreaterThanOrEqual(
+    60,
+  );
+  const rangeBottomMargin = 390 - range.bottom;
+  expect(
+    rangeBottomMargin,
+    `la timeline est remontée du bord bas (marge ${rangeBottomMargin.toFixed(1)} px)`,
+  ).toBeGreaterThanOrEqual(8);
+  const buttonsBottomMargin = 390 - Math.max(...paused.buttons.map((button) => button.bottom));
+  expect(
+    buttonsBottomMargin,
+    `la rangée de boutons est remontée au-dessus de la timeline (marge ${buttonsBottomMargin.toFixed(1)} px)`,
+  ).toBeGreaterThanOrEqual(38);
 
   // La barre est utilisable : « −2 s » recule réellement le curseur, et la course reste gelée.
   const before = await page.evaluate(
@@ -617,6 +676,88 @@ test('le bouton persos ouvre les six personnages en grand en 844×390', async ({
   expect(after.arena).toBe(before.arena);
   expect(after.canvas).toBe(before.canvas);
   expect(after.steps).toBeGreaterThanOrEqual(before.steps - 1);
+
+  expectNoErrors(watch);
+});
+
+/**
+ * Les mots d'événement (`TURBO !`, `BONUS !`, `MALUS !`) restent **dans la voie** en 844×390.
+ *
+ * Ils étaient posés au-dessus du sprite, donc dans la bande de la voie du dessus : ils consommaient
+ * la hauteur qui manquait aux personnages. Le test attend un événement **réel** (la course en produit
+ * d'elle-même, en mode accéléré), puis compare la position du badge à celle du personnage que le
+ * noyau a désigné : le badge doit être sur l'axe de sa voie, pas au-dessus de la tête.
+ */
+test('les textes d’événement restent dans la voie du personnage en 844×390', async ({ page }) => {
+  const watch = watchConsole(page);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.goto(raceUrl({ seed: SEED, fast: true, autostart: true }));
+  await waitForHooks(page);
+
+  // Un badge n'apparaît que pendant un événement réel : on attend qu'il y en ait un.
+  await expect
+    .poll(
+      async () => page.evaluate(() => document.querySelectorAll('[data-testid="event-badge"]').length),
+      { timeout: 25_000, message: 'la course a produit un événement visible' },
+    )
+    .toBeGreaterThan(0);
+
+  const measured = await page.evaluate(() => {
+    const badge = document.querySelector('[data-testid="event-badge"]');
+    const canvas = document.querySelector('#game canvas');
+    const view = window.__CHAOS_RACE_VIEW__;
+    if (badge === null || canvas === null || view === undefined) {
+      throw new Error('mesure impossible');
+    }
+    const rect = badge.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+    const track = view.track();
+    const scale = canvasRect.height / track.arenaHeight;
+    const characterId = badge.getAttribute('data-character-id') ?? '';
+    const sprite = view.sprites().find((candidate) => candidate.id === characterId) ?? null;
+    return {
+      badge: {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        centerY: (rect.top + rect.bottom) / 2,
+      },
+      characterId,
+      sprite:
+        sprite === null
+          ? null
+          : {
+              axisY: canvasRect.top + sprite.screenY * scale,
+              centerX: canvasRect.left + sprite.screenX * scale,
+              topY: canvasRect.top + (sprite.screenY - sprite.height / 2) * scale,
+              height: sprite.height * scale,
+            },
+      laneGap: (track.arenaHeight * 0.8) / 5 * scale,
+    };
+  });
+
+  expect(measured.characterId, 'le badge désigne un personnage réel').not.toBe('');
+  const sprite = measured.sprite;
+  expect(sprite, 'le personnage du badge est suivi par le rendu').not.toBeNull();
+  if (sprite === null) {
+    throw new Error('personnage absent');
+  }
+
+  // Sur l'axe de la voie : le badge ne monte plus au-dessus du sprite…
+  expect(
+    Math.abs(measured.badge.centerY - sprite.axisY),
+    `le badge est sur l’axe de la voie (badge ${measured.badge.centerY.toFixed(1)}, axe ${sprite.axisY.toFixed(1)}, voie ${measured.laneGap.toFixed(1)})`,
+  ).toBeLessThanOrEqual(measured.laneGap / 2);
+  expect(
+    measured.badge.centerY,
+    'le badge n’est plus posé au-dessus du sprite',
+  ).toBeGreaterThan(sprite.topY);
+  // …et il reste **derrière** lui : il ne dépasse pas vers l'avant du personnage.
+  expect(
+    measured.badge.right,
+    'le badge est à l’arrière du personnage, pas devant',
+  ).toBeLessThanOrEqual(sprite.centerX + 2);
 
   expectNoErrors(watch);
 });

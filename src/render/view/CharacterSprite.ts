@@ -3,7 +3,15 @@ import type { GameObjects, Scene } from 'phaser';
 import type { CharacterConfig } from '../../core/characters';
 import type { CharacterId } from '../../core/types';
 import { characterTextureKey } from '../characterAssets';
-import { VIEW, characterHeightPx, characterNameFontPx, laneY } from '../viewConfig';
+import {
+  VIEW,
+  characterHeightPx,
+  characterNameDepth,
+  characterNameFontPx,
+  characterNameStrokePx,
+  characterNameY,
+  laneY,
+} from '../viewConfig';
 
 /**
  * Un personnage à l'écran.
@@ -92,20 +100,25 @@ export class CharacterSprite {
     this.image.setDisplaySize(this.widthPx, this.heightPx);
     this.nameLabel.setFontSize(this.fontSizePx);
     this.edgeMarker.setFontSize(this.fontSizePx);
+    // Derrière le personnage, le nom a besoin d'un contour : sans lui, la partie recouverte par
+    // l'illustration se confondrait avec elle. Le contour n'existe qu'en petit paysage, et il porte
+    // sur le dessin du texte, pas sur sa boîte : aucune mesure de mise en page ne change.
+    this.nameLabel.setStroke(VIEW.CHARACTER_NAME_STROKE_COLOR, characterNameStrokePx(compact));
   }
 
   /**
    * Positionne le personnage à partir de sa distance et de la voie qui lui est réservée.
    *
-   * Le nom est posé à partir de la hauteur **réellement affichée**, pas d'une constante : il reste
-   * juste au-dessus de la tête, quel que soit le cadrage de l'illustration.
+   * Le nom partage l'axe du personnage en petit paysage (`characterNameY`) et passe **derrière** lui
+   * (`characterNameDepth`) : il ne consomme donc aucune hauteur, et le personnage peut le recouvrir en
+   * partie. Sur bureau, il reste juste au-dessus de la tête, au-dessus du sprite.
    */
   place(screenX: number, heightPx: number, compact = false): void {
     const y = laneY(this.laneIndex, heightPx, compact);
     this.image.setPosition(screenX, y);
-    this.nameLabel.setPosition(screenX, y - this.heightPx / 2 - 2);
-    this.image.setDepth(10 + this.laneIndex);
-    this.nameLabel.setDepth(60);
+    this.nameLabel.setPosition(screenX, characterNameY(y, this.heightPx, compact));
+    this.image.setDepth(VIEW.CHARACTER_SPRITE_DEPTH_BASE + this.laneIndex);
+    this.nameLabel.setDepth(characterNameDepth(compact));
   }
 
   /** Signale un personnage sorti de la fenêtre, collé au bord correspondant. */
@@ -176,5 +189,25 @@ export class CharacterSprite {
 
   get screenY(): number {
     return this.image.y;
+  }
+
+  /**
+   * Ordonnée réellement dessinée du nom, en pixels logiques.
+   *
+   * Elle est publiée pour qu'un test puisse prouver que le nom partage l'axe du personnage en petit
+   * paysage — donc qu'il ne réserve aucune hauteur au-dessus du sprite.
+   */
+  get nameY(): number {
+    return this.nameLabel.y;
+  }
+
+  /** Profondeur réelle du nom : elle doit être **inférieure** à celle du sprite en petit paysage. */
+  get nameDepth(): number {
+    return this.nameLabel.depth;
+  }
+
+  /** Profondeur réelle du sprite. */
+  get depth(): number {
+    return this.image.depth;
   }
 }

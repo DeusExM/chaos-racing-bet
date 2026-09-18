@@ -299,9 +299,9 @@ La disposition compacte est donc devenue, pour la même course :
   surimpression, et ils sont attachés aux personnages ;
 * **les personnages grandissent** : la hauteur récupérée revient aux voies, qui s'étendent
   (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO`), et le rendu passe de
-  `CHARACTER_HEIGHT_PX = 73` à `CHARACTER_HEIGHT_COMPACT_PX = 84` px logiques (nom compris, police
-  `CHARACTER_NAME_FONT_COMPACT_PX = 20`) — la plus grande valeur qui laisse le nom de la première voie
-  entier et une séparation nette entre voisines.
+  `CHARACTER_HEIGHT_PX = 73` à `CHARACTER_HEIGHT_COMPACT_PX = 100` px logiques (police du nom
+  `CHARACTER_NAME_FONT_COMPACT_PX = 20`) — la plus grande valeur de la fourchette demandée qui laisse
+  une séparation nette entre voisines.
 
 Deux précisions issues de la micro-correction suivante. La **seed n'est affichée qu'une fois** : son
 ancien doublon déclaré dans `index.html` a été supprimé, le HUD (dans la colonne) en est le seul
@@ -312,6 +312,24 @@ que la barre occupe quand on met Pause. Le bouton **`Persos`** ouvre enfin un pa
 personnages **en grand**, avec leur nom, en réutilisant les images déjà servies au rendu : c'est une
 surcouche d'interface pure, sans aucun effet sur la course (elle ne connaît ni la simulation, ni le
 speaker, ni la relecture).
+
+**Textes attachés aux personnages, en petit paysage.** Le **nom** et les mots d'événement
+(`TURBO !`, `BONUS !`, `MALUS !`) ne sont plus posés **au-dessus** du sprite : ils vivent **dans la
+voie**, sur l'axe du personnage, et passent **derrière** lui (`characterNameY`, `characterNameDepth` —
+profondeur 5, sous les sprites qui occupent 10 à 15). Le nom porte un léger contour pour rester lisible
+là où l'illustration le recouvre, et le personnage peut donc passer devant une partie de son nom. La
+conséquence est celle qui était recherchée : plus aucun texte ne consomme de hauteur au-dessus d'un
+sprite, donc les personnages peuvent grandir jusqu'à `100` px logiques sans que les voies se
+rapprochent. Les mots d'événement, eux, restent dans la couche DOM du HUD (comme le reste du HUD) : ils
+sont recentrés sur l'axe de la voie et décalés vers l'arrière du personnage, sans le recouvrir. Sur
+**bureau**, rien ne change : le nom reste au-dessus de la tête, au-dessus du sprite, sans contour, et
+les mots d'événement restent au-dessus du sprite.
+
+**Timeline de pause, en petit paysage.** La barre de relecture est **remontée** du bord bas de l'écran
+(marge de sécurité de `0.6rem` en plus de `env(safe-area-inset-bottom)`), et sa **zone tactile fait
+30 px de haut** alors que la piste visible reste fine (4 px) : le curseur natif de Safari, haut de
+~16 px et collé au bord, n'était pas attrapable au doigt. Le dessin du curseur est redéfini pour
+WebKit et pour Gecko, uniquement dans la requête média compacte.
 
 Techniquement, la piste n'a plus le rapport 16:9 de l'arène de bureau : la **largeur logique du canvas**
 est donc déduite du rapport réel de la piste (`viewport.arenaBaseSize`), pour que le canvas et la
@@ -330,9 +348,11 @@ n'est jamais une taille d'affichage. Les fichiers servis font 320 px de haut (co
 par `tools/optimizeCharacterAssets.mjs`, ≈ 0,75 Mio au total), les originaux fournis (~1448×1086,
 ~6,2 Mio) restant **intacts** hors du dépôt : c'est ce qui garde de la marge pour les écrans à haute
 densité tout en respectant le budget de ressources d'`AGENTS.md` §3.6. Le nom reste au-dessus du
-sprite, positionné à partir de la hauteur réellement affichée, et la visibilité (`setDrawn`) est
-calculée sur la **taille réellement dessinée** : les illustrations étant plus larges que hautes, un
-personnage qui ne tient pas entièrement dans la piste est masqué au profit de son marqueur de bord.
+sprite sur les formats de bureau, positionné à partir de la hauteur réellement affichée ; en petit
+paysage il partage l'axe du personnage et passe derrière lui (voir plus haut). La visibilité
+(`setDrawn`) est calculée sur la **taille réellement dessinée** : les illustrations étant plus larges
+que hautes, un personnage qui ne tient pas entièrement dans la piste est masqué au profit de son
+marqueur de bord.
 
 **Relecture pendant une pause manuelle (passe corrective 2).** Pendant une pause du MJ, une petite
 barre apparaît sous les commandes : `−2 s`, une barre de temps, `+2 s`, et une lecture

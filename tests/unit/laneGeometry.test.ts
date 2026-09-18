@@ -5,7 +5,10 @@ import { arenaBaseSize } from '../../src/render/viewport';
 import {
   VIEW,
   characterHeightPx,
+  characterNameDepth,
   characterNameFontPx,
+  characterNameStrokePx,
+  characterNameY,
   laneRatios,
   laneY,
 } from '../../src/render/viewConfig';
@@ -19,8 +22,16 @@ import {
  * Le test E2E mesure ce qui est **réellement dessiné** dans un navigateur, à trois ou quatre
  * résolutions. Mais il ne dit pas *pourquoi* une valeur tient : ces contrôles-ci portent sur les
  * constantes et sur la fonction pure, donc ils échouent **avant** qu'un réglage ne casse la mise en
- * page, et ils expliquent la contrainte (nom entier en haut, aucune silhouette sur la voie voisine)
- * plutôt que de la constater.
+ * page, et ils expliquent la contrainte plutôt que de la constater.
+ *
+ * ## Ce qui a changé avec la micro-correction finale
+ *
+ * En petit paysage, le nom n'est plus posé **au-dessus** du personnage : il partage son axe et passe
+ * derrière lui (`characterNameY`, `characterNameDepth`). La contrainte « le nom tient au-dessus de la
+ * tête » disparaît donc au profit de deux autres, plus simples : le nom reste **dans le cadre du
+ * sprite** (donc il ne réserve aucune hauteur) et deux cadres voisins ne se touchent pas. C'est ce
+ * qui permet d'agrandir les personnages sans rapprocher les voies. Sur bureau, rien ne change : le
+ * nom reste au-dessus de la tête, au-dessus du sprite, sans contour.
  *
  * Le facteur `1.25` est la hauteur de ligne retenue pour le nom : c'est la valeur usuelle d'un texte
  * `system-ui` (ascendante + descendante + interligne) et elle est **conservatrice** — Phaser mesure
@@ -77,9 +88,37 @@ describe('zone des voies', () => {
     for (const compact of [false, true]) {
       const centers = laneCenters(compact);
       const first = centers[0] ?? 0;
-      const labelTop = first - characterHeightPx(compact) / 2 - 2 - nameLabelHeight(compact);
+      // Le nom a son origine en bas (`setOrigin(0.5, 1)`) : il occupe donc la bande juste au-dessus
+      // de l'ordonnée calculée.
+      const labelTop =
+        characterNameY(first, characterHeightPx(compact), compact) - nameLabelHeight(compact);
       expect(labelTop, 'le nom de la première voie sort du haut du canvas').toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('dessine le nom dans la voie et derrière le personnage en petit paysage', () => {
+    const compact = true;
+    const height = characterHeightPx(compact);
+    for (const center of laneCenters(compact)) {
+      const nameY = characterNameY(center, height, compact);
+      // Même axe que le personnage : le nom ne réserve donc **aucune** hauteur au-dessus de lui.
+      expect(nameY, 'le nom partage l’axe du personnage').toBe(center);
+      // Et il tient entièrement dans le cadre du sprite : rien ne dépasse de son encombrement.
+      expect(nameY - nameLabelHeight(compact)).toBeGreaterThanOrEqual(center - height / 2);
+      expect(nameY).toBeLessThanOrEqual(center + height / 2);
+    }
+    // Derrière : sa profondeur est sous celle du premier sprite. Et il porte un contour, sans quoi la
+    // partie recouverte se confondrait avec l'illustration.
+    expect(characterNameDepth(compact)).toBeLessThan(VIEW.CHARACTER_SPRITE_DEPTH_BASE);
+    expect(characterNameStrokePx(compact)).toBeGreaterThan(0);
+  });
+
+  it('laisse le nom au-dessus de la tête sur les formats de bureau', () => {
+    const height = characterHeightPx(false);
+    const first = laneCenters(false)[0] ?? 0;
+    expect(characterNameY(first, height, false)).toBe(first - height / 2 - 2);
+    expect(characterNameDepth(false)).toBeGreaterThanOrEqual(VIEW.CHARACTER_SPRITE_DEPTH_BASE);
+    expect(characterNameStrokePx(false)).toBe(0);
   });
 
   it('garde la dernière silhouette entière, dans les deux formats', () => {
@@ -97,7 +136,8 @@ describe('zone des voies', () => {
       for (let index = 1; index < centers.length; index += 1) {
         const center = centers[index] ?? 0;
         const above = centers[index - 1] ?? 0;
-        const labelTop = center - height / 2 - 2 - nameLabelHeight(compact);
+        const labelTop =
+          characterNameY(center, height, compact) - nameLabelHeight(compact);
         // Silhouette visible de la voie du dessus, dans l'hypothèse la plus défavorable : toute la
         // marge transparente est sous le personnage.
         const visibleBottom = above + height / 2 - height * WORST_CASE_TRANSPARENT_MARGIN;
@@ -105,12 +145,6 @@ describe('zone des voies', () => {
           labelTop,
           `le nom de la voie ${String(index)} recouvre la silhouette de la voie ${String(index - 1)}`,
         ).toBeGreaterThanOrEqual(visibleBottom);
-
-        // En petit paysage, la géométrie est dimensionnée pour aller plus loin : les **cadres** des
-        // images sont eux aussi séparés, sans dépendre de la transparence des fichiers.
-        if (compact) {
-          expect(labelTop).toBeGreaterThanOrEqual(above + height / 2);
-        }
       }
     }
   });
@@ -132,10 +166,10 @@ describe('zone des voies', () => {
   it('agrandit les personnages en petit paysage, dans la fourchette demandée', () => {
     const compactHeight = characterHeightPx(true);
     expect(compactHeight).toBeGreaterThan(characterHeightPx(false));
-    // Fourchette issue du test joueur sur iPhone : 80 à 88 px logiques, la plus grande valeur qui
+    // Fourchette issue du test joueur sur iPhone : 94 à 100 px logiques, la plus grande valeur qui
     // respecte les contraintes ci-dessus étant retenue.
-    expect(compactHeight).toBeGreaterThanOrEqual(80);
-    expect(compactHeight).toBeLessThanOrEqual(88);
+    expect(compactHeight).toBeGreaterThanOrEqual(94);
+    expect(compactHeight).toBeLessThanOrEqual(100);
     // Le nom grandit aussi : le canvas d'un téléphone est réduit à ≈ 0,54, donc la police nominale
     // rendrait ≈ 7,5 px CSS, sous le plancher de lisibilité.
     expect(characterNameFontPx(true)).toBeGreaterThan(characterNameFontPx(false));

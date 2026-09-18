@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { CHARACTERS, CHARACTER_IDS } from '../../src/core/characters';
 import { characterHeightPx } from '../../src/render/viewConfig';
 import { REPLAY_STEP_STEPS } from '../../src/render/view/replayModel';
-import { expectNoErrors, raceUrl, waitForHooks, watchConsole } from './helpers';
+import { expectNoErrors, raceUrl, waitForFinished, waitForHooks, watchConsole } from './helpers';
 
 /**
  * Disposition réelle d'un téléphone en paysage (passe responsive issue du test sur iPhone).
@@ -850,3 +850,162 @@ test('les textes d’événement restent dans la voie du personnage en 844×390'
 
   expectNoErrors(watch);
 });
+
+/**
+ * Écran d'arrivée et **zone protégée de l'iPhone** (Dynamic Island), en paysage.
+ *
+ * ## Le défaut constaté
+ *
+ * Sur un vrai iPhone en paysage, tout est correctement placé **pendant** la course, mais le panneau
+ * d'arrivée — le seul bloc du HUD qui traverse toute la largeur (`grid-column: 1 / -1`) — passait sous
+ * la Dynamic Island : une partie du classement final se retrouvait dans la zone capteur.
+ *
+ * ## Comment on le prouve dans un navigateur de bureau
+ *
+ * `env(safe-area-inset-*)` vaut `0` sur un écran sans encoche : mesurer sans rien simuler ne
+ * prouverait donc rien. Chromium expose `Emulation.setSafeAreaInsetsOverride`, exactement ce
+ * qu'utilise le mode appareil des DevTools : on impose donc une zone protégée **réaliste** (59 px de
+ * chaque côté, comme un iPhone 14 Pro en paysage) et on vérifie que **tout le contenu** du panneau
+ * reste à l'intérieur — titre, six lignes de classement, passages en tête et boutons de fin.
+ *
+ * Le correctif ne touche que ce panneau : la piste et les commandes sont mesurées **avant** et
+ * **après** l'ouverture de l'écran d'arrivée, et doivent être identiques au pixel.
+ */
+for (const phone of [
+  { name: '844×390', width: 844, height: 390 },
+  { name: '926×428', width: 926, height: 428 },
+] as const) {
+  test(`l’écran d’arrivée reste hors de la zone protégée de l’iPhone en ${phone.name}`, async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const watch = watchConsole(page);
+    await page.setViewportSize({ width: phone.width, height: phone.height });
+
+    // Zone protégée imposée **avant** le chargement : `env()` est lu au calcul du style, donc une
+    // ouverture après coup ne changerait rien.
+    const client = await page.context().newCDPSession(page);
+    const insets = { top: 0, left: 59, bottom: 21, right: 59 };
+    await client.send('Emulation.setSafeAreaInsetsOverride', { insets });
+
+    await page.goto(raceUrl({ seed: SEED, fast: true, autostart: false }));
+    await waitForHooks(page);
+
+    // Géométrie **avant** l'arrivée : c'est la référence de non-régression du reste de l'écran.
+    const before = await page.evaluate(() => {
+      const box = (selector: string): Box | null => {
+        const element = document.querySelector(selector);
+        if (element === null) {
+          return null;
+        }
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
+      };
+      return { canvas: box('#game canvas'), controls: box('.controls') };
+    });
+
+    await page.evaluate(() => {
+      window.__CHAOS_RACE__?.start();
+    });
+    await waitForFinished(page);
+    await expect(page.getByTestId('finish')).toBeVisible();
+
+    const measured = await page.evaluate(() => {
+      const box = (element: Element | null): Box | null => {
+        if (element === null) {
+          return null;
+        }
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
+      };
+      const finish = document.querySelector('[data-testid="finish"]');
+      const style = finish === null ? null : getComputedStyle(finish);
+      return {
+        paddingLeft: style?.paddingLeft ?? '',
+        paddingRight: style?.paddingRight ?? '',
+        panel: box(finish),
+        title: box(document.querySelector('.hud-finish-title')),
+        rows: Array.from(document.querySelectorAll('[data-testid="finish-row"]')).map((row) =>
+          box(row),
+        ),
+        passagesTitle: box(document.querySelector('.hud-finish-passages .hud-finish-subtitle')),
+        passages: Array.from(document.querySelectorAll('[data-testid="finish-passage"]')).map(
+          (row) => box(row),
+        ),
+        actions: Array.from(document.querySelectorAll('.hud-finish-actions button')).map((button) =>
+          box(button),
+        ),
+        canvas: box(document.querySelector('#game canvas')),
+        controls: box(document.querySelector('.controls')),
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      };
+    });
+
+    // 1) `env(safe-area-inset-*)` est réellement appliqué : le rembourrage horizontal vaut la marge de
+    //    base **plus** la zone protégée, des deux côtés (l'orientation peut la mettre à gauche ou à
+    //    droite, donc les deux sont protégés).
+    const basePadding = 0.35 * 16;
+    expect(parseFloat(measured.paddingLeft)).toBeCloseTo(basePadding + insets.left, 1);
+    expect(parseFloat(measured.paddingRight)).toBeCloseTo(basePadding + insets.right, 1);
+
+    // 2) Le panneau lui-même reste pleine largeur (c'est un fond) : c'est son **contenu** qui doit
+    //    sortir de la zone capteur. Aucun texte, aucune ligne, aucun bouton ne s'y trouve.
+    const inside = (box: Box | null, label: string): void => {
+      expect(box, `${label} présent`).not.toBeNull();
+      if (box === null) {
+        return;
+      }
+      expect(box.left, `${label} hors de la zone protégée (gauche)`).toBeGreaterThanOrEqual(
+        insets.left,
+      );
+      expect(box.right, `${label} hors de la zone protégée (droite)`).toBeLessThanOrEqual(
+        measured.viewport.width - insets.right,
+      );
+      expect(box.top, `${label} dans la fenêtre (haut)`).toBeGreaterThanOrEqual(0);
+      expect(box.bottom, `${label} entièrement visible (bas)`).toBeLessThanOrEqual(
+        measured.viewport.height,
+      );
+      expect(box.width, `${label} non écrasé`).toBeGreaterThan(0);
+      expect(box.height, `${label} non écrasé`).toBeGreaterThan(0);
+    };
+
+    inside(measured.title, 'titre Arrivée');
+    expect(measured.rows, 'les six lignes du classement final').toHaveLength(CHARACTER_IDS.length);
+    for (const [index, row] of measured.rows.entries()) {
+      inside(row, `ligne de classement ${String(index + 1)}`);
+    }
+    inside(measured.passagesTitle, 'titre Passages en tête');
+    expect(measured.passages, 'les trois bornes').toHaveLength(3);
+    for (const [index, passage] of measured.passages.entries()) {
+      inside(passage, `passage ${String(index + 1)}`);
+    }
+    expect(measured.actions, 'les deux boutons de fin').toHaveLength(2);
+    for (const [index, button] of measured.actions.entries()) {
+      inside(button, `bouton de fin ${String(index + 1)}`);
+    }
+
+    // 3) Les deux boutons restent réellement utilisables (visibles, dans la fenêtre, cliquables).
+    await expect(page.getByTestId('finish-replay-same')).toBeVisible();
+    await expect(page.getByTestId('finish-new-race')).toBeVisible();
+
+    // 4) Le reste du jeu n'a pas bougé d'un pixel : le correctif ne concerne que ce panneau.
+    expect(measured.canvas, 'la piste est intacte').toEqual(before.canvas);
+    expect(measured.controls, 'les commandes sont intactes').toEqual(before.controls);
+
+    expectNoErrors(watch);
+  });
+}

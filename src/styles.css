@@ -1362,7 +1362,19 @@ body {
   .hud-finish {
     grid-row: 4;
     gap: 0.15rem;
-    padding: 0.2rem 0.35rem;
+    /*
+     * Dynamic Island / zone capteur (passe de vérification).
+     *
+     * En paysage, la zone protégée d'iOS se trouve sur l'un des deux **bords courts** de l'écran — à
+     * gauche ou à droite selon le sens de rotation, donc on protège **les deux côtés**. Le panneau
+     * d'arrivée est le seul bloc du HUD qui traverse **toute** la largeur (`grid-column: 1 / -1`) :
+     * sans marge, le classement final, les passages en tête et les boutons de fin pouvaient passer
+     * sous la Dynamic Island. La marge est ajoutée **à l'intérieur du panneau**, et seulement là : la
+     * piste, le classement live, la ligne d'état, les commandes, la timeline et la galerie gardent
+     * exactement leur géométrie.
+     */
+    padding: 0.2rem calc(0.35rem + env(safe-area-inset-right, 0px)) 0.2rem
+      calc(0.35rem + env(safe-area-inset-left, 0px));
   }
 
   .hud-finish-subtitle {

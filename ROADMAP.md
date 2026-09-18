@@ -1209,6 +1209,29 @@ le panneau), et `Terminé` à l'arrivée.
 > nominale » de la piste est supprimé (il ressemblait à une ligne d'arrivée) sans que la logique
 > d'arrivée — qui reste **temporelle** — soit touchée. Voir `GAME_DESIGN.md` §5.2.
 
+> **Note (passe de vérification, après le troisième test joueur manuel).** Même nature que les passes
+> précédentes : **aucune** constante de simulation touchée (`SPEED.*`, `DRIFT.*`, `SURGE.*`,
+> `EVENT.*`, `OVERTAKE.*`, `RACE_CONFIG`, `SIM_CONFIG` intacts), **aucun** tirage aléatoire déplacé,
+> aucun seuil d'équilibrage modifié. Deux points :
+>
+> 1. **Écran d'arrivée et Dynamic Island.** En paysage de téléphone, le panneau final traverse toute la
+>    largeur de l'écran : il reçoit maintenant `env(safe-area-inset-left)` et
+>    `env(safe-area-inset-right)` **à l'intérieur de son rembourrage**, et rien d'autre ne bouge (la
+>    piste et les commandes sont mesurées avant/après l'arrivée et doivent être identiques au pixel).
+>    `viewport-fit=cover` était déjà en place. Preuve : zone protégée réellement imposée
+>    (`Emulation.setSafeAreaInsetsOverride`, 59 px de chaque côté) à 844×390 et 926×428, tous les
+>    éléments du panneau restant dedans. Le test échoue si l'on retire la marge — vérifié.
+> 2. **Audit statistique des leaders.** Nouvel outil **`npm run balance:leaders`**
+>    (`tools/leaderAudit.ts`, `tools/leaderAuditRunner.mjs`, `tests/unit/leaderAudit.test.ts`,
+>    22 tests) : sur **10 000 seeds**, il mesure le leader exact à 20 s / 40 s / 60 s, les matrices de
+>    transition, la persistance, les taux de victoire, l'unicité du corpus et l'indépendance des flux
+>    RNG — et compare un sous-corpus de 1000 seeds aux références publiées. Résultat : **aucune
+>    anomalie** (parts compatibles avec `1/6`, χ² ≤ 4,61 pour un seuil de 11,07 ; 10 000 courses
+>    distinctes ; références `8,308`, `63,20 %`, `100/100`, `15,30 % – 18,40 %` reproduites à
+>    l'identique). L'impression « le même leader mène souvent les trois bornes » est **confirmée**
+>    (34,04 % des courses) et **normale** : elle est la conséquence directe de l'avance acquise, pas
+>    d'un biais. Voir `GAME_DESIGN.md` §13.
+
 ---
 
 ### P013.5 — Jalon 3D : prototype de rendu et choix du moteur `[ ]`

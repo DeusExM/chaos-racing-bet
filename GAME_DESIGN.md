@@ -447,6 +447,18 @@ de l'**historique de résultats déjà calculés**.
   dépassait donc l'écran même quand le panneau, lui, était correct. La rangée est maintenant définie
   (`minmax(0, 1fr)`), et l'en-tête, les rembourrages et les écarts sont légèrement resserrés en petit
   paysage avant de réduire les images.
+* **Écran d'arrivée et Dynamic Island.** En paysage de téléphone, l'écran final est le **seul** bloc du
+  HUD qui traverse toute la largeur de l'écran (`grid-column: 1 / -1`) : sans marge, son classement
+  final, ses passages en tête ou ses boutons pouvaient passer sous la Dynamic Island. La zone protégée
+  d'iOS se trouve sur l'un des deux **bords courts**, à gauche ou à droite selon le sens de rotation :
+  les deux côtés sont donc protégés, en ajoutant `env(safe-area-inset-left)` et
+  `env(safe-area-inset-right)` au rembourrage **intérieur** du panneau d'arrivée, et **seulement** là.
+  La piste, le classement en course, la ligne d'état, les commandes, la timeline et la galerie gardent
+  exactement leur géométrie : le test mesure la piste et les commandes avant et après l'arrivée et
+  exige qu'elles soient **identiques au pixel**. `viewport-fit=cover` était déjà présent dans le
+  viewport et n'a pas été modifié. La preuve est faite en imposant une vraie zone protégée
+  (`Emulation.setSafeAreaInsetsOverride`, 59 px de chaque côté) à 844×390 et 926×428 : titre,
+  six lignes de classement, passages et boutons restent tous à l'intérieur.
 * **Repère d'échelle retiré.** L'**échelle nominale** affichée sur la piste a été supprimée : elle
   ressemblait à une ligne d'arrivée et induisait en erreur, alors que la course se termine **par le
   temps** (§5, invariant 3). Le repère n'a **pas** été renommé `Arrivée` — ce serait faux — et la
@@ -1161,6 +1173,35 @@ document et les seuils changent ensemble.
 > conformes sans être touchées. Aucune constante de `SPEED`, `SURGE`, `EVENT`, `DRIFT` ni `OVERTAKE`
 > n'a été modifiée, et `EVENT.RATE_PER_S` vaut toujours `1/14` (une tentative à `1/10` a été mesurée
 > puis **annulée** : elle sortait la cadence des événements de la plage).
+
+> **Passe de vérification des leaders (test joueur n° 3) — aucune constante modifiée.** Un joueur a eu
+> l'impression que « le même personnage est souvent premier à 20 s, à 40 s et à l'arrivée ». Mesuré sur
+> **10 000 seeds** par `npm run balance:leaders` (rapports `.tmp/leader-audit.txt` et
+> `.tmp/leader-audit.json`) :
+>
+> | Mesure | Valeur |
+> | --- | --- |
+> | Part de leader à 20 s | 16,24 % – 16,82 % (χ² = 1,54 ; seuil 5 % = 11,07) |
+> | Part de leader à 40 s | 16,26 % – 17,04 % (χ² = 3,07) |
+> | Part de leader à 60 s (= vainqueur) | 16,24 % – 17,10 % (χ² = 4,61) |
+> | Même leader aux trois bornes | 34,04 % |
+> | Exactement 2 leaders distincts | 53,25 % |
+> | 3 leaders distincts | 12,71 % |
+> | Leader 20 s = leader 40 s | 51,61 % |
+> | Leader 40 s = vainqueur | 62,23 % |
+> | Leader 20 s = vainqueur | 41,53 % |
+> | Changements de leader (moyenne) | 8,19 sur 10 000 seeds ; **8,308** sur le sous-corpus de 1000 seeds |
+> | 10 000 courses distinctes | oui : 10 000 vecteurs de distance, **720** classements, **216** triplets de leaders |
+> | Flux RNG (15 streams) | aucune paire identique, aucune corrélation hors du hasard, χ²(9) ≤ 14,27 (seuil corrigé 27,88) |
+>
+> **Conclusion : aucune anomalie.** L'impression du joueur est **confirmée par la mesure** — un tiers
+> des courses garde le même leader d'un bout à l'autre — mais elle n'est pas un défaut : les parts par
+> personnage restent compatibles avec `1/6` (χ² très en dessous du seuil à 5 %, |z| maximal `1,16`
+> contre `2,64` après correction de Bonferroni), aucun personnage n'est favorisé, et le sous-corpus de
+> 1000 seeds **reproduit exactement** les références déjà publiées ici (`8,308`, `63,20 %`, `100/100`,
+> `15,30 % – 18,40 %`). Aucune constante de `SPEED`, `DRIFT`, `SURGE`, `EVENT` ni `OVERTAKE` n'a été
+> touchée, et aucun tirage aléatoire n'a été déplacé.
+
 
 > **Biais de vitesse — résolu en P010, revérifié à 60 s.** La dérive, les surges et les événements ont
 > chacun une espérance **nette positive**, et leur somme dépassait le seuil `±1,5 %` de §13. P008 avait

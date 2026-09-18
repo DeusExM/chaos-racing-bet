@@ -267,8 +267,9 @@ export class RaceScene extends Scene {
             // images n'étant pas carrées, la largeur et la hauteur sont publiées séparément.
             width: sprite.width,
             height: sprite.height,
-            // Position et profondeur du nom : elles prouvent que le nom est bien **dans** la voie et
-            // **derrière** le personnage en petit paysage, donc qu'il ne consomme aucune hauteur.
+            // Position et profondeur du nom : elles prouvent que le nom est bien **dans** la voie,
+            // **derrière** le personnage au sens de la course (à sa gauche) et jamais dessous.
+            nameX: sprite.nameX,
             nameY: sprite.nameY,
             nameDepth: sprite.nameDepth,
             depth: sprite.depth,

@@ -6,9 +6,9 @@ import { characterTextureKey } from '../characterAssets';
 import {
   VIEW,
   characterHeightPx,
-  characterNameDepth,
   characterNameFontPx,
-  characterNameStrokePx,
+  characterNameOrigin,
+  characterNameX,
   characterNameY,
   laneY,
 } from '../viewConfig';
@@ -100,25 +100,29 @@ export class CharacterSprite {
     this.image.setDisplaySize(this.widthPx, this.heightPx);
     this.nameLabel.setFontSize(this.fontSizePx);
     this.edgeMarker.setFontSize(this.fontSizePx);
-    // Derrière le personnage, le nom a besoin d'un contour : sans lui, la partie recouverte par
-    // l'illustration se confondrait avec elle. Le contour n'existe qu'en petit paysage, et il porte
-    // sur le dessin du texte, pas sur sa boîte : aucune mesure de mise en page ne change.
-    this.nameLabel.setStroke(VIEW.CHARACTER_NAME_STROKE_COLOR, characterNameStrokePx(compact));
+    // Le nom est ancré par son bord droit en petit paysage (il est posé à gauche du personnage) et
+    // centré ailleurs : l'origine fait partie du format, comme la taille.
+    const origin = characterNameOrigin(compact);
+    this.nameLabel.setOrigin(origin.x, origin.y);
   }
 
   /**
    * Positionne le personnage à partir de sa distance et de la voie qui lui est réservée.
    *
-   * Le nom partage l'axe du personnage en petit paysage (`characterNameY`) et passe **derrière** lui
-   * (`characterNameDepth`) : il ne consomme donc aucune hauteur, et le personnage peut le recouvrir en
-   * partie. Sur bureau, il reste juste au-dessus de la tête, au-dessus du sprite.
+   * Le nom suit le personnage horizontalement, mais **derrière** lui au sens de la course : à sa
+   * gauche, sur l'axe de sa voie, séparé du sprite par `CHARACTER_NAME_GAP_PX`. Il ne consomme donc
+   * aucune hauteur, et il n'est jamais recouvert par l'illustration. Sur bureau, il reste centré
+   * juste au-dessus de la tête.
    */
   place(screenX: number, heightPx: number, compact = false): void {
     const y = laneY(this.laneIndex, heightPx, compact);
     this.image.setPosition(screenX, y);
-    this.nameLabel.setPosition(screenX, characterNameY(y, this.heightPx, compact));
+    this.nameLabel.setPosition(
+      characterNameX(screenX, this.widthPx, compact),
+      characterNameY(y, this.heightPx, compact),
+    );
     this.image.setDepth(VIEW.CHARACTER_SPRITE_DEPTH_BASE + this.laneIndex);
-    this.nameLabel.setDepth(characterNameDepth(compact));
+    this.nameLabel.setDepth(VIEW.CHARACTER_NAME_DEPTH);
   }
 
   /** Signale un personnage sorti de la fenêtre, collé au bord correspondant. */
@@ -192,6 +196,16 @@ export class CharacterSprite {
   }
 
   /**
+   * Abscisse réellement dessinée du nom, en pixels logiques.
+   *
+   * En petit paysage, elle est **à gauche** du sprite (le nom est derrière le personnage dans le sens
+   * de la course) et séparée de lui : le texte n'est donc jamais recouvert par l'illustration.
+   */
+  get nameX(): number {
+    return this.nameLabel.x;
+  }
+
+  /**
    * Ordonnée réellement dessinée du nom, en pixels logiques.
    *
    * Elle est publiée pour qu'un test puisse prouver que le nom partage l'axe du personnage en petit
@@ -201,7 +215,7 @@ export class CharacterSprite {
     return this.nameLabel.y;
   }
 
-  /** Profondeur réelle du nom : elle doit être **inférieure** à celle du sprite en petit paysage. */
+  /** Profondeur réelle du nom : elle est **au-dessus** des sprites, dans les deux formats. */
   get nameDepth(): number {
     return this.nameLabel.depth;
   }

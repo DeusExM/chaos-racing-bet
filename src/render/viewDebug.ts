@@ -24,13 +24,20 @@ export interface SpriteView {
   /** Hauteur réellement dessinée, en pixels logiques du canvas. */
   readonly height: number;
   /**
+   * Abscisse réellement dessinée du **nom**, en pixels logiques du canvas.
+   *
+   * En petit paysage, elle est **à gauche** du sprite : le nom est derrière le personnage au sens de
+   * la course (la course va de gauche à droite), jamais dessous.
+   */
+  readonly nameX: number;
+  /**
    * Ordonnée réellement dessinée du **nom**, en pixels logiques du canvas.
    *
    * En petit paysage, elle est égale à `screenY` : le nom vit dans la voie, sur l'axe du personnage,
    * et ne réserve donc aucune hauteur au-dessus du sprite (micro-correction finale).
    */
   readonly nameY: number;
-  /** Profondeur du nom. Inférieure à `depth` en petit paysage : le nom passe **derrière** le sprite. */
+  /** Profondeur du nom. Supérieure à `depth` : le nom n'est jamais derrière le sprite en profondeur. */
   readonly nameDepth: number;
   /** Profondeur du sprite. */
   readonly depth: number;

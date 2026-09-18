@@ -1043,9 +1043,12 @@ body {
  * utilisable au doigt sur un vrai iPhone, où le curseur natif était trop bas et trop fin.
  *
  * Enfin, les textes attachés aux personnages — le **nom** (dessiné par le rendu, voir
- * `characterNameY`) et les mots d'événement (`TURBO !`, `BONUS !`, `MALUS !`) — sont ramenés **dans
- * la voie**, sur l'axe du personnage : ils ne réservent plus aucune hauteur au-dessus du sprite, ce
- * qui permet d'agrandir les personnages (`CHARACTER_HEIGHT_COMPACT_PX`) sans rapprocher les voies.
+ * `characterNameX`) et les mots d'événement (`TURBO !`, `BONUS !`, `MALUS !`) — vivent **dans la
+ * voie**, sur l'axe du personnage, et **derrière lui au sens de la course** : à sa gauche, puisque la
+ * course va de gauche à droite. « Derrière » ne veut donc **pas** dire sous l'image : le texte n'est
+ * jamais recouvert par le sprite, et il n'a pas besoin de contour. Aucun de ces textes ne réserve de
+ * hauteur au-dessus du sprite, ce qui permet d'agrandir les personnages
+ * (`CHARACTER_HEIGHT_COMPACT_PX`) sans rapprocher les voies.
  *
  * ## Pourquoi la colonne 1 de la grille est exactement la piste
  *
@@ -1412,16 +1415,19 @@ body {
    * 12) Les textes temporaires (`TURBO !`, `BONUS !`, `MALUS !`) entrent dans la voie.
    *
    * Ils étaient posés au-dessus du sprite : ils consommaient donc la hauteur de la voie, et
-   * interdisaient d'agrandir les personnages. Ils sont maintenant **sur l'axe de la voie**, recentrés
-   * verticalement et décalés vers l'arrière du personnage (à gauche, puisqu'il avance vers la
-   * droite) : ils restent dans la bande de la voie, ne réservent aucune hauteur, et ne recouvrent ni
-   * la silhouette ni le visage — le décalage vaut la demi-largeur du sprite à l'échelle du téléphone.
-   * Le décalage est celui d'une variable, donc l'animation d'apparition suit la même position sans
-   * être réécrite.
+   * interdisaient d'agrandir les personnages. Ils sont maintenant **dans la voie**, sur l'axe du
+   * personnage, et **derrière lui au sens de la course** : à sa gauche, puisque la course va de gauche
+   * à droite. Le décalage horizontal vaut la **demi-largeur du sprite** plus une petite marge, donc le
+   * badge s'arrête avant l'image et ne fusionne jamais avec elle. Cette demi-largeur est exprimée en
+   * `vh` parce qu'elle suit l'échelle du canvas : `106 px logiques × 1,334 / 2`, rapportés à la hauteur
+   * logique de `720` px que le canvas compact épouse (`9,82 %` de la hauteur de la fenêtre). Le
+   * décalage est une variable, donc l'animation d'apparition suit la même position : elle ne fait que
+   * monter de `0,3rem` et grandir, sans jamais déplacer le badge vers l'avant.
    */
   .hud-event {
-    --event-shift: translate(calc(-100% - 2.2rem), -50%);
-    --event-shift-from: translate(calc(-100% - 1.7rem), -50%);
+    --sprite-half-width: 9.82vh;
+    --event-shift: translate(calc(-100% - var(--sprite-half-width) - 0.4rem), -50%);
+    --event-shift-from: translate(calc(-100% - var(--sprite-half-width) - 0.4rem), calc(-50% + 0.3rem));
     font-size: 0.62rem;
   }
 

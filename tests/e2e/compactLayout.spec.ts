@@ -79,6 +79,7 @@ interface CompactLayout {
     readonly id: string;
     readonly screenX: number;
     readonly screenY: number;
+    readonly nameX: number;
     readonly nameY: number;
     readonly nameDepth: number;
     readonly depth: number;
@@ -188,6 +189,7 @@ async function measure(page: Page): Promise<CompactLayout> {
         id: sprite.id,
         screenX: sprite.screenX,
         screenY: sprite.screenY,
+        nameX: sprite.nameX,
         nameY: sprite.nameY,
         nameDepth: sprite.nameDepth,
         depth: sprite.depth,
@@ -355,13 +357,13 @@ for (const viewport of VIEWPORTS) {
       characterHeightPx(true),
       0,
     );
-    expect(characterHeightPx(true), 'fourchette demandée sur téléphone').toBeGreaterThanOrEqual(94);
-    expect(characterHeightPx(true), 'fourchette demandée sur téléphone').toBeLessThanOrEqual(100);
+    expect(characterHeightPx(true), 'fourchette demandée sur téléphone').toBeGreaterThanOrEqual(104);
+    expect(characterHeightPx(true), 'fourchette demandée sur téléphone').toBeLessThanOrEqual(106);
     expect(characterHeightPx(true)).toBeGreaterThan(characterHeightPx(false));
     expect(
       spriteHeight * scale,
-      'un personnage affiché mesure au moins 50 px CSS',
-    ).toBeGreaterThanOrEqual(50);
+      'un personnage affiché mesure au moins 55 px CSS',
+    ).toBeGreaterThanOrEqual(55);
 
     expect(layout.sprites, 'les six voies sont suivies').toHaveLength(CHARACTER_IDS.length);
     const laneYs = [...layout.sprites].map((sprite) => sprite.screenY).sort((a, b) => a - b);
@@ -380,16 +382,27 @@ for (const viewport of VIEWPORTS) {
       }
     }
 
-    // 9) Le nom vit **dans** la voie, sur l'axe du personnage, et passe **derrière** lui : il ne
-    // réserve donc aucune hauteur au-dessus du sprite. C'est ce qui autorise la taille ci-dessus.
+    // 9) Le nom vit **dans** la voie, sur l'axe du personnage, et **derrière lui au sens de la
+    // course** — à sa gauche, puisque la course va de gauche à droite. Il ne réserve donc aucune
+    // hauteur au-dessus du sprite, et il n'est jamais recouvert par l'illustration : c'est ce qui
+    // autorise la taille ci-dessus.
     for (const sprite of layout.sprites) {
       expect(sprite.nameY, `le nom de ${sprite.id} est sur l’axe du personnage`).toBeCloseTo(
         sprite.screenY,
         3,
       );
-      expect(sprite.nameDepth, `le nom de ${sprite.id} passe derrière le sprite`).toBeLessThan(
-        sprite.depth,
-      );
+      expect(
+        sprite.nameX,
+        `le nom de ${sprite.id} s’arrête avant le début du sprite`,
+      ).toBeLessThanOrEqual(sprite.screenX - sprite.width / 2);
+      expect(
+        sprite.screenX - sprite.width / 2 - sprite.nameX,
+        `un espace sépare le nom de ${sprite.id} de son sprite`,
+      ).toBeGreaterThanOrEqual(1);
+      expect(
+        sprite.nameDepth,
+        `le nom de ${sprite.id} n’est pas derrière le sprite en profondeur`,
+      ).toBeGreaterThan(sprite.depth);
     }
 
     expectNoErrors(watch);
@@ -730,6 +743,7 @@ test('les textes d’événement restent dans la voie du personnage en 844×390'
           : {
               axisY: canvasRect.top + sprite.screenY * scale,
               centerX: canvasRect.left + sprite.screenX * scale,
+              leftX: canvasRect.left + (sprite.screenX - sprite.width / 2) * scale,
               topY: canvasRect.top + (sprite.screenY - sprite.height / 2) * scale,
               height: sprite.height * scale,
             },
@@ -753,11 +767,12 @@ test('les textes d’événement restent dans la voie du personnage en 844×390'
     measured.badge.centerY,
     'le badge n’est plus posé au-dessus du sprite',
   ).toBeGreaterThan(sprite.topY);
-  // …et il reste **derrière** lui : il ne dépasse pas vers l'avant du personnage.
+  // …et il reste **derrière** lui au sens de la course : il s'arrête avant le début du sprite, donc il
+  // ne fusionne jamais avec l'image.
   expect(
     measured.badge.right,
-    'le badge est à l’arrière du personnage, pas devant',
-  ).toBeLessThanOrEqual(sprite.centerX + 2);
+    `le badge s’arrête avant le sprite (badge ${measured.badge.right.toFixed(1)}, sprite ${sprite.leftX.toFixed(1)})`,
+  ).toBeLessThanOrEqual(sprite.leftX);
 
   expectNoErrors(watch);
 });

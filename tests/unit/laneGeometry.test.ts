@@ -13,6 +13,7 @@ import {
   laneRatios,
   laneY,
 } from '../../src/render/viewConfig';
+import type { LaneBand } from '../../src/render/viewConfig';
 
 /**
  * Géométrie des voies : c'est elle qui décide si les personnages se chevauchent, si leur nom reste
@@ -69,9 +70,19 @@ function nameLabelHeight(compact: boolean, participants: number): number {
   return characterNameFontPx(participants, compact) * LABEL_LINE_HEIGHT_FACTOR;
 }
 
+/**
+ * Bande des voies d'un effectif, telle que le rendu la construit.
+ *
+ * La bande **reçoit** la hauteur de cadre (`characterHeightPx`) : c'est la même valeur que celle des
+ * sprites, donc le test mesure exactement la géométrie qui est dessinée.
+ */
+function bandFor(compact: boolean, participants: number = CHARACTER_IDS.length): LaneBand {
+  return laneBand(participants, compact, characterHeightPx(participants, compact));
+}
+
 /** Ordonnées des voies d'un effectif, dans l'ordre du roster. */
 function laneCenters(compact: boolean, participants: number = CHARACTER_IDS.length): number[] {
-  const band = laneBand(participants, compact);
+  const band = bandFor(compact, participants);
   return Array.from({ length: participants }, (_, index) =>
     laneY(index, band, participants),
   );
@@ -98,7 +109,7 @@ describe('zone des voies', () => {
     for (const compact of [false, true]) {
       for (const participants of PARTICIPANT_COUNTS) {
         const centers = laneCenters(compact, participants);
-        const band = laneBand(participants, compact);
+        const band = bandFor(compact, participants);
         expect(centers).toHaveLength(participants);
         expect(centers[0]).toBeCloseTo(band.top, 6);
         expect(centers[centers.length - 1]).toBeCloseTo(band.bottom, 6);
@@ -247,27 +258,32 @@ describe('zone des voies', () => {
     }
   });
 
-  it('retient la plus grande hauteur qui respecte les contraintes, pour chaque effectif', () => {
+  it('retient la plus grande hauteur qui respecte la contrainte de séparation', () => {
+    // La hauteur est le plus grand entier `h` tel que, une fois les centres répartis entre les deux
+    // bords de la bande, il reste `MIN_VISIBLE_GAP` entre deux silhouettes. Un pixel de plus doit
+    // briser l'inégalité : c'est ce qui prouve que la valeur est le maximum, pas un réglage au jugé.
+    const margin = 20;
+    const gap = 10;
     for (const compact of [false, true]) {
       for (const participants of PARTICIPANT_COUNTS) {
-        const band = laneBand(participants, compact);
         const height = characterHeightPx(participants, compact);
-        const spacing = (band.bottom - band.top) / (participants - 1);
-        // 1) la séparation visible est respectée…
-        expect(spacing - height * MAX_VISIBLE_FRACTION).toBeGreaterThanOrEqual(10);
-        // 2) …et un pixel de plus la briserait, ou ferait sortir un cadre de l'arène : la valeur
-        //    retenue est donc la plus grande possible, jamais un réglage « au feeling ».
-        const canvasBound = 2 * Math.min(band.top, VIEW.BASE_HEIGHT - band.bottom);
-        const ceiling = Math.min((spacing - 10) / MAX_VISIBLE_FRACTION, canvasBound);
         if (participants === CHARACTER_IDS.length) {
-          // À six coureurs, la taille est **figée** par les constantes historiques, sous le plafond.
+          // À six coureurs, la taille est **figée** par les constantes historiques, sans calcul.
           expect(height).toBe(
             compact ? VIEW.CHARACTER_HEIGHT_COMPACT_PX : VIEW.CHARACTER_HEIGHT_PX,
           );
-          expect(height).toBeLessThanOrEqual(Math.floor(ceiling));
-        } else {
-          expect(height).toBe(Math.floor(ceiling));
+          continue;
         }
+        const expected = Math.floor(
+          (VIEW.BASE_HEIGHT - 2 * margin - gap * (participants - 1)) /
+            (1 + MAX_VISIBLE_FRACTION * (participants - 1)),
+        );
+        expect(height, `${String(participants)} coureurs`).toBe(expected);
+        // La même inégalité, écrite telle qu'elle se mesure à l'écran, pour `h` puis pour `h + 1`.
+        const spacing = (VIEW.BASE_HEIGHT - 2 * margin - height) / (participants - 1);
+        expect(spacing - height * MAX_VISIBLE_FRACTION).toBeGreaterThanOrEqual(gap);
+        const next = (VIEW.BASE_HEIGHT - 2 * margin - (height + 1)) / (participants - 1);
+        expect(next - (height + 1) * MAX_VISIBLE_FRACTION).toBeLessThan(gap);
       }
     }
   });
@@ -276,32 +292,30 @@ describe('zone des voies', () => {
     // La géométrie de l'effectif de référence est **gelée** : elle ne doit pas bouger d'un pixel,
     // puisque c'est elle qui définit « une course à six comme avant ».
     for (const compact of [false, true]) {
-      expect(laneBand(CHARACTER_IDS.length, compact)).toEqual(laneRatios(compact));
+      expect(bandFor(compact, CHARACTER_IDS.length)).toEqual(laneRatios(compact));
     }
   });
 
-  it('garde chaque cadre entier dans l’arène, grâce à une bande calculée par effectif', () => {
-    // La bande est la plus grande qui laisse chaque cadre **entier** dans l'arène. C'est ce calcul qui
-    // remplace l'ancienne borne fixe (`2 × 72 = 144 px`), qui écrasait tous les effectifs réduits à la
-    // même taille : la bande s'élargit vers les bords à mesure que l'effectif diminue.
+  it('pose le bord du premier et du dernier cadre à 20 px du canvas, à effectif réduit', () => {
+    // La bande place le **bord** du premier cadre à 20 px du haut et le bord du dernier à 20 px du
+    // bas, puis répartit les centres uniformément. C'est ce calcul qui remplace l'ancienne borne fixe
+    // (`2 × 72 = 144 px`), qui écrasait tous les effectifs réduits à la même taille.
+    const margin = 20;
     for (const compact of [false, true]) {
       for (const participants of PARTICIPANT_COUNTS) {
-        const band = laneBand(participants, compact);
+        const band = bandFor(compact, participants);
         const height = characterHeightPx(participants, compact);
-        expect(band.top).toBeGreaterThan(0);
-        expect(band.bottom).toBeLessThan(VIEW.BASE_HEIGHT);
-        // Le cadre de la première et de la dernière voie reste **entièrement** dans le canvas.
-        expect(band.top - height / 2, 'la première voie sort par le haut').toBeGreaterThanOrEqual(0);
-        expect(
-          band.bottom + height / 2,
-          'la dernière voie sort par le bas',
-        ).toBeLessThanOrEqual(VIEW.BASE_HEIGHT);
         if (participants < CHARACTER_IDS.length) {
-          // Le gain est réel : le cadre d'un effectif réduit est plus grand que celui de l'effectif de
-          // référence, et la bande s'écarte du bord pour le laisser tenir entier.
-          expect(height, `le cadre à ${String(participants)} n’a pas grandi`).toBeGreaterThan(
-            characterHeightPx(CHARACTER_IDS.length, compact),
-          );
+          // Le bord du cadre, et non le centre de la voie, est à `margin` du bord du canvas, et la
+          // bande est symétrique : les deux centres sont à égale distance du milieu de l'arène. Ni la
+          // marge ni la symétrie ne s'appliquent à l'effectif de référence, dont la géométrie reste
+          // celle d'avant.
+          expect(band.top - height / 2, 'bord haut du premier cadre').toBeCloseTo(margin, 6);
+          expect(
+            VIEW.BASE_HEIGHT - (band.bottom + height / 2),
+            'bord bas du dernier cadre',
+          ).toBeCloseTo(margin, 6);
+          expect(band.top + band.bottom, 'bande symétrique').toBeCloseTo(VIEW.BASE_HEIGHT, 6);
         }
       }
     }

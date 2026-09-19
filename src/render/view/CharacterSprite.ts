@@ -83,7 +83,7 @@ export class CharacterSprite {
    * de chaque voie. La valeur initiale ne sert qu'avant le premier `layout()`, qui est toujours appelé
    * avant le premier placement.
    */
-  private band: LaneBand = laneBand(MAX_PARTICIPANTS, false);
+  private band: LaneBand = laneBand(MAX_PARTICIPANTS, false, VIEW.CHARACTER_HEIGHT_PX);
 
   /** État visuel courant, décidé par le modèle pur à partir du seul événement actif. */
   private visual: EventVisual = NO_EVENT_VISUAL;
@@ -159,9 +159,10 @@ export class CharacterSprite {
     const fontTarget = characterNameFontPx(this.participants, compact);
     this.fontSizePx = Math.max(9, Math.min(fontTarget, heightPx * (fontTarget / VIEW.BASE_HEIGHT)));
 
-    // La bande des voies est calculée **une fois** ici, avec la hauteur logique réellement reçue :
-    // elle dépend de l'effectif (voir `laneBand`), et tous les placements suivants la relisent.
-    this.band = laneBand(this.participants, compact);
+    // La bande des voies est calculée **une fois** ici, avec la hauteur de cadre **retenue** juste
+    // au-dessus : c'est elle qui décide de l'ordonnée de chaque voie, et tous les placements suivants
+    // la relisent. Lui passer la hauteur déjà calculée interdit au sprite et à la bande de diverger.
+    this.band = laneBand(this.participants, compact, this.heightPx);
 
     this.image.setDisplaySize(this.widthPx, this.heightPx);
     this.applyVisualScale();

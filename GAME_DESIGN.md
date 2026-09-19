@@ -339,14 +339,18 @@ La disposition compacte est donc devenue, pour la même course :
   comprises).
 
 Ces deux constantes ne décrivent que l'**effectif de référence** (six coureurs). À **trois, quatre et
-cinq** partants, la bande des voies est recalculée par effectif (`laneBand`, `src/render/viewConfig.ts`) :
-elle est la plus grande qui garde chaque cadre **entier** dans l'arène, répartie symétriquement, et
-bornée par la séparation visible. La hauteur des personnages suit (`characterHeightPx`), sans aucun
-réglage manuel : **172 px** à trois coureurs (police 32), **135** à quatre (25), **111** à cinq (21),
-**106** à six (20, valeur figée) — soit un ordre strictement décroissant. Le vide entre deux
+cinq** partants, la géométrie verticale est recalculée par effectif (`laneBand`, `src/render/viewConfig.ts`) :
+la marge est **petite et fixe** — 20 px — et se mesure sur le **bord du cadre**, jamais sur le centre de
+la voie. Le premier cadre est donc posé à 20 px du haut du canvas, le dernier à 20 px du bas, et les
+centres se répartissent uniformément entre ces deux positions. La hauteur des personnages suit
+(`characterHeightPx`) : c'est le plus grand entier `h` tel que
+`(720 − 40 − h) / (n − 1) − 0,956 × h ≥ 10`, soit `h ≤ (720 − 40 − 10 × (n − 1)) / (1 + 0,956 × (n − 1))`
+— sans aucun réglage manuel : **226 px** à trois coureurs (police 43), **168** à quatre (32), **132** à
+cinq (25), **106** à six (20, valeur figée) — soit un ordre strictement décroissant. Un pixel de plus
+briserait la séparation visible, donc la valeur retenue est exactement le maximum. Le vide entre deux
 silhouettes, qui dépassait 150 px à trois coureurs avec l'ancienne bande fixe, est ainsi récupéré au
 profit des personnages. À six coureurs, **rien ne change** : bande, voies, sprites et noms restent
-ceux d'avant, au pixel près.
+ceux d'avant, au pixel près — ni la marge de 20 px ni la symétrie ne s'appliquent à lui.
 
 Deux précisions issues de la micro-correction suivante. La **seed n'est affichée qu'une fois** : son
 ancien doublon déclaré dans `index.html` a été supprimé, le HUD (dans la colonne) en est le seul

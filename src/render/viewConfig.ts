@@ -47,9 +47,8 @@ export interface ViewConfig {
    * La passe responsive issue du test sur iPhone a supprimé, sur ce format, le titre, les marges
    * extérieures et le HUD supérieur : la zone des voies peut donc s'étendre vers le haut et le bas,
    * et les personnages grossir d'autant. Ces deux ratios ne servent plus qu'à l'**effectif de
-   * référence** (six coureurs) : à trois, quatre et cinq, la bande est recalculée par `laneBand`,
-   * parce qu'une bande fixe plafonnait tous les effectifs réduits à la même taille (voir la
-   * documentation de cette fonction).
+   * référence** (six coureurs) : à trois, quatre et cinq, la bande est recalculée par `laneBand` à
+   * partir d'une marge de `LANE_MARGIN_PX` mesurée sur le **bord du cadre** (voir `laneBand`).
    */
   readonly COMPACT_LANE_TOP_RATIO: number;
   /** Position verticale de la dernière voie en petit paysage, en fraction de la hauteur. */
@@ -344,8 +343,47 @@ const MAX_VISIBLE_FRACTION = 0.956;
  */
 const MIN_VISIBLE_GAP_PX = 10;
 
+/**
+ * Marge entre le **bord du cadre** d'un sprite et le bord du canvas, en pixels logiques.
+ *
+ * Elle est petite et fixe : c'est elle qui laisse le vide perçu en haut et en bas, et elle se mesure
+ * sur le **bord du cadre**, jamais sur le centre de la voie. Confondre les deux plafonnait la hauteur
+ * d'un sprite à `2 × marge` — un cadre centré à 20 px du bord ne pouvait pas dépasser 40 px de haut.
+ */
+const LANE_MARGIN_PX = 20;
+
 /** Effectif de référence : le roster complet, dont la taille des personnages est **figée**. */
 const REFERENCE_PARTICIPANTS = MAX_PARTICIPANTS;
+
+/**
+ * Hauteur du cadre d'un personnage pour un effectif **réduit**, en pixels logiques.
+ *
+ * ## La contrainte, telle qu'elle se mesure à l'écran
+ *
+ * Le premier cadre est posé à `LANE_MARGIN_PX` du haut du canvas, le dernier à `LANE_MARGIN_PX` du
+ * bas, et les centres sont répartis uniformément entre ces deux positions. L'espacement vaut donc
+ * `(BASE_HEIGHT − 2 × marge − h) / (n − 1)`, et deux silhouettes voisines restent lisibles tant que
+ * cet espacement laisse `MIN_VISIBLE_GAP_PX` entre elles une fois retirée la hauteur **visible** du
+ * cadre (`MAX_VISIBLE_FRACTION × h`) :
+ *
+ * `(BASE_HEIGHT − 2 × marge − h) / (n − 1) − 0,956 × h ≥ 10`
+ *
+ * soit `h ≤ (BASE_HEIGHT − 2 × marge − 10 × (n − 1)) / (1 + 0,956 × (n − 1))`.
+ *
+ * La hauteur retenue est le **plus grand entier** qui satisfasse cette inégalité : un pixel de plus la
+ * brise. Le dénominateur est bien `1 + 0,956 × (n − 1)` — le terme de séparation se répète `n − 1`
+ * fois, le terme de hauteur une seule.
+ *
+ * ## Pourquoi seulement les effectifs réduits
+ *
+ * L'effectif de **référence** (six coureurs) garde ses constantes historiques : c'est ce qui garantit
+ * qu'une course à six reste, au pixel près, celle d'avant.
+ */
+function reducedFrameHeightPx(count: number): number {
+  const available = VIEW.BASE_HEIGHT - 2 * LANE_MARGIN_PX - MIN_VISIBLE_GAP_PX * (count - 1);
+  const denominator = 1 + MAX_VISIBLE_FRACTION * (count - 1);
+  return Math.floor(available / denominator);
+}
 
 /**
  * Bande des voies d'une course, en pixels logiques, pour un effectif donné.
@@ -356,14 +394,17 @@ const REFERENCE_PARTICIPANTS = MAX_PARTICIPANTS;
  * voie tombe à 72 px du haut de l'arène : un cadre ne peut donc pas dépasser `2 × 72 = 144 px` sans
  * sortir du canvas, et cette borne **écrasait tous les effectifs réduits à la même taille** — 144 px
  * à trois comme à quatre comme à cinq. Résultat observé sur un vrai téléphone : à trois coureurs, il
- * restait plus de 150 px de vide entre deux silhouettes, alors que les personnages auraient pu
- * occuper cet espace.
+ * restait plus de 150 px de vide entre deux silhouettes, alors que les personnages pouvaient occuper
+ * cet espace.
  *
- * La bande est donc **la plus grande qui garde chaque cadre entièrement dans l'arène**, répartie
- * symétriquement (`top` et `bottom` à la même distance du bord), et bornée par la contrainte de
- * séparation : ses voies ne doivent pas se rapprocher au point que deux silhouettes se touchent.
- * Sa hauteur `H` vaut `(n − 1) × (BASE_HEIGHT − 2 × GAP) / (n + 1)`, sans jamais descendre sous
- * `2 × (n − 1) × GAP` — la hauteur minimale qui laisse `GAP` entre deux silhouettes voisines.
+ * ## Ce qui décide la géométrie
+ *
+ * La bande ne fixe pas la hauteur des personnages : c'est l'inverse. Elle **reçoit** `heightPx` —
+ * celle de `characterHeightPx`, donc la même valeur que les sprites — et place les centres en
+ * conséquence : le premier à `marge + h/2`, le dernier à `BASE_HEIGHT − marge − h/2`, de sorte que le
+ * **bord** de chaque cadre tombe exactement à `LANE_MARGIN_PX` du bord du canvas. Les centres
+ * intermédiaires se répartissent uniformément entre ces deux valeurs (`laneY`). Recevoir la hauteur
+ * plutôt que la recalculer garantit que le décor et les personnages ne peuvent pas diverger.
  *
  * ## Ce qui reste figé
  *
@@ -374,22 +415,20 @@ const REFERENCE_PARTICIPANTS = MAX_PARTICIPANTS;
  *
  * Fonction **pure** : elle ne lit ni `window`, ni le DOM, ni l'effectif courant d'une course.
  */
-export function laneBand(participants: number, compact: boolean): LaneBand {
+export function laneBand(
+  participants: number,
+  compact: boolean,
+  heightPx: number,
+): LaneBand {
   const count = Math.min(Math.max(Math.trunc(participants), 2), REFERENCE_PARTICIPANTS);
   if (count >= REFERENCE_PARTICIPANTS) {
     return laneRatios(compact);
   }
 
-  // Hauteur minimale : deux silhouettes voisines ne peuvent pas se rapprocher de moins de GAP, donc
-  // l'espacement ne peut pas descendre sous `GAP / MAX_VISIBLE_FRACTION`, et la bande doit couvrir
-  // `(n − 1)` espacements.
-  const separationFloor =
-    ((count - 1) * MIN_VISIBLE_GAP_PX) / MAX_VISIBLE_FRACTION;
-  const spreadHeight =
-    ((count - 1) * (VIEW.BASE_HEIGHT - 2 * MIN_VISIBLE_GAP_PX)) / (count + 1);
-  const bandHeight = Math.max(separationFloor, Math.min(spreadHeight, VIEW.BASE_HEIGHT));
-  const margin = (VIEW.BASE_HEIGHT - bandHeight) / 2;
-  return { top: margin, bottom: VIEW.BASE_HEIGHT - margin };
+  return {
+    top: LANE_MARGIN_PX + heightPx / 2,
+    bottom: VIEW.BASE_HEIGHT - LANE_MARGIN_PX - heightPx / 2,
+  };
 }
 
 /**
@@ -398,29 +437,15 @@ export function laneBand(participants: number, compact: boolean): LaneBand {
  * ## Pourquoi la taille dépend du nombre de coureurs
  *
  * La bande des voies est la même ressource pour tout le monde : à trois coureurs, chacun dispose de
- * deux fois plus d'espace vertical qu'à six. Laisser les sprites à leur taille « six » gaspillerait
- * cet espace — c'est exactement ce que corrige cette fonction.
+ * beaucoup plus d'espace vertical qu'à six. Laisser les sprites à leur taille « six » gaspillerait cet
+ * espace — c'est exactement ce que corrige cette fonction.
  *
  * ## La valeur retenue est la plus grande qui tienne, jamais un réglage arbitraire
  *
- * Pour un effectif donné, la hauteur est la **plus grande** valeur qui respecte les trois contraintes
- * mesurables du projet, dans cet ordre :
- *
- * 1. `séparation visible ≥ MIN_VISIBLE_GAP_PX`, mesurée sur la silhouette réelle
- *    (`MAX_VISIBLE_FRACTION`) et non sur le cadre — c'est l'écart entre deux **centres de voies** qui
- *    la décide, jamais la taille de la bande ;
- * 2. le **cadre** de la première voie reste dans l'arène (`centre − h/2 ≥ 0`) ;
- * 3. le cadre de la dernière voie aussi (`centre + h/2 ≤ BASE_HEIGHT`).
- *
- * Ces contraintes se lisent directement : `h ≤ (espacement − 10) / 0,956` et
- * `h ≤ 2 × min(haut de bande, bas d'arène − bas de bande)`. Aucune constante n'est ajoutée à la main.
- *
- * ## À six coureurs, rien ne change
- *
- * L'effectif de référence court avec **exactement** les constantes historiques
- * (`CHARACTER_HEIGHT_PX`, `CHARACTER_HEIGHT_COMPACT_PX`) : elles sont plus petites que le maximum
- * autorisé par les contraintes ci-dessus, et c'est ce qui garantit qu'une course à six reste, au
- * pixel près, celle d'avant cette fonctionnalité.
+ * Pour un effectif réduit, la hauteur est le plus grand entier qui respecte la séparation visible
+ * (voir `reducedFrameHeightPx`) ; elle ne peut jamais dépasser la bande elle-même. À six coureurs,
+ * elle vaut **exactement** la constante historique (`CHARACTER_HEIGHT_PX` ou
+ * `CHARACTER_HEIGHT_COMPACT_PX`).
  */
 export function characterHeightPx(participants: number, compact: boolean): number {
   const reference = compact ? VIEW.CHARACTER_HEIGHT_COMPACT_PX : VIEW.CHARACTER_HEIGHT_PX;
@@ -429,13 +454,8 @@ export function characterHeightPx(participants: number, compact: boolean): numbe
     return reference;
   }
 
-  const band = laneBand(count, compact);
-  const spacing = (band.bottom - band.top) / (count - 1);
-
-  const separationBound = (spacing - MIN_VISIBLE_GAP_PX) / MAX_VISIBLE_FRACTION;
-  const canvasBound = 2 * Math.min(band.top, VIEW.BASE_HEIGHT - band.bottom);
-
-  return Math.max(reference, Math.floor(Math.min(separationBound, canvasBound)));
+  const frame = reducedFrameHeightPx(count);
+  return Math.max(reference, frame);
 }
 
 /**

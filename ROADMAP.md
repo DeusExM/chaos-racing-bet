@@ -303,7 +303,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | **P013-cor2** | **Seconde passe corrective après le second test joueur manuel `[x]`** | P013-cor | commentaire véridique sur la position, relecture pendant la pause, classement hors piste, segment d'arrivée |
 | **P013-cor3** | **Courses de 3 à 6 coureurs `[x]`** | P013-cor2 | effectif réglable, personnages plus grands à effectif réduit, fermeture de l'arrivée |
 | **P013-cor4** | **UX `Lancer` / `Réinitialiser` et correctif d'effectif `[x]`** | P013-cor3 | trois boutons pilotés par la phase, reset à toute phase, `start()` sans remise à zéro implicite, sélecteur tactile |
-| **P013-cor5** | **Taille des personnages à 3, 4 et 5 coureurs `[x]`** | P013-cor4 | bande des voies calculée par effectif, sprites 172/135/111 px en compact, 6 coureurs inchangés au pixel |
+| **P013-cor5** | **Taille des personnages à 3, 4 et 5 coureurs `[x]`** | P013-cor4 | marge fixe de 20 px mesurée sur le bord du cadre, sprites 226/168/132 px en compact, 6 coureurs inchangés au pixel |
 | **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
 | P014 | Identité visuelle et animations des 6 personnages | P013.5 | personnages distincts et drôles |
 | P015 | Polish, accessibilité, audio optionnel | P014 | finition |
@@ -1344,6 +1344,11 @@ polices) : le test unitaire compare chaque valeur à la constante d'origine, et 
 hauteur réellement dessinée à `844×390` et `926×428`. À 4 et 3, la hauteur atteint le plafond imposé
 par la place disponible dans l'arène : c'est une valeur **dérivée**, pas un réglage au jugé.
 
+> **Remplacé par P013-cor5.** Les valeurs de ce tableau (140/144/144) et la phrase « la bande des voies
+> ne change pas » décrivent l'état de P013-cor3. La micro-correction P013-cor5 a depuis rendu la bande
+> dépendante de l'effectif, avec une marge fixe de 20 px mesurée sur le bord du cadre : les tailles sont
+> **226 / 168 / 132 / 106** (voir § P013-cor5). L'historique de l'étape est conservé tel quel.
+
 **5. URL reproductible.** Le nombre de coureurs fait partie de l'identité d'une course :
 `?seed=…&players=3..6`. `app/` réécrit les deux paramètres au démarrage **et** à chaque nouvelle
 course, donc un rechargement rejoue exactement la même course, et « Rejouer la même seed » comme
@@ -1510,40 +1515,49 @@ voie était posée à `0,10 × 720 = 72 px` du haut, donc un cadre ne pouvait pa
 `2 × 72 = 144 px` sans sortir du canvas. Cette borne écrasait 3, 4 et 5 coureurs à la même taille.
 
 **2. La bande des voies est désormais calculée par effectif** (`laneBand`, `src/render/viewConfig.ts`).
-Elle est **la plus grande qui garde chaque cadre entièrement dans l'arène**, répartie symétriquement,
-et bornée par la contrainte de séparation : `H = (n − 1) × (BASE_HEIGHT − 2 × GAP) / (n + 1)`, sans
-descendre sous `2 × (n − 1) × GAP`. Le décor (`TrackView`), les sprites et leurs noms lisent **la
-même** fonction : ils ne peuvent donc pas décrire deux géométries différentes. `laneY` prend
-désormais la bande en argument, si bien qu'un appelant ne peut plus dessiner des voies sur une bande
-et des personnages sur une autre.
+La marge est **petite et fixe** — `LANE_MARGIN_PX = 20 px` — et se mesure sur le **bord du cadre**, jamais
+sur le centre de la voie : le premier cadre est posé à 20 px du haut du canvas, le dernier à 20 px du
+bas, et les centres se répartissent uniformément entre ces deux positions. Le décor (`TrackView`), les
+sprites et leurs noms lisent **la même** fonction : ils ne peuvent donc pas décrire deux géométries
+différentes. `laneY` prend la bande en argument, si bien qu'un appelant ne peut plus dessiner des voies
+sur une bande et des personnages sur une autre.
 
-**3. La taille est calculée, pas choisie.** `characterHeightPx` prend la plus grande hauteur qui
-respecte, dans l'ordre : `séparation visible ≥ 10 px` mesurée sur la silhouette réelle (95,6 % du
-cadre), puis le **cadre** de la première et de la dernière voie dans l'arène. Aucune constante n'est
-ajoutée à la main, et la taille du nom suit la même proportion.
+**3. La taille est calculée, pas choisie.** `characterHeightPx` prend le plus grand **entier** `h` qui
+respecte la contrainte de lisibilité, écrite telle qu'elle se mesure à l'écran :
+
+`(BASE_HEIGHT − 2 × marge − h) / (n − 1) − 0,956 × h ≥ 10`
+
+soit `h ≤ (720 − 40 − 10 × (n − 1)) / (1 + 0,956 × (n − 1))`. Le terme de séparation se répète `n − 1`
+fois, le terme de hauteur une seule fois : le dénominateur est bien `1 + 0,956 × (n − 1)`. Un pixel de
+plus brise l'inégalité, donc la valeur retenue est exactement le maximum. La taille du nom suit la même
+proportion.
 
 **4. Six coureurs restent la référence figée.** L'effectif de référence garde **exactement** la bande
 historique (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO` en petit paysage, `LANE_TOP_RATIO` /
 `LANE_BOTTOM_RATIO` sur bureau) et **exactement** `CHARACTER_HEIGHT_COMPACT_PX` / `CHARACTER_HEIGHT_PX` :
-voies, sprites et noms sont ceux d'avant, au pixel près.
+voies, sprites et noms sont ceux d'avant, au pixel près. Ni la marge de 20 px ni la symétrie ne
+s'appliquent à lui.
 
 **Tailles obtenues, en petit paysage** (logique 1280×720, identiques sur bureau à effectif réduit) :
 
-| Effectif | Bande (haut → bas) | Espacement | Hauteur du cadre | Police du nom | Séparation visible |
-| --- | --- | --- | --- | --- | --- |
-| 3 | 185 → 535 | 175 | **172** | 32 | 10,6 |
-| 4 | 150 → 570 | 140 | **135** | 25 | 10,9 |
-| 5 | 126,7 → 593,3 | 116,7 | **111** | 21 | 10,6 |
-| 6 *(figé)* | 72 → 648 | 115,2 | **106** | 20 | 13,9 |
+| Effectif | Centres (premier → dernier) | Espacement | Hauteur du cadre | Police du nom | Séparation visible | Cadre +1 px |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3 | 133 → 587 | 227 | **226** | 43 | 10,94 | 9,99 ❌ |
+| 4 | 104 → 616 | 170,7 | **168** | 32 | 10,06 | 9,10 ❌ |
+| 5 | 86 → 634 | 137 | **132** | 25 | 10,81 | 9,85 ❌ |
+| 6 *(figé)* | 72 → 648 | 115,2 | **106** | 20 | 13,86 | — |
 
-L'ordre demandé est donc strict : `taille(3) > taille(4) > taille(5) > taille(6)` — 172 > 135 > 111 >
-106, soit **+62 %** pour trois coureurs, +27 % pour quatre, +5 % pour cinq. En CSS sur un iPhone
-(844×390, canvas réduit à ≈ 0,54), le personnage passe de ≈ 57 px à ≈ 93 px de haut à trois coureurs.
+Le bord du premier cadre tombe exactement à **20 px** du haut et celui du dernier à **20 px** du bas
+(700 px), pour 3, 4 et 5. L'ordre demandé est strict : `taille(3) > taille(4) > taille(5) > taille(6)`
+— 226 > 168 > 132 > 106, soit **+113 %** pour trois coureurs, +58 % pour quatre, +25 % pour cinq. En CSS
+sur un iPhone (844×390, canvas réduit à ≈ 0,54), le personnage passe de ≈ 57 px à ≈ 122 px de haut à
+trois coureurs.
 
 **Tests (DoD).** Unitaires : `tests/unit/laneGeometry.test.ts` (21 tests) — les voies se répartissent
 entre les deux bords de la bande, la bande historique est **gelée** à six coureurs dans les deux
-formats, chaque cadre reste entier dans l'arène, la séparation visible tient à 10 px pour tout
-effectif, la hauteur retenue est bien le plafond calculé, et l'ordre des tailles est strict. E2E :
+formats, le bord du premier et du dernier cadre tombe à 20 px du canvas (effectifs réduits seulement),
+la bande est symétrique, la séparation visible tient à 10 px pour tout effectif, la hauteur retenue est
+bien le plafond (un pixel de plus la briserait) et l'ordre des tailles est strict. E2E :
 `tests/e2e/players.spec.ts` vérifie à `844×390` et `926×428`, pour 3, 4, 5 et 6 coureurs, que la
 hauteur réellement dessinée vaut `characterHeightPx(n, true)`, que l'ordre est strict, qu'aucun cadre
 ne sort de l'arène (haut et bas), que la séparation visible reste ≥ 10 px et que le nom reste à gauche

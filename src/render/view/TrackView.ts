@@ -2,7 +2,7 @@ import type { GameObjects, Scene } from 'phaser';
 
 import { MAX_PARTICIPANTS } from '../../core/participants';
 import type { UiText } from '../uiText';
-import { VIEW, laneBand, laneY } from '../viewConfig';
+import { VIEW, characterHeightPx, laneBand, laneY } from '../viewConfig';
 import type { LaneBand } from '../viewConfig';
 import type { CameraRig } from './CameraRig';
 
@@ -36,7 +36,7 @@ export class TrackView {
    * ou quatre coureurs au lieu de rester à la taille « six ». La valeur initiale ne sert qu'avant le
    * premier `layout()`.
    */
-  private band: LaneBand = laneBand(MAX_PARTICIPANTS, false);
+  private band: LaneBand = laneBand(MAX_PARTICIPANTS, false, VIEW.CHARACTER_HEIGHT_PX);
 
   /** Nombre de partants du dernier agencement : décide du nombre de bandes et de leur hauteur. */
   private participants = MAX_PARTICIPANTS;
@@ -72,9 +72,9 @@ export class TrackView {
     this.heightPx = heightPx;
     this.participants = participants;
 
-    // La bande vient de la **même** fonction que celle des sprites : le décor et les personnages ne
-    // peuvent donc pas décrire deux géométries différentes.
-    this.band = laneBand(participants, compact);
+    // La bande vient de la **même** fonction que celle des sprites, avec la **même** hauteur de cadre :
+    // le décor et les personnages ne peuvent donc pas décrire deux géométries différentes.
+    this.band = laneBand(participants, compact, characterHeightPx(participants, compact));
 
     this.lanes.clear();
     const bandHeight = heightPx / (participants + 1);

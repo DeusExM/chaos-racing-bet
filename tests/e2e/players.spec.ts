@@ -375,7 +375,11 @@ test('à trois coureurs, le badge d’événement ne recouvre aucune silhouette 
     )
     .toBeGreaterThan(0);
 
-  const band = laneBand(MIN_PARTICIPANTS, true);
+  const band = laneBand(
+    MIN_PARTICIPANTS,
+    true,
+    characterHeightPx(MIN_PARTICIPANTS, true),
+  );
   const measured = await page.evaluate(
     ({ lanes, bandTop, bandBottom }) => {
       const badge = document.querySelector('[data-testid="event-badge"]');

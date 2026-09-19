@@ -451,7 +451,7 @@ export class RaceScene extends Scene {
       // L'effet d'événement est décidé **avant** la pose : il ne fait que lire l'état déjà calculé de
       // cette frame, et il ne peut donc ni déplacer le personnage ni changer sa vitesse.
       sprite.updateEventVisual(character, delta);
-      sprite.place(screenX, this.layoutHeight, this.compactLayout);
+      sprite.place(screenX);
       // Un personnage hors du champ est **masqué** : il n'est jamais dessiné sous la bande réservée au
       // classement permanent, pas même partiellement. La décision se prend sur la **taille réellement
       // affichée** (les images sont plus larges que hautes) : supposer un carré laisserait dépasser
@@ -463,8 +463,6 @@ export class RaceScene extends Scene {
         sprite.showEdgeMarker(
           screenX < this.trackWidth / 2 ? 'left' : 'right',
           this.trackWidth,
-          this.layoutHeight,
-          this.compactLayout,
         );
       } else {
         sprite.hideEdgeMarker();

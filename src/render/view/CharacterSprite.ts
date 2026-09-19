@@ -2,6 +2,7 @@ import type { GameObjects, Scene } from 'phaser';
 import { BlendModes } from 'phaser';
 
 import type { CharacterConfig } from '../../core/characters';
+import { MAX_PARTICIPANTS } from '../../core/participants';
 import type { CharacterId, CharacterState } from '../../core/types';
 import { characterTextureKey } from '../characterAssets';
 import { eventVisualOf, NO_EVENT_VISUAL, type EventVisual } from './eventVisualModel';
@@ -12,7 +13,9 @@ import {
   characterNameOrigin,
   characterNameX,
   characterNameY,
+  laneBand,
   laneY,
+  type LaneBand,
 } from '../viewConfig';
 
 /**
@@ -72,6 +75,15 @@ export class CharacterSprite {
   private widthPx = VIEW.CHARACTER_HEIGHT_PX;
 
   private fontSizePx = VIEW.CHARACTER_NAME_FONT_PX;
+
+  /**
+   * Bande des voies de la course, calculée par `layout()`.
+   *
+   * Elle dépend de l'effectif : c'est elle, et non une constante de format, qui décide de l'ordonnée
+   * de chaque voie. La valeur initiale ne sert qu'avant le premier `layout()`, qui est toujours appelé
+   * avant le premier placement.
+   */
+  private band: LaneBand = laneBand(MAX_PARTICIPANTS, false);
 
   /** État visuel courant, décidé par le modèle pur à partir du seul événement actif. */
   private visual: EventVisual = NO_EVENT_VISUAL;
@@ -147,6 +159,10 @@ export class CharacterSprite {
     const fontTarget = characterNameFontPx(this.participants, compact);
     this.fontSizePx = Math.max(9, Math.min(fontTarget, heightPx * (fontTarget / VIEW.BASE_HEIGHT)));
 
+    // La bande des voies est calculée **une fois** ici, avec la hauteur logique réellement reçue :
+    // elle dépend de l'effectif (voir `laneBand`), et tous les placements suivants la relisent.
+    this.band = laneBand(this.participants, compact);
+
     this.image.setDisplaySize(this.widthPx, this.heightPx);
     this.applyVisualScale();
     this.nameLabel.setFontSize(this.fontSizePx);
@@ -215,8 +231,8 @@ export class CharacterSprite {
    * aucune hauteur, et il n'est jamais recouvert par l'illustration. Le halo et la traînée suivent la
    * même position : le halo se superpose au sprite, la traînée s'en écarte vers l'arrière.
    */
-  place(screenX: number, heightPx: number, compact = false): void {
-    const y = laneY(this.laneIndex, heightPx, compact, this.participants);
+  place(screenX: number): void {
+    const y = laneY(this.laneIndex, this.band, this.participants);
     this.image.setPosition(screenX, y);
     this.aura.setPosition(screenX, y);
     this.trail.setPosition(screenX - this.widthPx * this.visual.trailOffsetRatio, y);
@@ -233,10 +249,10 @@ export class CharacterSprite {
   }
 
   /** Signale un personnage sorti de la fenêtre, collé au bord correspondant. */
-  showEdgeMarker(side: 'left' | 'right', widthPx: number, heightPx: number, compact = false): void {
+  showEdgeMarker(side: 'left' | 'right', widthPx: number): void {
     const x = side === 'left' ? VIEW.EDGE_MARGIN_PX : widthPx - VIEW.EDGE_MARGIN_PX;
     this.edgeMarker.setText(side === 'left' ? `◀ ${this.name}` : `${this.name} ▶`);
-    this.edgeMarker.setPosition(x, laneY(this.laneIndex, heightPx, compact, this.participants));
+    this.edgeMarker.setPosition(x, laneY(this.laneIndex, this.band, this.participants));
     this.edgeMarker.setDepth(80);
     this.edgeMarker.setVisible(true);
   }

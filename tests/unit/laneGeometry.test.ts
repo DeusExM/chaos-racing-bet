@@ -9,6 +9,7 @@ import {
   characterNameOrigin,
   characterNameX,
   characterNameY,
+  laneBand,
   laneRatios,
   laneY,
 } from '../../src/render/viewConfig';
@@ -70,8 +71,9 @@ function nameLabelHeight(compact: boolean, participants: number): number {
 
 /** Ordonnées des voies d'un effectif, dans l'ordre du roster. */
 function laneCenters(compact: boolean, participants: number = CHARACTER_IDS.length): number[] {
+  const band = laneBand(participants, compact);
   return Array.from({ length: participants }, (_, index) =>
-    laneY(index, VIEW.BASE_HEIGHT, compact, participants),
+    laneY(index, band, participants),
   );
 }
 
@@ -92,14 +94,14 @@ function nameLabelTop(centerY: number, compact: boolean, participants: number): 
 const PARTICIPANT_COUNTS: readonly number[] = [3, 4, 5, CHARACTER_IDS.length];
 
 describe('zone des voies', () => {
-  it('répartit les voies entre les ratios du format, sans en perdre aucune', () => {
+  it('répartit les voies entre les deux bords de la bande, sans en perdre aucune', () => {
     for (const compact of [false, true]) {
       for (const participants of PARTICIPANT_COUNTS) {
         const centers = laneCenters(compact, participants);
-        const ratios = laneRatios(compact);
+        const band = laneBand(participants, compact);
         expect(centers).toHaveLength(participants);
-        expect(centers[0]).toBeCloseTo(VIEW.BASE_HEIGHT * ratios.top, 6);
-        expect(centers[centers.length - 1]).toBeCloseTo(VIEW.BASE_HEIGHT * ratios.bottom, 6);
+        expect(centers[0]).toBeCloseTo(band.top, 6);
+        expect(centers[centers.length - 1]).toBeCloseTo(band.bottom, 6);
         // Espacement constant : les voies ne s'écrasent pas les unes contre les autres.
         const spacings = centers.slice(1).map((value, index) => value - (centers[index] ?? 0));
         for (const spacing of spacings) {
@@ -247,17 +249,15 @@ describe('zone des voies', () => {
 
   it('retient la plus grande hauteur qui respecte les contraintes, pour chaque effectif', () => {
     for (const compact of [false, true]) {
-      const ratios = laneRatios(compact);
-      const bandTop = VIEW.BASE_HEIGHT * ratios.top;
-      const bandBottom = VIEW.BASE_HEIGHT * ratios.bottom;
       for (const participants of PARTICIPANT_COUNTS) {
+        const band = laneBand(participants, compact);
         const height = characterHeightPx(participants, compact);
-        const spacing = (bandBottom - bandTop) / (participants - 1);
+        const spacing = (band.bottom - band.top) / (participants - 1);
         // 1) la séparation visible est respectée…
         expect(spacing - height * MAX_VISIBLE_FRACTION).toBeGreaterThanOrEqual(10);
         // 2) …et un pixel de plus la briserait, ou ferait sortir un cadre de l'arène : la valeur
         //    retenue est donc la plus grande possible, jamais un réglage « au feeling ».
-        const canvasBound = 2 * Math.min(bandTop, VIEW.BASE_HEIGHT - bandBottom);
+        const canvasBound = 2 * Math.min(band.top, VIEW.BASE_HEIGHT - band.bottom);
         const ceiling = Math.min((spacing - 10) / MAX_VISIBLE_FRACTION, canvasBound);
         if (participants === CHARACTER_IDS.length) {
           // À six coureurs, la taille est **figée** par les constantes historiques, sous le plafond.
@@ -267,6 +267,41 @@ describe('zone des voies', () => {
           expect(height).toBeLessThanOrEqual(Math.floor(ceiling));
         } else {
           expect(height).toBe(Math.floor(ceiling));
+        }
+      }
+    }
+  });
+
+  it('garde la bande historique à six coureurs, dans les deux formats', () => {
+    // La géométrie de l'effectif de référence est **gelée** : elle ne doit pas bouger d'un pixel,
+    // puisque c'est elle qui définit « une course à six comme avant ».
+    for (const compact of [false, true]) {
+      expect(laneBand(CHARACTER_IDS.length, compact)).toEqual(laneRatios(compact));
+    }
+  });
+
+  it('garde chaque cadre entier dans l’arène, grâce à une bande calculée par effectif', () => {
+    // La bande est la plus grande qui laisse chaque cadre **entier** dans l'arène. C'est ce calcul qui
+    // remplace l'ancienne borne fixe (`2 × 72 = 144 px`), qui écrasait tous les effectifs réduits à la
+    // même taille : la bande s'élargit vers les bords à mesure que l'effectif diminue.
+    for (const compact of [false, true]) {
+      for (const participants of PARTICIPANT_COUNTS) {
+        const band = laneBand(participants, compact);
+        const height = characterHeightPx(participants, compact);
+        expect(band.top).toBeGreaterThan(0);
+        expect(band.bottom).toBeLessThan(VIEW.BASE_HEIGHT);
+        // Le cadre de la première et de la dernière voie reste **entièrement** dans le canvas.
+        expect(band.top - height / 2, 'la première voie sort par le haut').toBeGreaterThanOrEqual(0);
+        expect(
+          band.bottom + height / 2,
+          'la dernière voie sort par le bas',
+        ).toBeLessThanOrEqual(VIEW.BASE_HEIGHT);
+        if (participants < CHARACTER_IDS.length) {
+          // Le gain est réel : le cadre d'un effectif réduit est plus grand que celui de l'effectif de
+          // référence, et la bande s'écarte du bord pour le laisser tenir entier.
+          expect(height, `le cadre à ${String(participants)} n’a pas grandi`).toBeGreaterThan(
+            characterHeightPx(CHARACTER_IDS.length, compact),
+          );
         }
       }
     }

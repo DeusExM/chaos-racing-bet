@@ -2,7 +2,8 @@ import type { GameObjects, Scene } from 'phaser';
 
 import { MAX_PARTICIPANTS } from '../../core/participants';
 import type { UiText } from '../uiText';
-import { VIEW, laneRatios, laneY } from '../viewConfig';
+import { VIEW, laneBand, laneY } from '../viewConfig';
+import type { LaneBand } from '../viewConfig';
 import type { CameraRig } from './CameraRig';
 
 /**
@@ -28,10 +29,14 @@ export class TrackView {
 
   private heightPx: number;
 
-  /** Ratios des voies du format courant : une seule source pour les bandes, les repères et les noms. */
-  private laneTop = VIEW.LANE_TOP_RATIO;
-
-  private laneBottom = VIEW.LANE_BOTTOM_RATIO;
+  /**
+   * Bande des voies du dernier agencement, en pixels logiques.
+   *
+   * Elle dépend de l'**effectif** (`laneBand`) : c'est ce qui permet aux personnages de grandir à trois
+   * ou quatre coureurs au lieu de rester à la taille « six ». La valeur initiale ne sert qu'avant le
+   * premier `layout()`.
+   */
+  private band: LaneBand = laneBand(MAX_PARTICIPANTS, false);
 
   /** Nombre de partants du dernier agencement : décide du nombre de bandes et de leur hauteur. */
   private participants = MAX_PARTICIPANTS;
@@ -67,14 +72,14 @@ export class TrackView {
     this.heightPx = heightPx;
     this.participants = participants;
 
-    const ratios = laneRatios(compact);
-    this.laneTop = ratios.top;
-    this.laneBottom = ratios.bottom;
+    // La bande vient de la **même** fonction que celle des sprites : le décor et les personnages ne
+    // peuvent donc pas décrire deux géométries différentes.
+    this.band = laneBand(participants, compact);
 
     this.lanes.clear();
     const bandHeight = heightPx / (participants + 1);
     for (let index = 0; index < participants; index += 1) {
-      const center = laneY(index, heightPx, compact, participants);
+      const center = laneY(index, this.band, participants);
       const even = index % 2 === 0;
       this.lanes.fillStyle(even ? 0x131a2f : 0x101627, 1);
       this.lanes.fillRect(0, center - bandHeight / 2, widthPx, bandHeight);
@@ -88,13 +93,13 @@ export class TrackView {
   /** Ordonnée de la ligne d'horizon : le haut de la zone des voies du format courant. */
   private horizonY(heightPx: number): number {
     const bandHeight = heightPx / (this.participants + 1);
-    return heightPx * this.laneTop - bandHeight / 2;
+    return this.band.top - bandHeight / 2;
   }
 
   /** Ordonnée du bas de la zone des voies : elle borne les graduations de distance. */
   private laneAreaBottom(heightPx: number): number {
     const bandHeight = heightPx / (this.participants + 1);
-    return heightPx * this.laneBottom + bandHeight / 2;
+    return this.band.bottom + bandHeight / 2;
   }
 
   /** Redessine les graduations visibles, d'après le cadrage courant. */

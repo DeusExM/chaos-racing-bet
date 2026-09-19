@@ -338,6 +338,16 @@ La disposition compacte est donc devenue, pour la même course :
   une séparation visible entre silhouettes voisines (≥ 10 px logiques, marges transparentes des images
   comprises).
 
+Ces deux constantes ne décrivent que l'**effectif de référence** (six coureurs). À **trois, quatre et
+cinq** partants, la bande des voies est recalculée par effectif (`laneBand`, `src/render/viewConfig.ts`) :
+elle est la plus grande qui garde chaque cadre **entier** dans l'arène, répartie symétriquement, et
+bornée par la séparation visible. La hauteur des personnages suit (`characterHeightPx`), sans aucun
+réglage manuel : **172 px** à trois coureurs (police 32), **135** à quatre (25), **111** à cinq (21),
+**106** à six (20, valeur figée) — soit un ordre strictement décroissant. Le vide entre deux
+silhouettes, qui dépassait 150 px à trois coureurs avec l'ancienne bande fixe, est ainsi récupéré au
+profit des personnages. À six coureurs, **rien ne change** : bande, voies, sprites et noms restent
+ceux d'avant, au pixel près.
+
 Deux précisions issues de la micro-correction suivante. La **seed n'est affichée qu'une fois** : son
 ancien doublon déclaré dans `index.html` a été supprimé, le HUD (dans la colonne) en est le seul
 porteur, sur tous les formats. Et **aucune place n'est réservée à une barre de relecture absente** : la
@@ -356,8 +366,9 @@ voie**, sur l'axe du personnage, et **derrière lui au sens de la course** — c
 le début du sprite, n'est **jamais** recouvert par lui, et n'a pour cette raison aucun contour à
 porter — aucun mélange de texte sous le sprite n'est utilisé. La règle est **la même sur bureau et en
 petit paysage** ; seules les tailles changent (`CHARACTER_HEIGHT_PX = 92` contre
-`CHARACTER_HEIGHT_COMPACT_PX = 106`, polices `CHARACTER_NAME_FONT_PX = 16` contre
-`CHARACTER_NAME_FONT_COMPACT_PX = 20`). La conséquence est celle qui était recherchée : plus aucun
+`CHARACTER_HEIGHT_COMPACT_PX = 106` à six coureurs, polices `CHARACTER_NAME_FONT_PX = 16` contre
+`CHARACTER_NAME_FONT_COMPACT_PX = 20`, et davantage à effectif réduit — voir plus haut). La conséquence
+est celle qui était recherchée : plus aucun
 texte ne consomme de hauteur au-dessus d'un sprite, donc les personnages peuvent grandir sans que les
 voies se rapprochent. Les mots d'événement, eux, restent dans la couche DOM du HUD (comme le reste du
 HUD) : ils sont recentrés sur l'axe de la voie et reculés de la **demi-largeur réelle du sprite** plus
@@ -425,7 +436,8 @@ hors ligne n'est introduit : l'étape P016 reste intacte.
 provisoires : chacun affiche son **illustration** (`public/assets/characters/`, une par personnage,
 associée par `src/render/characterAssets.ts` — la seule table du projet qui connaît un chemin
 d'asset). Le rendu ne choisit qu'une **hauteur** (`VIEW.CHARACTER_HEIGHT_PX = 92` sur bureau,
-`VIEW.CHARACTER_HEIGHT_COMPACT_PX = 106` en petit paysage) et déduit la largeur du ratio de l'image :
+`VIEW.CHARACTER_HEIGHT_COMPACT_PX = 106` en petit paysage, à l'effectif de référence de six coureurs ;
+davantage à trois, quatre et cinq — voir plus haut) et déduit la largeur du ratio de l'image :
 une image n'est donc **jamais** écrasée en carré, et la résolution du fichier n'est jamais une taille
 d'affichage. Les fichiers servis font 320 px de haut (copies runtime produites par
 `tools/optimizeCharacterAssets.mjs`, ≈ 0,75 Mio au total), les originaux fournis (~1448×1086,

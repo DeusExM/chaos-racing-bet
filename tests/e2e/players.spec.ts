@@ -4,7 +4,7 @@ import { CHARACTERS, CHARACTER_IDS } from '../../src/core/characters';
 import { RACE_CONFIG } from '../../src/core/config';
 import { MAX_PARTICIPANTS, MIN_PARTICIPANTS } from '../../src/core/participants';
 import type { CharacterId } from '../../src/core/types';
-import { VIEW } from '../../src/render/viewConfig';
+import { characterHeightPx, laneBand, VIEW } from '../../src/render/viewConfig';
 import {
   expectNoErrors,
   raceUrl,
@@ -189,8 +189,17 @@ test('le choix s’applique avant la course, et plus jamais pendant', async ({ p
   const before = await measureLanes(page);
   expect(before.players).toBe(MIN_PARTICIPANTS);
   expect(before.participants).toHaveLength(MIN_PARTICIPANTS);
-  expect(before.lanes).toHaveLength(MIN_PARTICIPANTS);
   expect(new URL(page.url()).searchParams.get('players')).toBe('3');
+
+  // Les sprites sont reconstruits par la **boucle de rendu**, pas par le clic : la mesure peut donc
+  // tomber une frame trop tôt. On attend que le rendu ait rattrapé le noyau — l'attente est bornée, et
+  // un rendu qui ne se mettrait jamais à jour échoue au lieu de passer par chance.
+  await expect
+    .poll(async () => (await measureLanes(page)).lanes.length, {
+      timeout: 5_000,
+      message: 'le rendu aligne les trois voies demandées',
+    })
+    .toBe(MIN_PARTICIPANTS);
 
   // Course lancée : le contrôle est **désactivé**, et l'effectif ne bouge plus d'un partant.
   await page.evaluate(() => {
@@ -252,7 +261,12 @@ for (const viewport of [
     const watch = watchConsole(page);
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
 
-    const measured: { players: number; lanes: readonly LaneMeasure[]; compact: boolean }[] = [];
+    const measured: {
+      players: number;
+      lanes: readonly LaneMeasure[];
+      compact: boolean;
+      arenaHeight: number;
+    }[] = [];
     for (const players of [MAX_PARTICIPANTS, 5, 4, MIN_PARTICIPANTS]) {
       await page.goto(raceUrl({ seed: 'KR7Z8NAR', players, fast: true, autostart: true }));
       await waitForHooks(page);
@@ -262,7 +276,12 @@ for (const viewport of [
       const sample = await measureLanes(page);
       expect(sample.compact, `${viewport.name} doit être en format compact`).toBe(true);
       expect(sample.lanes).toHaveLength(players);
-      measured.push({ players, lanes: sample.lanes, compact: sample.compact });
+      measured.push({
+        players,
+        lanes: sample.lanes,
+        compact: sample.compact,
+        arenaHeight: sample.arenaHeight,
+      });
     }
 
     const six = measured[0];
@@ -273,12 +292,17 @@ for (const viewport of [
       throw new Error('mesures manquantes');
     }
 
-    // Six coureurs gardent **exactement** la taille historique du format compact.
+    // Six coureurs gardent **exactement** la taille historique du format compact : c'est la référence
+    // figée, au pixel près.
     expect(six.lanes[0]?.height).toBe(VIEW.CHARACTER_HEIGHT_COMPACT_PX);
-    // Moins de coureurs, des personnages plus grands — et jamais plus petits.
+    // Chaque effectif reçoit exactement la taille calculée par le rendu, et l'ordre demandé est
+    // strict : taille(3) > taille(4) > taille(5) > taille(6).
+    expect(five.lanes[0]?.height).toBe(characterHeightPx(5, true));
+    expect(four.lanes[0]?.height).toBe(characterHeightPx(4, true));
+    expect(three.lanes[0]?.height).toBe(characterHeightPx(3, true));
     expect(five.lanes[0]?.height ?? 0).toBeGreaterThan(six.lanes[0]?.height ?? 0);
-    expect(four.lanes[0]?.height ?? 0).toBeGreaterThanOrEqual(five.lanes[0]?.height ?? 0);
-    expect(three.lanes[0]?.height ?? 0).toBeGreaterThanOrEqual(four.lanes[0]?.height ?? 0);
+    expect(four.lanes[0]?.height ?? 0).toBeGreaterThan(five.lanes[0]?.height ?? 0);
+    expect(three.lanes[0]?.height ?? 0).toBeGreaterThan(four.lanes[0]?.height ?? 0);
     // Le gain est franc : au moins 30 % de hauteur en plus à trois coureurs.
     expect(three.lanes[0]?.height ?? 0).toBeGreaterThanOrEqual(
       Math.round((six.lanes[0]?.height ?? 0) * 1.3),
@@ -290,8 +314,17 @@ for (const viewport of [
         visibleGap(sample.lanes),
         `${viewport.name} à ${String(sample.players)} coureurs`,
       ).toBeGreaterThanOrEqual(10);
-      // Les voies sont réparties sur toute la hauteur de l'arène, du haut vers le bas.
+      // Aucun cadre ne sort de l'arène, ni par le haut ni par le bas : c'est la contrainte qui a
+      // décidé de la bande des voies, et elle doit tenir à l'écran et pas seulement dans le calcul.
+      const height = sample.lanes[0]?.height ?? 0;
       const sorted = [...sample.lanes].sort((a, b) => a.centerY - b.centerY);
+      const first = sorted[0]?.centerY ?? 0;
+      const last = sorted[sorted.length - 1]?.centerY ?? 0;
+      expect(first - height / 2, 'la première voie sort par le haut').toBeGreaterThanOrEqual(0);
+      expect(last + height / 2, 'la dernière voie sort par le bas').toBeLessThanOrEqual(
+        sample.arenaHeight,
+      );
+      // Les voies sont réparties sur toute la hauteur de l'arène, du haut vers le bas.
       expect(sorted).toHaveLength(sample.players);
       for (let index = 1; index < sorted.length; index += 1) {
         expect(sorted[index]?.centerY ?? 0).toBeGreaterThan(sorted[index - 1]?.centerY ?? 0);
@@ -305,6 +338,114 @@ for (const viewport of [
     expectNoErrors(watch);
   });
 }
+
+/**
+ * Badges d'événement à trois coureurs : la lisibilité ne doit pas être payée par un chevauchement.
+ *
+ * ## Le risque que ce test ferme
+ *
+ * Le badge `TURBO !` / `BONUS !` vit dans la voie, **sur l'axe** du personnage, et il est posé à sa
+ * gauche. En agrandissant les personnages à effectif réduit, la bande des voies se resserre d'autant :
+ * un badge plus haut que la voie viendrait mordre sur la silhouette **du voisin**.
+ *
+ * ## Ce qui est mesuré
+ *
+ * Un événement **réel** (la course en produit d'elle-même en mode accéléré), puis l'écart entre le
+ * badge et l'axe de sa voie, la distance verticale entre son bord et chaque **autre** silhouette, et
+ * la distance au milieu de la voie. Le badge doit rester sur son axe, ne pas sortir de l'arène, et ne
+ * recouvrir **aucune autre** silhouette : il peut se superposer au personnage qu'il désigne — c'est
+ * son étiquette — mais jamais à un autre coureur.
+ */
+test('à trois coureurs, le badge d’événement ne recouvre aucune silhouette voisine en 844×390', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const watch = watchConsole(page);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.goto(
+    raceUrl({ seed: 'KR7Z8NAR', players: MIN_PARTICIPANTS, fast: true, autostart: true }),
+  );
+  await waitForHooks(page);
+
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => document.querySelectorAll('[data-testid="event-badge"]').length),
+      { timeout: 25_000, message: 'la course à trois a produit un événement visible' },
+    )
+    .toBeGreaterThan(0);
+
+  const band = laneBand(MIN_PARTICIPANTS, true);
+  const measured = await page.evaluate(
+    ({ lanes, bandTop, bandBottom }) => {
+      const badge = document.querySelector('[data-testid="event-badge"]');
+      const canvas = document.querySelector('#game canvas');
+      const view = window.__CHAOS_RACE_VIEW__;
+      if (badge === null || canvas === null || view === undefined) {
+        throw new Error('mesure impossible');
+      }
+      const rect = badge.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      const track = view.track();
+      const scale = canvasRect.height / track.arenaHeight;
+      const characterId = badge.getAttribute('data-character-id') ?? '';
+      const sprites = view.sprites();
+      const own = sprites.find((candidate) => candidate.id === characterId) ?? null;
+      return {
+        badge: {
+          top: rect.top,
+          bottom: rect.bottom,
+          centerY: (rect.top + rect.bottom) / 2,
+          right: rect.right,
+        },
+        ownAxisY: own === null ? null : canvasRect.top + own.screenY * scale,
+        ownLeftX: own === null ? null : canvasRect.left + (own.screenX - own.width / 2) * scale,
+        // Silhouettes **visibles** des autres voies, en CSS : 95,6 % de la hauteur du cadre.
+        others: sprites
+          .filter((candidate) => candidate.id !== characterId)
+          .map((candidate) => ({
+            visibleTop:
+              canvasRect.top + (candidate.screenY - (candidate.height * 0.956) / 2) * scale,
+            visibleBottom:
+              canvasRect.top + (candidate.screenY + (candidate.height * 0.956) / 2) * scale,
+          })),
+        // Demi-espacement réel entre deux voies : le badge ne doit pas franchir le milieu de sa voie.
+        halfLaneGap: ((bandBottom - bandTop) / (lanes - 1) / 2) * scale,
+        canvasTop: canvasRect.top,
+        canvasBottom: canvasRect.bottom,
+      };
+    },
+    { lanes: MIN_PARTICIPANTS, bandTop: band.top, bandBottom: band.bottom },
+  );
+
+  const ownAxisY = measured.ownAxisY;
+  const ownLeftX = measured.ownLeftX;
+  if (ownAxisY === null || ownLeftX === null) {
+    throw new Error('le personnage du badge n’est pas suivi par le rendu');
+  }
+
+  // 1) Le badge est **sur l'axe** de sa voie, et dans le canvas.
+  expect(measured.badge.centerY).toBeCloseTo(ownAxisY, 0);
+  expect(measured.badge.top).toBeGreaterThanOrEqual(measured.canvasTop);
+  expect(measured.badge.bottom).toBeLessThanOrEqual(measured.canvasBottom);
+  // 2) Il reste **derrière** le personnage au sens de la course : il s'arrête avant le début du sprite.
+  expect(measured.badge.right).toBeLessThanOrEqual(ownLeftX);
+  // 3) Il ne franchit pas le milieu de sa voie : il ne peut donc pas atteindre la voie voisine.
+  expect(
+    Math.abs(measured.badge.centerY - ownAxisY),
+    'le badge s’écarte du milieu de sa voie',
+  ).toBeLessThanOrEqual(measured.halfLaneGap);
+  // 4) Il ne recouvre **aucune autre** silhouette : c'est la contrainte qui justifie de garder une
+  //    séparation visible entre deux voies même quand les personnages grandissent.
+  for (const other of measured.others) {
+    expect(
+      measured.badge.bottom <= other.visibleTop || measured.badge.top >= other.visibleBottom,
+      `le badge recouvre une silhouette voisine (badge ${measured.badge.top.toFixed(1)}–${measured.badge.bottom.toFixed(1)}, silhouette ${other.visibleTop.toFixed(1)}–${other.visibleBottom.toFixed(1)})`,
+    ).toBe(true);
+  }
+
+  expectNoErrors(watch);
+});
 
 test('le bouton × ferme l’écran d’arrivée sans rien relancer ni rien changer', async ({ page }) => {
   test.setTimeout(120_000);

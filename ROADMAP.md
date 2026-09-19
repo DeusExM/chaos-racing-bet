@@ -303,6 +303,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | **P013-cor2** | **Seconde passe corrective après le second test joueur manuel `[x]`** | P013-cor | commentaire véridique sur la position, relecture pendant la pause, classement hors piste, segment d'arrivée |
 | **P013-cor3** | **Courses de 3 à 6 coureurs `[x]`** | P013-cor2 | effectif réglable, personnages plus grands à effectif réduit, fermeture de l'arrivée |
 | **P013-cor4** | **UX `Lancer` / `Réinitialiser` et correctif d'effectif `[x]`** | P013-cor3 | trois boutons pilotés par la phase, reset à toute phase, `start()` sans remise à zéro implicite, sélecteur tactile |
+| **P013-cor5** | **Taille des personnages à 3, 4 et 5 coureurs `[x]`** | P013-cor4 | bande des voies calculée par effectif, sprites 172/135/111 px en compact, 6 coureurs inchangés au pixel |
 | **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
 | P014 | Identité visuelle et animations des 6 personnages | P013.5 | personnages distincts et drôles |
 | P015 | Polish, accessibilité, audio optionnel | P014 | finition |
@@ -1489,6 +1490,72 @@ bouton renommé (`reset-button`).
 fichiers) ; `vite build` OK ; **124 tests E2E** OK, dont **7 nouveaux**, sans aucune erreur console. Le
 corpus de seeds dorées et les tests d'équilibrage passent **sans aucune mise à jour** : aucune
 constante, aucun RNG, aucune taille de personnage n'a été touché. Voir `GAME_DESIGN.md` §3.1 et §9.2.
+
+---
+
+### P013-cor5 — Taille des personnages à 3, 4 et 5 coureurs `[x]`
+
+**Nature.** Comme `P013-cor` à `P013-cor4`, ce n'est **pas** une étape de la numérotation : c'est une
+**micro-correction ciblée**, demandée après un test sur appareil réel, **avant** P013.5. Elle ne touche
+que le **rendu des voies et la taille des personnages pour 3, 4 et 5 coureurs**. Sont intacts :
+`src/core/**`, `src/sim/**`, le RNG, l'équilibrage, la sélection des partants, les événements, le
+speaker, l'URL, les boutons, le sélecteur de coureurs, la réinitialisation, la timeline, la rotation
+portrait/paysage, l'écran d'arrivée, la page `Persos`, la durée de course et les positions
+horizontales. Aucun refactor général.
+
+**1. Le défaut constaté.** Sur un iPhone en paysage, à trois et quatre coureurs, il restait un vide
+vertical de plus de 150 px entre deux silhouettes : les personnages **plafonnaient tous à 144 px**,
+quelle que soit la place disponible. La cause était une borne fixe, et non un réglage : la première
+voie était posée à `0,10 × 720 = 72 px` du haut, donc un cadre ne pouvait pas dépasser
+`2 × 72 = 144 px` sans sortir du canvas. Cette borne écrasait 3, 4 et 5 coureurs à la même taille.
+
+**2. La bande des voies est désormais calculée par effectif** (`laneBand`, `src/render/viewConfig.ts`).
+Elle est **la plus grande qui garde chaque cadre entièrement dans l'arène**, répartie symétriquement,
+et bornée par la contrainte de séparation : `H = (n − 1) × (BASE_HEIGHT − 2 × GAP) / (n + 1)`, sans
+descendre sous `2 × (n − 1) × GAP`. Le décor (`TrackView`), les sprites et leurs noms lisent **la
+même** fonction : ils ne peuvent donc pas décrire deux géométries différentes. `laneY` prend
+désormais la bande en argument, si bien qu'un appelant ne peut plus dessiner des voies sur une bande
+et des personnages sur une autre.
+
+**3. La taille est calculée, pas choisie.** `characterHeightPx` prend la plus grande hauteur qui
+respecte, dans l'ordre : `séparation visible ≥ 10 px` mesurée sur la silhouette réelle (95,6 % du
+cadre), puis le **cadre** de la première et de la dernière voie dans l'arène. Aucune constante n'est
+ajoutée à la main, et la taille du nom suit la même proportion.
+
+**4. Six coureurs restent la référence figée.** L'effectif de référence garde **exactement** la bande
+historique (`COMPACT_LANE_TOP_RATIO` / `COMPACT_LANE_BOTTOM_RATIO` en petit paysage, `LANE_TOP_RATIO` /
+`LANE_BOTTOM_RATIO` sur bureau) et **exactement** `CHARACTER_HEIGHT_COMPACT_PX` / `CHARACTER_HEIGHT_PX` :
+voies, sprites et noms sont ceux d'avant, au pixel près.
+
+**Tailles obtenues, en petit paysage** (logique 1280×720, identiques sur bureau à effectif réduit) :
+
+| Effectif | Bande (haut → bas) | Espacement | Hauteur du cadre | Police du nom | Séparation visible |
+| --- | --- | --- | --- | --- | --- |
+| 3 | 185 → 535 | 175 | **172** | 32 | 10,6 |
+| 4 | 150 → 570 | 140 | **135** | 25 | 10,9 |
+| 5 | 126,7 → 593,3 | 116,7 | **111** | 21 | 10,6 |
+| 6 *(figé)* | 72 → 648 | 115,2 | **106** | 20 | 13,9 |
+
+L'ordre demandé est donc strict : `taille(3) > taille(4) > taille(5) > taille(6)` — 172 > 135 > 111 >
+106, soit **+62 %** pour trois coureurs, +27 % pour quatre, +5 % pour cinq. En CSS sur un iPhone
+(844×390, canvas réduit à ≈ 0,54), le personnage passe de ≈ 57 px à ≈ 93 px de haut à trois coureurs.
+
+**Tests (DoD).** Unitaires : `tests/unit/laneGeometry.test.ts` (21 tests) — les voies se répartissent
+entre les deux bords de la bande, la bande historique est **gelée** à six coureurs dans les deux
+formats, chaque cadre reste entier dans l'arène, la séparation visible tient à 10 px pour tout
+effectif, la hauteur retenue est bien le plafond calculé, et l'ordre des tailles est strict. E2E :
+`tests/e2e/players.spec.ts` vérifie à `844×390` et `926×428`, pour 3, 4, 5 et 6 coureurs, que la
+hauteur réellement dessinée vaut `characterHeightPx(n, true)`, que l'ordre est strict, qu'aucun cadre
+ne sort de l'arène (haut et bas), que la séparation visible reste ≥ 10 px et que le nom reste à gauche
+du sprite ; un **nouveau** test mesure, à trois coureurs, le badge d'événement réel et prouve qu'il
+reste sur l'axe de sa voie, dans le canvas, derrière le sprite et **hors de toute silhouette
+voisine**. `tests/e2e/compactLayout.spec.ts`, `hudLayout.spec.ts` et `assets.spec.ts` passent sans
+mise à jour.
+
+**Résultats réels.** `npm run verify` **vert** — `typecheck` 0 erreur ; **768 tests unitaires** (51
+fichiers) ; `vite build` OK ; **125 tests E2E** OK, dont **1 nouveau**, sans aucune erreur console. Les
+seeds dorées et les tests d'équilibrage passent **sans aucune mise à jour** : aucune constante de
+simulation, aucun RNG et aucune taille de l'effectif de référence n'a été touché.
 
 ---
 

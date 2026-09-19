@@ -210,8 +210,8 @@ export class RngStream {
  * Dérive un stream nommé à partir de la seed d'une course.
  *
  * Chaque couple `(seed, label)` donne une suite indépendante. Les labels prévus sont
- * `drift:<charId>`, `surge:<charId>`, `events:global`, `events:<charId>`, `speaker:lines`
- * et `cosmetic` (voir `GAME_DESIGN.md` §10).
+ * `drift:<charId>`, `surge:<charId>`, `events:global`, `events:<charId>`, `speaker:lines`,
+ * `cosmetic` et `participants` (voir `GAME_DESIGN.md` §10).
  */
 export function forkStream(seed: number, label: string): RngStream {
   const streamSeed = hash32(`${seed >>> 0}:${label}`);

@@ -463,6 +463,62 @@ body {
 }
 
 /*
+ * Sélecteur du nombre de coureurs (courses de 3 à 6).
+ *
+ * Il partage la rangée de la seed, à droite : le panneau d'arrivée, le classement et la piste gardent
+ * donc exactement la même géométrie, et le HUD compact n'accueille pas un bloc de plus. Le HUD ne
+ * capture aucun clic (`pointer-events: none`) : ce contrôle, lui, doit les recevoir.
+ */
+.hud-players {
+  grid-column: 1;
+  grid-row: 5;
+  justify-self: end;
+  align-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  pointer-events: auto;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: #00000080;
+  font-size: 0.9em;
+}
+
+.hud-players-label {
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hud-players-select {
+  pointer-events: auto;
+  padding: 0.05rem 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #16203c;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.hud-players-select:hover,
+.hud-players-select:focus-visible {
+  border-color: var(--accent);
+}
+
+.hud-players-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Pendant une course, le choix est figé : le contrôle le dit au lieu de laisser croire l'inverse. */
+.hud-players-select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/*
  * Bouton « persos » (micro-correction responsive) : déclaré par `index.html`, il vit dans la rangée de
  * la seed et n'apparaît qu'en petit paysage (voir la requête média). Sur les autres formats il est en
  * `display: none` : il n'occupe donc aucune cellule de la grille du HUD et la mise en page de bureau
@@ -646,6 +702,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  /*
+   * Marge droite visible (passe « courses de 3 à 6 coureurs ») : le panneau était légèrement trop
+   * large, il touchait presque le bord de l'arène. Il est donc **un peu plus étroit**, sans rien
+   * perdre : la protection Dynamic Island / safe-area du petit paysage reste portée par son `padding`
+   * (voir la requête média), et cette marge-ci s'y ajoute, dans les deux formats.
+   */
+  margin-right: 0.5rem;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--accent);
   border-radius: 10px;
@@ -663,6 +726,39 @@ body {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.2rem 0.5rem;
+}
+
+/*
+ * Fermeture de l'écran d'arrivée (×).
+ *
+ * Le panneau entier est en `pointer-events: none` : ce bouton, comme les boutons d'action, doit donc
+ * les réactiver pour être cliquable. Il est poussé à droite par `margin-left: auto` (le panneau est un
+ * `flex` en colonne, l'en-tête un `flex` en ligne) et reste tactile sur téléphone.
+ */
+.hud-finish-close {
+  margin-left: auto;
+  pointer-events: auto;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #16203c;
+  color: var(--text);
+  font: inherit;
+  font-size: 1.1em;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hud-finish-close:hover,
+.hud-finish-close:focus-visible {
+  border-color: var(--accent);
+}
+
+.hud-finish-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .hud-finish-title {
@@ -1526,6 +1622,31 @@ body {
     grid-row: 6;
     justify-self: end;
     align-self: end;
+    min-height: 1.4rem;
+    font-size: 0.55rem;
+  }
+
+  /*
+   * Le sélecteur du nombre de coureurs occupe la même rangée, au **centre** : seed à gauche, effectif
+   * au milieu, bouton « persos » à droite. Le libellé disparaît (la valeur « 3 » à « 6 » suffit et se
+   * lit d'un coup d'œil), ce qui laisse la place aux trois éléments dans la colonne du HUD.
+   */
+  .hud-players {
+    grid-column: 2;
+    grid-row: 6;
+    justify-self: center;
+    align-self: end;
+    gap: 0.15rem;
+    padding: 0.05rem 0.25rem;
+    background: transparent;
+    font-size: 0.55rem;
+  }
+
+  .hud-players-label {
+    display: none;
+  }
+
+  .hud-players-select {
     min-height: 1.4rem;
     font-size: 0.55rem;
   }

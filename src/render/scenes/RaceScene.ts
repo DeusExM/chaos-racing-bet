@@ -1,6 +1,6 @@
 import { Scene } from 'phaser';
 
-import { CHARACTERS } from '../../core/characters';
+import { characterById } from '../../core/characters';
 import type { RaceFact } from '../../core/types';
 import type { RaceSimulation } from '../../sim/RaceSimulation';
 import type { SimPhase } from '../../sim/types';
@@ -105,6 +105,14 @@ export interface RaceSceneOptions {
    * l'instant figé, sous l'écran qui le masque.
    */
   readonly allowsGameplay: () => boolean;
+  /**
+   * Prévient `app/` à chaque changement de phase temps réel.
+   *
+   * Il sert au sélecteur du nombre de coureurs, qui n'est modifiable qu'avant une course : le rendu
+   * ne touche pas à ce contrôle (il appartient à `app/`), il se contente de dire **quand** la phase
+   * change. Aucune règle de course ne passe par là.
+   */
+  readonly onPhase?: ((phase: SimPhase) => void) | undefined;
 }
 
 /** Libellé d'état correspondant à une phase temps réel. Exhaustif par construction. */
@@ -146,6 +154,18 @@ export class RaceScene extends Scene {
   private readonly rig = new CameraRig();
 
   private sprites: readonly CharacterSprite[] = [];
+
+  /**
+   * Signature des partants du dernier jeu de sprites construit.
+   *
+   * Elle sert à détecter un **changement d'effectif** (nouvelle course à 3, 4 ou 5 coureurs) : les
+   * sprites appartiennent à une course, donc ils sont reconstruits plutôt que réutilisés — sinon une
+   * course à trois garderait six voies et six personnages dessinés.
+   */
+  private participantsKey = '';
+
+  /** Dernière phase annoncée à `app/` : évite de la prévenir à chaque frame. */
+  private lastPhase: SimPhase | null = null;
 
   private track: TrackView | null = null;
 
@@ -235,9 +255,7 @@ export class RaceScene extends Scene {
       this.subtitle = new SubtitleBanner(this.options.hudRoot);
     }
 
-    this.sprites = CHARACTERS.map(
-      (character, index) => new CharacterSprite(this, character, index),
-    );
+    this.sprites = this.buildSprites();
 
     // Le classement est tenu par le HUD : celui-ci en est le **seul** écrivain, donc l'ordre affiché
     // ne peut pas diverger d'une seconde implémentation qui écrirait les mêmes lignes.
@@ -366,6 +384,14 @@ export class RaceScene extends Scene {
     const phase = this.options.simulation.phase;
     const checkpoint = this.options.simulation.checkpoint;
 
+    // 2 bis. Changement de phase temps réel : `app/` en est prévenu une fois par transition (jamais à
+    // chaque frame). Cela ne sert qu'à l'interface — ici, autoriser ou non le choix du nombre de
+    // coureurs — et ne peut donc pas influencer la course.
+    if (phase !== this.lastPhase) {
+      this.lastPhase = phase;
+      this.options.onPhase?.(phase);
+    }
+
     // 2 bis. Passages en tête (passe de finition 2D) : quand le noyau annonce une borne, le premier de
     // son classement est noté. C'est une **lecture** du classement existant, faite une fois par borne :
     // aucun second moteur de classement n'est créé, et une borne non franchie n'est jamais complétée.
@@ -390,9 +416,14 @@ export class RaceScene extends Scene {
     }
 
     // 4. Les positions de rendu : celles de l'instant **consulté** pendant une relecture, sinon celles
-    // du noyau, plus une inertie purement visuelle après l'arrivée. Le décalage est le même pour les
-    // six marcheurs, donc l'ordre à l'écran ne peut pas diverger du classement affiché — une position
+    // du noyau, plus une inertie purement visuelle après l'arrivée. Le décalage est le même pour tous
+    // les partants, donc l'ordre à l'écran ne peut pas diverger du classement affiché — une position
     // de sprite n'est jamais un critère de victoire.
+    //
+    // C'est aussi ici, et seulement ici, que le rendu suit un changement d'**effectif** : entre deux
+    // courses, le noyau peut aligner trois, quatre, cinq ou six partants, et les sprites sont alors
+    // reconstruits pour cet effectif. Une course lancée ne change jamais d'effectif.
+    this.syncParticipants();
     this.visualXs =
       replayFrame !== null
         ? replayFrame.distances
@@ -611,10 +642,51 @@ export class RaceScene extends Scene {
       );
     }
 
-    this.track?.layout(this.trackWidth, height, compact);
+    this.track?.layout(this.trackWidth, height, compact, this.sprites.length);
     for (const sprite of this.sprites) {
       sprite.layout(height, compact);
     }
+  }
+
+  /**
+   * Construit un sprite par **partant**, dans l'ordre canonique du roster.
+   *
+   * Les sprites ne sont plus construits « pour six » : ils suivent la liste des partants du noyau, qui
+   * est la seule source de vérité sur qui court. L'index de voie est l'index dans cette liste, donc
+   * les voies restent ordonnées et aucun trou n'apparaît.
+   */
+  private buildSprites(): readonly CharacterSprite[] {
+    const participants = this.options.simulation.participants;
+    this.participantsKey = participants.join(',');
+    return participants.map((id, index) => {
+      const character = characterById(id);
+      if (character === undefined) {
+        throw new RangeError(`Partant hors roster : « ${id} ».`);
+      }
+      return new CharacterSprite(this, character, index, participants.length);
+    });
+  }
+
+  /**
+   * Reconstruit les sprites si l'effectif a changé depuis la dernière frame.
+   *
+   * Un changement d'effectif n'arrive qu'entre deux courses (`restart`), jamais pendant une course :
+   * le noyau reconstruit son moteur, le rendu reconstruit ses sprites. Les anciens sont détruits pour
+   * qu'aucune silhouette d'une course précédente ne reste dessinée sous la nouvelle.
+   */
+  private syncParticipants(): void {
+    const participants = this.options.simulation.participants;
+    if (participants.join(',') === this.participantsKey) {
+      return;
+    }
+    for (const sprite of this.sprites) {
+      sprite.destroy();
+    }
+    this.sprites = this.buildSprites();
+    this.passages.reset();
+    // La géométrie doit être rejouée pour le nouvel effectif : les voies et les tailles changent.
+    this.layoutWidth = 0;
+    this.layoutHeight = 0;
   }
 }
 

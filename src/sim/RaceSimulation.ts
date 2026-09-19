@@ -1,6 +1,7 @@
-import { RACE_CONFIG } from '../core/config';
+import { RACE_CONFIG, GAME_CONFIG } from '../core/config';
 import { RaceEngine } from '../core/engine';
-import type { RaceFact, RaceResult, RaceState } from '../core/types';
+import { DEFAULT_PARTICIPANTS, normalizeParticipants } from '../core/participants';
+import type { CharacterId, RaceFact, RaceResult, RaceState } from '../core/types';
 import { SIM_CONFIG } from './config';
 import { ReplayHistory } from './ReplayHistory';
 import type { SimConfig, SimPhase } from './types';
@@ -40,7 +41,13 @@ import type { SimConfig, SimPhase } from './types';
  * rien ne relie.
  */
 export class RaceSimulation {
-  private readonly engine: RaceEngine;
+  /**
+   * Noyau de la course.
+   *
+   * Il est **reconstruit** quand le nombre de coureurs change (voir `restart`) : l'effectif est fixé à
+   * la construction du moteur, et rien ne le modifie en cours de course.
+   */
+  private engine: RaceEngine;
 
   private config: SimConfig;
 
@@ -93,17 +100,36 @@ export class RaceSimulation {
    * Il est rempli ici, pas par le rendu : seul le propriétaire des pas peut dire ce qui a réellement
    * été calculé. Il ne participe à aucune décision — le vider, le remplir ou ne jamais le lire donne
    * exactement la même course.
+   *
+   * Il est **reconstruit** quand le nombre de coureurs change : ses tableaux sont dimensionnés sur
+   * l'effectif, et un historique de six places ne peut pas décrire une course à trois.
    */
-  readonly history = new ReplayHistory();
+  private replayHistory: ReplayHistory;
 
-  constructor(seed: string, config: SimConfig = SIM_CONFIG) {
+  constructor(seed: string, config: SimConfig = SIM_CONFIG, players: number = DEFAULT_PARTICIPANTS) {
     requireUsableConfig(config);
 
     this.config = config;
-    this.engine = new RaceEngine(seed);
+    this.engine = new RaceEngine(seed, GAME_CONFIG, { players });
+    this.replayHistory = new ReplayHistory(this.engine.participantIds.length);
     // Le pas `0` est un instant comme un autre : c'est l'état de départ, et la relecture doit pouvoir
     // y revenir (la borne basse du curseur vaut exactement `0 s`).
-    this.history.record(this.engine.getState());
+    this.replayHistory.record(this.engine.getState());
+  }
+
+  /** Historique de relecture de la course en cours, en lecture seule. */
+  get history(): ReplayHistory {
+    return this.replayHistory;
+  }
+
+  /** Partants de la course en cours, dans l'ordre canonique du roster. */
+  get participants(): readonly CharacterId[] {
+    return this.engine.participantIds;
+  }
+
+  /** Effectif choisi pour la prochaine course (3 à 6). Il ne change pas la course en cours. */
+  get players(): number {
+    return this.engine.playersCount;
   }
 
   /** Phase temps réel : `idle` tant que `start()` n'a pas été appelé. */
@@ -253,8 +279,21 @@ export class RaceSimulation {
     this.config = Object.freeze({ ...this.config, timeScale });
   }
 
-  /** Repart de zéro, **en `idle`**, avec tous les compteurs réels remis à plat. */
-  restart(seed?: string): void {
+  /**
+   * Repart de zéro, **en `idle`**, avec tous les compteurs réels remis à plat.
+   *
+   * `players` ne s'applique qu'**ici** : c'est la seule façon de changer le nombre de coureurs, et
+   * elle repart d'une course neuve. Une course déjà lancée ne peut donc pas changer d'effectif — le
+   * moteur et l'historique sont reconstruits, jamais redimensionnés en place.
+   */
+  restart(seed?: string, players?: number): void {
+    const nextPlayers =
+      players === undefined ? this.engine.playersCount : normalizeParticipants(players);
+    if (nextPlayers !== this.engine.playersCount) {
+      this.engine = new RaceEngine(this.engine.getState().seed, GAME_CONFIG, { players: nextPlayers });
+      this.replayHistory = new ReplayHistory(this.engine.participantIds.length);
+    }
+
     this.engine.reset(seed ?? this.engine.getState().seed);
     this.accumulatedSimS = 0;
     this.executedSteps = 0;
@@ -265,8 +304,8 @@ export class RaceSimulation {
     this.simPhase = 'idle';
     // L'historique appartient à **une** course : le garder d'une course à l'autre ferait croire à une
     // relecture possible d'instants qui n'existent plus.
-    this.history.reset();
-    this.history.record(this.engine.getState());
+    this.replayHistory.reset();
+    this.replayHistory.record(this.engine.getState());
   }
 
   /**

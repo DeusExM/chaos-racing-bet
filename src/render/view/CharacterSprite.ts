@@ -53,6 +53,15 @@ export class CharacterSprite {
 
   private readonly laneIndex: number;
 
+  /**
+   * Nombre de partants de la course, fixé à la construction.
+   *
+   * Il décide de la hauteur du sprite et de l'espacement des voies. Un sprite appartient à **une**
+   * course : changer le nombre de coureurs reconstruit les sprites (`RaceScene`), il ne les
+   * redimensionne jamais en place — sinon une course à trois garderait six voies.
+   */
+  private readonly participants: number;
+
   private readonly name: string;
 
   /** Ratio largeur/hauteur de la texture, lu une fois : il ne dépend ni de la frame, ni du format. */
@@ -75,9 +84,10 @@ export class CharacterSprite {
   /** Mode de fusion déjà appliqué aux effets : évite de reconstruire le pipeline à chaque image. */
   private blendKind: EventVisual['kind'] = 'none';
 
-  constructor(scene: Scene, character: CharacterConfig, laneIndex: number) {
+  constructor(scene: Scene, character: CharacterConfig, laneIndex: number, participants: number) {
     this.characterId = character.id;
     this.laneIndex = laneIndex;
+    this.participants = participants;
     this.name = character.name;
 
     this.image = scene.add.image(0, 0, characterTextureKey(character.id));
@@ -119,21 +129,22 @@ export class CharacterSprite {
   /**
    * Adapte la taille au format courant. Le rendu ne dépend jamais de la taille des sprites.
    *
-   * La hauteur logique reçue vaut `VIEW.BASE_HEIGHT` dans les deux formats : ce qui change en petit
-   * paysage, c'est la **cible** (`CHARACTER_HEIGHT_COMPACT_PX`), plus grande, parce que la zone des
-   * voies y est plus haute. Le facteur proportionnel et le plancher ne servent qu'à rester lisible si
-   * la hauteur logique changeait un jour — ils n'autorisent jamais un affichage non proportionnel à
-   * la texture.
+   * La hauteur logique reçue vaut `VIEW.BASE_HEIGHT` dans les deux formats : ce qui change, c'est la
+   * **cible** (`characterHeightPx(participants, compact)`), plus grande en petit paysage parce que la
+   * zone des voies y est plus haute, et plus grande aussi quand la course aligne moins de coureurs —
+   * la bande des voies est alors partagée entre moins de monde. Le facteur proportionnel et le
+   * plancher ne servent qu'à rester lisible si la hauteur logique changeait un jour : ils n'autorisent
+   * jamais un affichage non proportionnel à la texture.
    */
   layout(heightPx: number, compact = false): void {
-    const target = characterHeightPx(compact);
+    const target = characterHeightPx(this.participants, compact);
     this.heightPx = Math.max(
       VIEW.CHARACTER_MIN_HEIGHT_PX,
       Math.min(target, heightPx * (target / VIEW.BASE_HEIGHT)),
     );
     this.widthPx = this.heightPx * this.aspectRatio;
 
-    const fontTarget = characterNameFontPx(compact);
+    const fontTarget = characterNameFontPx(this.participants, compact);
     this.fontSizePx = Math.max(9, Math.min(fontTarget, heightPx * (fontTarget / VIEW.BASE_HEIGHT)));
 
     this.image.setDisplaySize(this.widthPx, this.heightPx);
@@ -205,7 +216,7 @@ export class CharacterSprite {
    * même position : le halo se superpose au sprite, la traînée s'en écarte vers l'arrière.
    */
   place(screenX: number, heightPx: number, compact = false): void {
-    const y = laneY(this.laneIndex, heightPx, compact);
+    const y = laneY(this.laneIndex, heightPx, compact, this.participants);
     this.image.setPosition(screenX, y);
     this.aura.setPosition(screenX, y);
     this.trail.setPosition(screenX - this.widthPx * this.visual.trailOffsetRatio, y);
@@ -225,7 +236,7 @@ export class CharacterSprite {
   showEdgeMarker(side: 'left' | 'right', widthPx: number, heightPx: number, compact = false): void {
     const x = side === 'left' ? VIEW.EDGE_MARGIN_PX : widthPx - VIEW.EDGE_MARGIN_PX;
     this.edgeMarker.setText(side === 'left' ? `◀ ${this.name}` : `${this.name} ▶`);
-    this.edgeMarker.setPosition(x, laneY(this.laneIndex, heightPx, compact));
+    this.edgeMarker.setPosition(x, laneY(this.laneIndex, heightPx, compact, this.participants));
     this.edgeMarker.setDepth(80);
     this.edgeMarker.setVisible(true);
   }
@@ -233,6 +244,22 @@ export class CharacterSprite {
   /** Masque le marqueur dès que le personnage revient dans la fenêtre. */
   hideEdgeMarker(): void {
     this.edgeMarker.setVisible(false);
+  }
+
+  /**
+   * Détruit les objets Phaser du sprite.
+   *
+   * Appelé quand l'**effectif** d'une course change : un sprite appartient à une course et à une voie,
+   * donc les sprites d'une course à six ne peuvent pas servir une course à trois. Les objets sont
+   * réellement détruits (et non cachés) : aucune silhouette d'une course précédente ne peut rester
+   * dessinée, et rien ne s'accumule d'une course à l'autre.
+   */
+  destroy(): void {
+    this.image.destroy();
+    this.aura.destroy();
+    this.trail.destroy();
+    this.nameLabel.destroy();
+    this.edgeMarker.destroy();
   }
 
   /**

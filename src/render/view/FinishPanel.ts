@@ -95,11 +95,28 @@ export class FinishPanel {
 
   private readonly newRaceButton: HTMLButtonElement;
 
+  /**
+   * Bouton de fermeture (×) : il **masque** l'écran d'arrivée, et rien de plus.
+   *
+   * Il ne relance aucune course, ne change pas la seed et ne touche pas au résultat : le classement
+   * figé reste disponible (`snapshot()`), les commandes habituelles redeviennent simplement
+   * accessibles sous le panneau.
+   */
+  private readonly closeButton: HTMLButtonElement;
+
   private lastSignature = '';
 
   private lastModel: FinishModel | null = null;
 
   private visible = false;
+
+  /**
+   * L'écran a-t-il été fermé par le joueur pour cette arrivée ?
+   *
+   * Le panneau reste un **reflet** de l'état : il se réaffiche donc à chaque nouvelle arrivée, et
+   * cette marque n'est levée que lorsque la course quitte la phase `finished` (voir `hide()`).
+   */
+  private dismissed = false;
 
   constructor(root: HTMLElement, text: UiText, actions: FinishActions) {
     this.text = text;
@@ -124,7 +141,17 @@ export class FinishPanel {
     this.photoBadge.dataset['testid'] = 'finish-photo';
     this.photoBadge.hidden = true;
 
-    head.append(title, this.winnerLine, this.photoBadge);
+    // Fermeture : le bouton est dans l'en-tête, à droite. Il porte un libellé lisible par les
+    // technologies d'assistance (`aria-label`) et un caractère visible (`×`) — un simple glyphe sans
+    // nom accessible serait un bouton muet.
+    this.closeButton = document.createElement('button');
+    this.closeButton.type = 'button';
+    this.closeButton.className = 'hud-finish-close';
+    this.closeButton.dataset['testid'] = 'finish-close';
+    this.closeButton.textContent = '×';
+    this.closeButton.setAttribute('aria-label', text.finishCloseLabel);
+
+    head.append(title, this.winnerLine, this.photoBadge, this.closeButton);
 
     const body = document.createElement('div');
     body.className = 'hud-finish-body';
@@ -186,6 +213,18 @@ export class FinishPanel {
     this.newRaceButton.addEventListener('click', () => {
       actions.newRace();
     });
+    this.closeButton.addEventListener('click', () => {
+      this.dismiss();
+    });
+
+    // Échap ferme aussi l'écran, sur les appareils qui ont un clavier. Le raccourci ne fait **rien**
+    // quand le panneau n'est pas affiché : il ne peut donc pas voler une touche au reste de la page.
+    window.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !this.visible) {
+        return;
+      }
+      this.dismiss();
+    });
 
     this.root = section;
     root.appendChild(section);
@@ -204,8 +243,14 @@ export class FinishPanel {
       return;
     }
 
-    this.show();
     this.lastModel = model;
+    if (this.dismissed) {
+      // Fermé par le joueur pour cette arrivée : le panneau reste masqué, mais le classement figé est
+      // conservé tel quel (aucune donnée n'est recalculée ni effacée).
+      return;
+    }
+
+    this.show();
 
     const signature = signatureOf(model);
     if (signature === this.lastSignature) {
@@ -355,9 +400,22 @@ export class FinishPanel {
     this.root.hidden = false;
   }
 
+  /**
+   * Masque l'écran sans rien oublier : le classement figé reste lisible par les tests et par le HUD.
+   *
+   * C'est ce que fait le bouton ×. `dismissed` empêche le panneau de se réafficher à la frame
+   * suivante, puisque le modèle, lui, est toujours là.
+   */
+  private dismiss(): void {
+    this.dismissed = true;
+    this.visible = false;
+    this.root.hidden = true;
+  }
+
   /** Masque réellement l'écran : `hidden` retire l'élément, donc aucune place n'est réservée. */
   private hide(): void {
     this.visible = false;
+    this.dismissed = false;
     this.lastModel = null;
     this.lastSignature = '';
     this.root.hidden = true;

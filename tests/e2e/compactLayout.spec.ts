@@ -354,12 +354,20 @@ for (const viewport of VIEWPORTS) {
     const scale = layout.canvas.width / layout.logicalArenaWidth;
     const spriteHeight = layout.sprites[0]?.height ?? 0;
     expect(spriteHeight, 'la hauteur de rendu est celle du format compact').toBeCloseTo(
-      characterHeightPx(true),
+      characterHeightPx(CHARACTER_IDS.length, true),
       0,
     );
-    expect(characterHeightPx(true), 'fourchette demandée sur téléphone').toBeGreaterThanOrEqual(104);
-    expect(characterHeightPx(true), 'fourchette demandée sur téléphone').toBeLessThanOrEqual(106);
-    expect(characterHeightPx(true)).toBeGreaterThan(characterHeightPx(false));
+    expect(
+      characterHeightPx(CHARACTER_IDS.length, true),
+      'fourchette demandée sur téléphone',
+    ).toBeGreaterThanOrEqual(104);
+    expect(
+      characterHeightPx(CHARACTER_IDS.length, true),
+      'fourchette demandée sur téléphone',
+    ).toBeLessThanOrEqual(106);
+    expect(characterHeightPx(CHARACTER_IDS.length, true)).toBeGreaterThan(
+      characterHeightPx(CHARACTER_IDS.length, false),
+    );
     expect(
       spriteHeight * scale,
       'un personnage affiché mesure au moins 55 px CSS',

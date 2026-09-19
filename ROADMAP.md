@@ -1281,6 +1281,140 @@ le panneau), et `Terminé` à l'arrivée.
 
 ---
 
+### P013-cor3 — Courses de 3 à 6 coureurs (nombre de partants, taille des personnages, fermeture de l'arrivée) `[x]`
+
+**Nature.** Comme `P013-cor`, `P013-cor2` et les notes de finition, ce n'est **pas** une étape de la
+numérotation : c'est une **fonctionnalité demandée** après la passe d'orientation, **avant** P013.5.
+Elle ne renumérote rien, ne change **aucune constante de simulation** (`SPEED.*`, `DRIFT.*`, `SURGE.*`,
+`EVENT.*`, `OVERTAKE.*`, `RACE_CONFIG`, `SIM_CONFIG` sont intacts), ne touche ni à la durée de 60 s, ni
+aux checkpoints `20/40`, ni aux formules d'Ornstein–Uhlenbeck, ni aux magnitudes d'événement, ni au
+taux d'événement, ni au mode portrait/paysage validé, ni à la galerie `Persos`, ni à la timeline. Elle
+ajoute une **dimension** à une course — le nombre de partants — sans jamais rejouer l'équilibrage.
+
+**1. Un effectif de course, distinct du roster.** Le roster reste figé à **six** personnages
+(`CHARACTERS`, `CHARACTER_IDS`) ; une **course** aligne **3, 4, 5 ou 6** partants. Le nouveau module
+`src/core/participants.ts` porte la règle, et rien d'autre :
+
+* `normalizeParticipants(valeur)` lit un effectif (URL, sélecteur) et retombe sur **6** pour toute
+  valeur absente ou illisible (`2`, `7`, `abc`, `4.5`, `null`) — un lien partagé ne casse donc jamais.
+* `selectParticipants(seedValue, count)` choisit les partants **déterministiquement** dans le roster,
+  par un flux RNG **dédié** (`participants`) et un Fisher–Yates partiel sur les index `0..5`, puis
+  renvoie la liste **triée en ordre canonique** `c0…c5`. Le joueur ne choisit jamais qui court.
+* **À six, rien n'est tiré** : la fonction renvoie `CHARACTER_IDS` **tel quel** (identité de tableau),
+  sans ouvrir de flux ni consommer un tirage. C'est la garantie structurelle de non-régression.
+
+L'effectif est fixé **par instance de moteur** : `RaceSimulation.restart(seed, players)` est le **seul**
+endroit qui peut le changer, et il reconstruit alors le moteur **et** l'historique de relecture. Une
+course lancée ne peut donc pas changer d'effectif — c'est structurel, pas une garde d'interface.
+
+**2. Le moteur court réellement à N.** `RaceState.characters` contient **N** personnages, il y a **N**
+flux `drift:<id>` et **N** flux `surge:<id>` (nommés par personnage : un partant garde exactement la
+même suite qu'à six), les événements ne ciblent que les partants, l'observateur de faits, le
+classement (`computeRanks`/`sortByRank`, seules sources de classement), l'historique de relecture
+(`3601 × N` valeurs) et l'écran d'arrivée suivent le même effectif. Aucun sprite n'est masqué pour
+simuler un plateau réduit : le rendu dessine **exactement** les partants, et reconstruit ses sprites
+quand la liste change (les anciens sont détruits).
+
+**3. Le speaker reste vrai.** Aucune magnitude n'est inventée : `BIG_COMEBACK` publie le gain
+**réellement mesuré** dans la fenêtre, et seuls les seuils qui **dépendent mathématiquement** de la
+taille du plateau sont bornés par `N − 1` — `BIG_COMEBACK` → `min(3, N − 1)` ; `LAST_COMEBACK` →
+`min(4, N − 1)` places et dernier → `min(3, N − 1)`e ou mieux. À trois coureurs, une remontée se
+déclenche donc à deux places, et « gagne 4 places » est **impossible** (le test le vérifie sur un
+corpus). Les textes de checkpoint qui nommaient l'index `5` en dur désignent désormais le **dernier
+rang réellement mesuré** : plus aucune réplique ne peut lever une erreur ni nommer un absent.
+
+**4. Moins de coureurs, des personnages plus grands.** La bande des voies ne change pas (elle garde le
+HUD à distance) ; c'est la **taille** qui suit l'effectif, et elle est **calculée**, pas choisie :
+`characterHeightPx(N, compact)` prend la plus grande hauteur qui laisse la séparation visible exigée
+(≥ 10 px logiques) entre deux silhouettes voisines, plafonnée par la marge transparente réellement
+mesurée des PNG (`95,6 %` de la hauteur visible au pire) et par la place disponible dans l'arène.
+
+| Effectif | Petit paysage (logique) | Bureau (logique) | Police du nom (compact / bureau) |
+| --- | --- | --- | --- |
+| **6** | `106` (inchangé) | `92` (inchangé) | `20` / `16` (inchangés) |
+| **5** | `140` | `121` | `26` / `21` |
+| **4** | `144` | `144` | `27` / `25` |
+| **3** | `144` | `144` | `27` / `25` |
+
+À six coureurs, la géométrie historique est conservée **au pixel** (bandes, ordonnées, tailles,
+polices) : le test unitaire compare chaque valeur à la constante d'origine, et un test E2E mesure la
+hauteur réellement dessinée à `844×390` et `926×428`. À 4 et 3, la hauteur atteint le plafond imposé
+par la place disponible dans l'arène : c'est une valeur **dérivée**, pas un réglage au jugé.
+
+**5. URL reproductible.** Le nombre de coureurs fait partie de l'identité d'une course :
+`?seed=…&players=3..6`. `app/` réécrit les deux paramètres au démarrage **et** à chaque nouvelle
+course, donc un rechargement rejoue exactement la même course, et « Rejouer la même seed » comme
+« Nouvelle course » conservent l'effectif choisi.
+
+**6. Sélecteur `Coureurs`.** Une liste **native** (`<select>`) est posée dans la rangée de la seed, à
+côté du bouton `Persos` : sur iPhone elle ouvre le sélecteur système, utilisable au doigt. Elle
+n'occupe aucune cellule nouvelle de la grille du HUD (donc la géométrie du HUD compact et du bureau
+est inchangée), elle est **désactivée pendant une course** (un réglage sans effet immédiat serait
+trompeur) et redevient active à l'arrivée. Avant le départ, le choix s'applique **tout de suite**
+(l'URL décrit la course à venir) ; après l'arrivée, il attend la course suivante pour ne pas escamoter
+le classement affiché.
+
+**7. Écran d'arrivée.** Le panneau est légèrement **moins large**, avec une marge visible à droite
+dans les deux formats, la protection Dynamic Island / safe-area restant portée par son rembourrage
+(elle s'y ajoute). Il gagne un bouton **`×`** en haut à droite (nom accessible
+`Fermer l'écran d'arrivée`) : il **masque** le panneau et rien d'autre — aucune course relancée, seed
+inchangée, classement figé intact, URL inchangée, commandes habituelles de nouveau atteignables.
+`Échap` fait de même sur un appareil à clavier, uniquement quand le panneau est affiché. Le podium vaut
+`min(3, N)` : une course à trois coureurs présente trois marches.
+
+**Tests (DoD).** Unitaires : `tests/unit/participants.test.ts` (11 tests — lecture de l'effectif et
+repli sur 6, effectif exact, unicité, appartenance au roster, ordre canonique, déterminisme
+seed + effectif, plateaux distincts selon la seed, sélection dépendante de l'effectif, identité du
+roster à six) et `tests/unit/participantsRace.test.ts` (13 tests — nombre de personnages du noyau,
+identifiants officiels, aucun fait ni événement sur un non-partant, classement à N lignes, `N`
+distances par instant de relecture, `N` résultats et podium `min(3, N)`, gain jamais impossible,
+seuils adaptés à trois coureurs, **non-régression bit à bit à six** : distances, classement et faits
+identiques à ceux d'un effectif six demandé explicitement). `tests/unit/laneGeometry.test.ts` est
+devenu paramétrique (3/4/5/6, deux formats) : répartition, espacement, noms entiers, aucune silhouette
+ne recouvre sa voisine, séparation visible ≥ 10 px, hauteur maximale dérivée, croissance des tailles,
+proportion texte/silhouette. E2E : `tests/e2e/players.spec.ts` (14 tests — sélecteur et URL par
+défaut, `players=3/4/5/6` du noyau à l'écran, URL illisible, choix appliqué avant la course puis
+désactivé pendant, effectif conservé par « Rejouer la même seed » et « Nouvelle course », tailles et
+absence de collision à `844×390` et `926×428`, fermeture par `×` puis par `Échap` sans rien relancer,
+marge droite du panneau, sélecteur qui ne recouvre pas la seed).
+
+**Audit statistique (demandé au point 11, exécuté après l'implémentation).** Nouvel outil
+`tools/participantsAudit.ts` + `tools/participantsAuditRunner.mjs` + `npm run balance:participants`
+(même schéma que `npm run balance:leaders` : Vite en SSR, rapports dans `.tmp/`, aucune dépendance
+ajoutée). Il mesure, pour chaque effectif, la sélection par personnage, les plateaux observés, le taux
+de victoire **conditionnel à la participation**, les changements de leader, les événements et surges
+par personnage, la persistance du leader aux bornes `20/40/60 s` et la reproductibilité bit à bit — et
+il compare chaque mesure à son espérance **exacte** (`N/6`, `1/C(6,N)`, `1/N`) par un χ² à 5 %. Il ne
+modifie **aucun** paramètre : un écart se rapporte, il ne se corrige pas.
+
+Sur **2 000 seeds par effectif** (8 000 courses, 28 800 000 pas, ≈ 91 s) :
+
+| Mesure | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- |
+| Sélection (attendu `N/6`) | 47,70 – 52,20 % (χ² = 4,98) | 64,85 – 68,60 % (χ² = 2,28) | 82,45 – 84,70 % (χ² = 0,75) | 100 % |
+| Victoire conditionnelle (attendu `1/N`) | 31,42 – 35,47 % (χ² = 3,10) | 23,75 – 26,12 % (χ² = 2,82) | 18,75 – 21,66 % (χ² = 5,50) | 15,10 – 18,05 % (χ² = 5,67) |
+| Plateaux distincts | 20 / 20 (χ² = 23,22 ; seuil 30,14) | 15 / 15 (χ² = 9,43 ; seuil 23,68) | 6 / 6 (χ² = 3,73) | 1 |
+| Changements de leader | 5,54 | 6,68 | 7,51 | 8,25 |
+| Événements / course | 1,92 | 1,79 | 1,70 | 1,64 |
+| Surges / personnage | 6,19 – 6,30 | 6,20 – 6,26 | 6,20 – 6,25 | 6,21 – 6,24 |
+| Leader conservé 20 → 60 s | 57,95 % | 50,85 % | 46,90 % | 42,50 % |
+| Courses distinctes / reproductibilité | 2 000 / 2 000 · oui | idem | idem | idem |
+
+**Conclusion : aucune anomalie statistique**, aucune constante touchée. Trois effets de bord mesurés
+et **non corrigés** (mesurer d'abord, rééquilibrer ensuite — c'était la demande) : le nombre
+d'événements par course dépend peu de l'effectif (cooldown **global**), donc chaque partant en reçoit
+davantage à trois (0,64 contre 0,27) ; les changements de leader diminuent avec l'effectif (5,54 à
+trois contre 8,25 à six) ; les surges par personnage sont **identiques** partout (≈ 6,2), ce qui
+confirme qu'un partant garde son flux `surge:<id>`. Détail complet dans `GAME_DESIGN.md` §13.
+
+**Résultats réels.** `npm run verify` **vert** — `typecheck` 0 erreur ; **764 tests unitaires** (51
+fichiers, dont 46 nouveaux) ; `vite build` OK ; **117 tests E2E** OK, dont **14 nouveaux**, sans aucune
+erreur console. Le corpus de seeds dorées (`tests/unit/goldenSeeds.test.ts`, distances et classement
+comparés **bit à bit**) passe **sans aucune mise à jour** : les courses à six coureurs sont exactement
+celles d'avant. Voir `GAME_DESIGN.md` §3.1, §5.2, §9.2 et §10.
+
+---
+
 ### P013.5 — Jalon 3D : prototype de rendu et choix du moteur `[ ]`
 
 **Objectif** : décider **par l'expérience**, et non sur le papier, si la présentation finale doit

@@ -56,6 +56,33 @@ export const CHARACTER_IDS = ['c0','c1','c2','c3','c4','c5'] as const;
   structurellement identiques (`assertAllCharactersEquivalent()`).
 * Les noms définitifs sont choisis en P014 ; avant cela, des libellés provisoires suffisent.
 
+### 3.1 Nombre de coureurs d'une course (3 à 6)
+
+Le **roster** compte 6 personnages ; une **course** peut en aligner 3, 4, 5 ou 6. Les deux notions sont
+distinctes et le restent partout dans le code : `CHARACTERS`/`CHARACTER_IDS` décrivent le roster
+complet, et l'**effectif** d'une course est la liste des **partants**.
+
+* L'effectif se choisit **avant** une course, avec le sélecteur `Coureurs : 3 / 4 / 5 / 6` (valeur par
+  défaut : 6). Une course lancée ne change **jamais** d'effectif : le moteur et l'historique de
+  relecture sont reconstruits au redémarrage, jamais redimensionnés en cours de route.
+* Les partants sont choisis **automatiquement et déterministiquement** à partir de la seed et de
+  l'effectif : `selectParticipants(seedValue, count)` (`src/core/participants.ts`) renvoie un
+  sous-ensemble du roster, dans l'**ordre canonique** `c0…c5`, par un flux RNG dédié `participants`
+  (Fisher–Yates partiel sur les index du roster, entiers uniquement). Le joueur ne choisit donc jamais
+  qui court, et deux joueurs partageant la même seed et le même effectif voient le même plateau.
+* **À six coureurs, rien n'est tiré** : la sélection est le roster lui-même, renvoyé tel quel, sans
+  ouvrir de flux ni consommer un seul tirage. Les courses à six sont donc **bit à bit** celles d'avant
+  cette fonctionnalité (distances, classement, faits).
+* Tout ce qui dépend du plateau suit l'effectif réel : `RaceState.characters` (N personnages), les
+  flux `drift:<id>` et `surge:<id>` (N de chaque), les cibles d'événements (les seuls partants), le
+  classement (N lignes), l'observateur de faits, l'historique de relecture (`3601 × N` valeurs), le
+  podium (`min(3, N)`) et le classement final (N résultats). Aucun sprite n'est « caché » pour
+  simuler un effectif réduit : le rendu dessine exactement les partants.
+* En petit paysage comme sur bureau, **moins de coureurs ⇒ des personnages plus grands** : la bande
+  des voies est partagée entre moins de monde, donc chaque voie est plus haute et la silhouette
+  visible grandit (`render/viewConfig.ts`, bornée par la séparation visible entre deux voies). À six
+  coureurs, la géométrie historique est conservée à l'identique.
+
 ---
 
 ## 4. Structure temporelle de la course
@@ -502,6 +529,16 @@ de l'**historique de résultats déjà calculés**.
   viewport et n'a pas été modifié. La preuve est faite en imposant une vraie zone protégée
   (`Emulation.setSafeAreaInsetsOverride`, 59 px de chaque côté) à 844×390 et 926×428 : titre,
   six lignes de classement, passages et boutons restent tous à l'intérieur.
+* **Écran d'arrivée : marge droite et fermeture (courses de 3 à 6, §3.1).** Le panneau était légèrement
+  trop large, il touchait presque le bord de l'arène : il est désormais un peu plus étroit, avec une
+  **marge visible à droite** dans les deux formats, et la protection Dynamic Island / safe-area reste
+  portée par son rembourrage intérieur (elle s'y ajoute, elle n'est pas remplacée). Le panneau porte en
+  outre un bouton **`×`** en haut à droite (nom accessible `Fermer l'écran d'arrivée`) : il **masque**
+  l'écran d'arrivée et **rien d'autre** — aucune course n'est relancée, la seed ne change pas, le
+  classement figé reste celui du noyau, l'URL ne bouge pas, et les commandes habituelles redeviennent
+  atteignables. Sur un appareil à clavier, `Échap` produit exactement le même effet, et uniquement
+  quand le panneau est affiché. Le podium vaut `min(3, N)` : une course à trois coureurs présente trois
+  marches, jamais un podium à trou.
 * **Repère d'échelle retiré.** L'**échelle nominale** affichée sur la piste a été supprimée : elle
   ressemblait à une ligne d'arrivée et induisait en erreur, alors que la course se termine **par le
   temps** (§5, invariant 3). Le repère n'a **pas** été renommé `Arrivée` — ce serait faux — et la
@@ -964,7 +1001,8 @@ il est détecté.
   `BIG_COMEBACK` = `[places gagnées, rang courant]` ; `OVERTAKE_STREAK` = `[dépassements dans la
   fenêtre]` ; `BIG_BONUS` et `LEADER_MALUS` = `[magnitude de l'événement, durée, rang au moment du
   tirage]` ; `CLOSE_RACE` = `[écart P1–P3, secondes écoulées]` ; `LAST_COMEBACK` = `[places gagnées,
-  rang courant]` ; `CHECKPOINT_SPLIT` = distances **dans l'ordre du classement** (P1 → P6) ;
+  rang courant]` ; `CHECKPOINT_SPLIT` = distances **dans l'ordre du classement** (P1 → PN, `N` étant
+  l'effectif de la course) ;
   `FINISH` et `PHOTO_FINISH` = `[écart P1–P2, distance du 1er, distance du 2e]`.
 * Les dépassements ne viennent **que** de `OvertakeTracker` (`src/core/overtakes.ts`), alimenté à
   chaque pas : aucune comparaison occasionnelle de classement ne peut créer un `OVERTAKE_STREAK`.
@@ -977,6 +1015,21 @@ il est détecté.
 * Toutes les fenêtres (5 s, 10 s, 30 s) sont comptées en **pas entiers** ; la mémoire de l'observateur
   est constante (aucune photographie de course n'est conservée). Les seuils et importances vivent dans
   la section `FACT` de `src/core/config.ts`.
+* **Seuils dépendant de l'effectif (courses de 3 à 6, §3.1).** Deux déclencheurs du tableau expriment
+  un **nombre de places**, qui n'existe que relativement à la taille du plateau. Eux seuls sont bornés
+  par `N − 1`, et **la mesure publiée reste le gain réellement observé** — jamais un nombre de places
+  impossible :
+
+  | Fait | Seuil du design | Seuil appliqué pour un plateau de `N` partants |
+  | --- | --- | --- |
+  | `BIG_COMEBACK` | `+3` places | `min(3, N − 1)` |
+  | `LAST_COMEBACK` (branche « dernier ») | dernier → 3e ou mieux | dernier → `min(3, N − 1)`e ou mieux |
+  | `LAST_COMEBACK` (branche « places ») | `≥ 4` places | `min(4, N − 1)` |
+
+  Conséquence concrète : à **3** coureurs, une remontée se déclenche à 2 places (dernier → 2e ou mieux)
+  et le speaker ne peut jamais annoncer « gagne 4 places » ; à **4** coureurs, « dernier → 3e ou mieux »
+  et 3 places ; à **5** et **6**, les seuils du design s'appliquent inchangés. Aucune autre constante
+  d'événement, de vitesse ou de fait n'est modifiée par l'effectif.
 
 ### 9.3 Discipline de parole
 
@@ -1069,8 +1122,10 @@ tenue : le correctif retire 9 % des répliques, pas la parole.
   peuvent donner la même seed interne. C'est admis, et jamais nié.
 * Les streams sont dérivés de la seed interne : `sfc32` initialisé par
   `splitmix32(hash(seedInterne + ':' + label))`. **Streams indépendants** par usage :
-  `drift:<charId>`, `surge:<charId>`, `events:global`, `events:<charId>`, `speaker:lines`,
-  `cosmetic` (rendu). L'ordre et le nombre d'appels dans un stream n'influencent aucun autre stream.
+  `drift:<charId>`, `surge:<charId>`, `events:global`, `events:<charId>`, `participants`,
+  `speaker:lines`, `cosmetic` (rendu). L'ordre et le nombre d'appels dans un stream n'influencent
+  aucun autre stream. Le flux `participants` n'est **jamais** ouvert à six coureurs (la sélection n'a
+  pas lieu), ce qui garantit la non-régression des courses à six.
 
 ### 10.2 Reproductibilité stricte
 
@@ -1112,7 +1167,11 @@ d'ambiance, et elle est la seule des deux méthodes à être bit à bit reproduc
 
 ### 10.4 Affichage et paramètres
 
-* Paramètres d'URL : `?seed=K7QM2X9A`, `&fast=1`, `&debug=1`, `&autostart=1`.
+* Paramètres d'URL : `?seed=K7QM2X9A`, `&players=3..6`, `&fast=1`, `&debug=1`, `&autostart=1`.
+* Le **nombre de coureurs fait partie de l'identité d'une course** : une URL reproductible porte donc
+  la seed **et** l'effectif. `app/` réécrit les deux paramètres au démarrage et à chaque nouvelle
+  course, et un rechargement rejoue exactement la même course. Une valeur d'effet absente ou illisible
+  (`players=2`, `players=9`, `players=abc`) retombe proprement sur **6** coureurs, sans erreur.
 * Debug : seed affichée en permanence (coin d'écran, copiable), avec `tSim`, segment courant, et à la
   demande un panneau (`debug=1`) : distances, vitesses, drift/surge/événement actifs, classement brut.
 
@@ -1244,6 +1303,50 @@ document et les seuils changent ensemble.
 > 1000 seeds **reproduit exactement** les références déjà publiées ici (`8,308`, `63,20 %`, `100/100`,
 > `15,30 % – 18,40 %`). Aucune constante de `SPEED`, `DRIFT`, `SURGE`, `EVENT` ni `OVERTAKE` n'a été
 > touchée, et aucun tirage aléatoire n'a été déplacé.
+
+> **Audit des courses de 3 à 6 coureurs — aucun paramètre modifié.** Mesure demandée avec la
+> fonctionnalité du nombre de partants (§3.1) et exécutée **après** son implémentation, sans toucher à
+> une seule constante : `npm run balance:participants` (rapports `.tmp/participants-audit.txt` et
+> `.tmp/participants-audit.json`) joue **2 000 seeds par effectif**, soit **8 000 courses** et
+> **28 800 000 pas** simulés (≈ 91 s).
+>
+> | Mesure | 3 coureurs | 4 coureurs | 5 coureurs | 6 coureurs |
+> | --- | --- | --- | --- | --- |
+> | Sélection d'un personnage (attendu `N/6`) | 47,70 – 52,20 % (χ² = 4,98) | 64,85 – 68,60 % (χ² = 2,28) | 82,45 – 84,70 % (χ² = 0,75) | 100 % |
+> | Victoire **conditionnelle à la participation** (attendu `1/N`) | 31,42 – 35,47 % (χ² = 3,10) | 23,75 – 26,12 % (χ² = 2,82) | 18,75 – 21,66 % (χ² = 5,50) | 15,10 – 18,05 % (χ² = 5,67) |
+> | Plateaux distincts observés | 20 / 20 (χ² = 23,22 ; seuil 30,14) | 15 / 15 (χ² = 9,43 ; seuil 23,68) | 6 / 6 (χ² = 3,73) | 1 (roster complet) |
+> | Changements de leader (moyenne) | 5,54 | 6,68 | 7,51 | 8,25 |
+> | Événements / course | 1,92 | 1,79 | 1,70 | 1,64 |
+> | Événements / personnage / course | 0,61 – 0,67 | 0,42 – 0,47 | 0,32 – 0,37 | 0,26 – 0,29 |
+> | Surges / personnage / course | 6,19 – 6,30 | 6,20 – 6,26 | 6,20 – 6,25 | 6,21 – 6,24 |
+> | Leader conservé 20 → 40 s | 65,85 % | 60,55 % | 54,75 % | 53,15 % |
+> | Leader conservé 40 → 60 s | 74,35 % | 69,35 % | 66,20 % | 61,55 % |
+> | Leader conservé 20 → 60 s | 57,95 % | 50,85 % | 46,90 % | 42,50 % |
+> | Courses distinctes | 2 000 / 2 000 | 2 000 / 2 000 | 2 000 / 2 000 | 2 000 / 2 000 |
+> | Reproductibilité bit à bit (100 seeds rejouées) | oui | oui | oui | oui |
+> | Classement du noyau = suivi pas à pas | oui | oui | oui | oui |
+>
+> **Conclusion : aucune anomalie.** Toutes les mesures restent sous leur seuil à 5 %, les taux de
+> victoire conditionnels sont ceux de `1/N` (33,3 % à trois, 25 % à quatre, 20 % à cinq, 16,7 % à six),
+> les 20, 15 et 6 plateaux possibles sont tous observés, et **aucun** des six personnages n'est
+> favorisé. Le mode réduit ne reproduit donc pas les chiffres du mode à six — il reproduit les siens.
+>
+> **Trois effets de bord, mesurés et volontairement non corrigés** (l'utilisateur a demandé de mesurer
+> avant de rééquilibrer quoi que ce soit) :
+>
+> 1. **Le nombre d'événements par course dépend très peu de l'effectif** (1,92 à trois coureurs, 1,64 à
+>    six) : le planificateur a un **cooldown global** (`EVENT.GLOBAL_COOLDOWN_S`) et un plafond par
+>    personnage, pas un quota proportionnel au plateau. Chaque partant reçoit donc **davantage**
+>    d'événements quand ils sont moins nombreux (0,64 contre 0,27 par course) — la même mécanique
+>    produit une course plus « événementielle » à trois. C'est une conséquence directe du design
+>    existant, pas un biais : `EVENT.RATE_PER_S`, les magnitudes et le catalogue sont **inchangés**.
+> 2. **Les changements de leader diminuent avec l'effectif** (5,54 à trois contre 8,25 à six) et la
+>    persistance du leader augmente (57,95 % contre 42,50 % de 20 à 60 s) : moins de rivaux, donc moins
+>    de croisements possibles. C'est mécanique, et ce n'est pas un défaut de variété — la course reste
+>    indécise, simplement avec moins de monde.
+> 3. **Les surges par personnage ne dépendent pas de l'effectif** (≈ 6,2 partout) : chaque personnage a
+>    son propre flux `surge:<id>`, donc un partant garde exactement la même séquence de surges qu'en
+>    mode six. C'est la preuve que la sélection ne touche aucun flux de personnage.
 
 
 > **Biais de vitesse — résolu en P010, revérifié à 60 s.** La dérive, les surges et les événements ont

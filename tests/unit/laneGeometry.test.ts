@@ -63,14 +63,16 @@ const MAX_VISIBLE_FRACTION = 0.956;
 /** Rapport largeur / hauteur des illustrations servies (427 × 320), mesuré sur les fichiers. */
 const FRAME_ASPECT = 427 / 320;
 
-/** Hauteur du libellé de nom d'un personnage, en pixels logiques. */
-function nameLabelHeight(compact: boolean): number {
-  return characterNameFontPx(compact) * LABEL_LINE_HEIGHT_FACTOR;
+/** Hauteur du libellé de nom d'un personnage, en pixels logiques, pour un effectif donné. */
+function nameLabelHeight(compact: boolean, participants: number): number {
+  return characterNameFontPx(participants, compact) * LABEL_LINE_HEIGHT_FACTOR;
 }
 
-/** Ordonnées des six voies, dans l'ordre du roster. */
-function laneCenters(compact: boolean): number[] {
-  return CHARACTER_IDS.map((_, index) => laneY(index, VIEW.BASE_HEIGHT, compact));
+/** Ordonnées des voies d'un effectif, dans l'ordre du roster. */
+function laneCenters(compact: boolean, participants: number = CHARACTER_IDS.length): number[] {
+  return Array.from({ length: participants }, (_, index) =>
+    laneY(index, VIEW.BASE_HEIGHT, compact, participants),
+  );
 }
 
 /**
@@ -79,23 +81,31 @@ function laneCenters(compact: boolean): number[] {
  * L'origine du texte est la même dans tous les formats (`characterNameOrigin`) : le nom est centré
  * verticalement sur l'axe de la voie, donc ancré par son milieu.
  */
-function nameLabelTop(centerY: number, compact: boolean): number {
-  return characterNameY(centerY) - nameLabelHeight(compact) * characterNameOrigin().y;
+function nameLabelTop(centerY: number, compact: boolean, participants: number): number {
+  return (
+    characterNameY(centerY) -
+    nameLabelHeight(compact, participants) * characterNameOrigin().y
+  );
 }
 
+/** Tous les effectifs d'une course : trois à six coureurs. */
+const PARTICIPANT_COUNTS: readonly number[] = [3, 4, 5, CHARACTER_IDS.length];
+
 describe('zone des voies', () => {
-  it('répartit les six voies entre les ratios du format, sans en perdre aucune', () => {
+  it('répartit les voies entre les ratios du format, sans en perdre aucune', () => {
     for (const compact of [false, true]) {
-      const centers = laneCenters(compact);
-      const ratios = laneRatios(compact);
-      expect(centers).toHaveLength(CHARACTER_IDS.length);
-      expect(centers[0]).toBeCloseTo(VIEW.BASE_HEIGHT * ratios.top, 6);
-      expect(centers[centers.length - 1]).toBeCloseTo(VIEW.BASE_HEIGHT * ratios.bottom, 6);
-      // Espacement constant : les voies ne s'écrasent pas les unes contre les autres.
-      const spacings = centers.slice(1).map((value, index) => value - (centers[index] ?? 0));
-      for (const spacing of spacings) {
-        expect(spacing).toBeCloseTo(spacings[0] ?? 0, 6);
-        expect(spacing).toBeGreaterThan(0);
+      for (const participants of PARTICIPANT_COUNTS) {
+        const centers = laneCenters(compact, participants);
+        const ratios = laneRatios(compact);
+        expect(centers).toHaveLength(participants);
+        expect(centers[0]).toBeCloseTo(VIEW.BASE_HEIGHT * ratios.top, 6);
+        expect(centers[centers.length - 1]).toBeCloseTo(VIEW.BASE_HEIGHT * ratios.bottom, 6);
+        // Espacement constant : les voies ne s'écrasent pas les unes contre les autres.
+        const spacings = centers.slice(1).map((value, index) => value - (centers[index] ?? 0));
+        for (const spacing of spacings) {
+          expect(spacing).toBeCloseTo(spacings[0] ?? 0, 6);
+          expect(spacing).toBeGreaterThan(0);
+        }
       }
     }
   });
@@ -108,13 +118,32 @@ describe('zone des voies', () => {
     expect(compactSpacing).toBeGreaterThan(desktopSpacing);
   });
 
-  it('garde le nom de la première voie entier, dans les deux formats', () => {
+  it('espace d’autant plus les voies que la course aligne moins de coureurs', () => {
     for (const compact of [false, true]) {
-      const first = laneCenters(compact)[0] ?? 0;
-      expect(
-        nameLabelTop(first, compact),
-        'le nom de la première voie sort du haut du canvas',
-      ).toBeGreaterThanOrEqual(0);
+      const spacings = PARTICIPANT_COUNTS.map((participants) => {
+        const centers = laneCenters(compact, participants);
+        return (centers[1] ?? 0) - (centers[0] ?? 0);
+      });
+      // Trois coureurs occupent deux fois l'espace de six : l'espace libéré sert réellement.
+      expect(spacings[0]).toBeGreaterThan(spacings[spacings.length - 1] ?? 0);
+      for (let index = 1; index < spacings.length; index += 1) {
+        expect(
+          spacings[index - 1],
+          `effectif ${String(PARTICIPANT_COUNTS[index - 1])} contre ${String(PARTICIPANT_COUNTS[index])}`,
+        ).toBeGreaterThan(spacings[index] ?? 0);
+      }
+    }
+  });
+
+  it('garde le nom de la première voie entier, dans les deux formats et pour tout effectif', () => {
+    for (const compact of [false, true]) {
+      for (const participants of PARTICIPANT_COUNTS) {
+        const first = laneCenters(compact, participants)[0] ?? 0;
+        expect(
+          nameLabelTop(first, compact, participants),
+          `le nom de la première voie sort du haut du canvas (${String(participants)} coureurs)`,
+        ).toBeGreaterThanOrEqual(0);
+      }
     }
   });
 
@@ -124,20 +153,22 @@ describe('zone des voies', () => {
     expect(characterNameOrigin().x).toBe(1);
     expect(characterNameOrigin().y).toBe(0.5);
     for (const compact of [false, true]) {
-      const height = characterHeightPx(compact);
-      const width = height * FRAME_ASPECT;
-      for (const center of laneCenters(compact)) {
-        const nameY = characterNameY(center);
-        // Même axe que le personnage : le nom ne réserve donc **aucune** hauteur au-dessus de lui.
-        expect(nameY, 'le nom partage l’axe du personnage').toBe(center);
-        const nameX = characterNameX(center, width);
-        expect(nameX, 'le texte s’arrête avant le début du sprite').toBeLessThanOrEqual(
-          center - width / 2,
-        );
-        expect(
-          center - width / 2 - nameX,
-          'un espace sépare la fin du texte du début du sprite',
-        ).toBeCloseTo(VIEW.CHARACTER_NAME_GAP_PX, 6);
+      for (const participants of PARTICIPANT_COUNTS) {
+        const height = characterHeightPx(participants, compact);
+        const width = height * FRAME_ASPECT;
+        for (const center of laneCenters(compact, participants)) {
+          const nameY = characterNameY(center);
+          // Même axe que le personnage : le nom ne réserve donc **aucune** hauteur au-dessus de lui.
+          expect(nameY, 'le nom partage l’axe du personnage').toBe(center);
+          const nameX = characterNameX(center, width);
+          expect(nameX, 'le texte s’arrête avant le début du sprite').toBeLessThanOrEqual(
+            center - width / 2,
+          );
+          expect(
+            center - width / 2 - nameX,
+            'un espace sépare la fin du texte du début du sprite',
+          ).toBeCloseTo(VIEW.CHARACTER_NAME_GAP_PX, 6);
+        }
       }
     }
     // Le nom est **au-dessus** des sprites : il n'est jamais derrière le personnage en profondeur.
@@ -148,78 +179,156 @@ describe('zone des voies', () => {
     expect(VIEW.CHARACTER_EFFECT_DEPTH_BASE).toBeLessThan(VIEW.CHARACTER_SPRITE_DEPTH_BASE);
   });
 
-  it('garde la dernière silhouette entière, dans les deux formats', () => {
+  it('garde la dernière silhouette entière, dans les deux formats et pour tout effectif', () => {
     for (const compact of [false, true]) {
-      const centers = laneCenters(compact);
-      const last = centers[centers.length - 1] ?? 0;
-      expect(last + characterHeightPx(compact) / 2).toBeLessThanOrEqual(VIEW.BASE_HEIGHT);
+      for (const participants of PARTICIPANT_COUNTS) {
+        const centers = laneCenters(compact, participants);
+        const last = centers[centers.length - 1] ?? 0;
+        expect(
+          last + characterHeightPx(participants, compact) / 2,
+          `la dernière silhouette sort du bas du canvas (${String(participants)} coureurs)`,
+        ).toBeLessThanOrEqual(VIEW.BASE_HEIGHT);
+      }
     }
   });
 
   it('ne laisse aucun nom recouvrir la silhouette visible de la voie au-dessus', () => {
     for (const compact of [false, true]) {
-      const centers = laneCenters(compact);
-      const height = characterHeightPx(compact);
-      for (let index = 1; index < centers.length; index += 1) {
-        const center = centers[index] ?? 0;
-        const above = centers[index - 1] ?? 0;
-        // Silhouette visible de la voie du dessus, dans l'hypothèse la plus défavorable : toute la
-        // marge transparente est sous le personnage.
-        const visibleBottom = above + height / 2 - height * WORST_CASE_TRANSPARENT_MARGIN;
-        expect(
-          nameLabelTop(center, compact),
-          `le nom de la voie ${String(index)} recouvre la silhouette de la voie ${String(index - 1)}`,
-        ).toBeGreaterThanOrEqual(visibleBottom);
+      for (const participants of PARTICIPANT_COUNTS) {
+        const centers = laneCenters(compact, participants);
+        const height = characterHeightPx(participants, compact);
+        for (let index = 1; index < centers.length; index += 1) {
+          const center = centers[index] ?? 0;
+          const above = centers[index - 1] ?? 0;
+          // Silhouette visible de la voie du dessus, dans l'hypothèse la plus défavorable : toute la
+          // marge transparente est sous le personnage.
+          const visibleBottom = above + height / 2 - height * WORST_CASE_TRANSPARENT_MARGIN;
+          expect(
+            nameLabelTop(center, compact, participants),
+            `le nom de la voie ${String(index)} recouvre la silhouette de la voie ${String(index - 1)}`,
+          ).toBeGreaterThanOrEqual(visibleBottom);
+        }
       }
     }
   });
 
   it('ne laisse aucune silhouette empiéter sur la voie voisine', () => {
     for (const compact of [false, true]) {
-      const centers = laneCenters(compact);
-      const height = characterHeightPx(compact);
-      for (let index = 1; index < centers.length; index += 1) {
-        const gap = (centers[index] ?? 0) - (centers[index - 1] ?? 0);
-        expect(
-          gap - height,
-          `les voies ${String(index - 1)} et ${String(index)} se chevauchent`,
-        ).toBeGreaterThan(0);
+      for (const participants of PARTICIPANT_COUNTS) {
+        const centers = laneCenters(compact, participants);
+        const height = characterHeightPx(participants, compact);
+        for (let index = 1; index < centers.length; index += 1) {
+          const gap = (centers[index] ?? 0) - (centers[index - 1] ?? 0);
+          expect(
+            gap - height,
+            `les voies ${String(index - 1)} et ${String(index)} se chevauchent`,
+          ).toBeGreaterThan(0);
+        }
       }
     }
   });
 
-  it('garde une séparation visible entre deux silhouettes voisines, dans les deux formats', () => {
+  it('garde une séparation visible entre deux silhouettes voisines, pour tout effectif', () => {
     for (const compact of [false, true]) {
-      const centers = laneCenters(compact);
-      const height = characterHeightPx(compact);
-      const gap = (centers[1] ?? 0) - (centers[0] ?? 0);
-      // Pire cas : deux silhouettes occupant toute la hauteur visible de leur cadre (95,6 %), l'une
-      // au-dessus de l'autre. C'est cette séparation-là que l'œil juge, pas l'écart entre cadres.
-      const visibleGap = gap - height * MAX_VISIBLE_FRACTION;
-      expect(
-        visibleGap,
-        `séparation visible de ${visibleGap.toFixed(1)} px logiques entre deux voies (${compact ? 'petit paysage' : 'bureau'})`,
-      ).toBeGreaterThanOrEqual(10);
+      for (const participants of PARTICIPANT_COUNTS) {
+        const centers = laneCenters(compact, participants);
+        const height = characterHeightPx(participants, compact);
+        const gap = (centers[1] ?? 0) - (centers[0] ?? 0);
+        // Pire cas : deux silhouettes occupant toute la hauteur visible de leur cadre (95,6 %), l'une
+        // au-dessus de l'autre. C'est cette séparation-là que l'œil juge, pas l'écart entre cadres.
+        const visibleGap = gap - height * MAX_VISIBLE_FRACTION;
+        expect(
+          visibleGap,
+          `séparation visible de ${visibleGap.toFixed(1)} px logiques entre deux voies (${compact ? 'petit paysage' : 'bureau'}, ${String(participants)} coureurs)`,
+        ).toBeGreaterThanOrEqual(10);
+      }
+    }
+  });
+
+  it('retient la plus grande hauteur qui respecte les contraintes, pour chaque effectif', () => {
+    for (const compact of [false, true]) {
+      const ratios = laneRatios(compact);
+      const bandTop = VIEW.BASE_HEIGHT * ratios.top;
+      const bandBottom = VIEW.BASE_HEIGHT * ratios.bottom;
+      for (const participants of PARTICIPANT_COUNTS) {
+        const height = characterHeightPx(participants, compact);
+        const spacing = (bandBottom - bandTop) / (participants - 1);
+        // 1) la séparation visible est respectée…
+        expect(spacing - height * MAX_VISIBLE_FRACTION).toBeGreaterThanOrEqual(10);
+        // 2) …et un pixel de plus la briserait, ou ferait sortir un cadre de l'arène : la valeur
+        //    retenue est donc la plus grande possible, jamais un réglage « au feeling ».
+        const canvasBound = 2 * Math.min(bandTop, VIEW.BASE_HEIGHT - bandBottom);
+        const ceiling = Math.min((spacing - 10) / MAX_VISIBLE_FRACTION, canvasBound);
+        if (participants === CHARACTER_IDS.length) {
+          // À six coureurs, la taille est **figée** par les constantes historiques, sous le plafond.
+          expect(height).toBe(
+            compact ? VIEW.CHARACTER_HEIGHT_COMPACT_PX : VIEW.CHARACTER_HEIGHT_PX,
+          );
+          expect(height).toBeLessThanOrEqual(Math.floor(ceiling));
+        } else {
+          expect(height).toBe(Math.floor(ceiling));
+        }
+      }
+    }
+  });
+
+  it('agrandit les personnages quand la course aligne moins de coureurs', () => {
+    for (const compact of [false, true]) {
+      const heights = PARTICIPANT_COUNTS.map((participants) =>
+        characterHeightPx(participants, compact),
+      );
+      // Six coureurs gardent exactement la taille historique.
+      expect(heights[heights.length - 1]).toBe(
+        compact ? VIEW.CHARACTER_HEIGHT_COMPACT_PX : VIEW.CHARACTER_HEIGHT_PX,
+      );
+      // Les effectifs réduits sont plus grands, et jamais plus petits que l'effectif supérieur.
+      for (let index = 0; index < heights.length - 1; index += 1) {
+        expect(heights[index]).toBeGreaterThan(heights[heights.length - 1] ?? 0);
+      }
+      for (let index = 1; index < heights.length; index += 1) {
+        expect(heights[index - 1]).toBeGreaterThanOrEqual(heights[index] ?? 0);
+      }
+      // Le gain est franc, pas cosmétique : au moins 30 % de hauteur en plus à trois coureurs.
+      expect(heights[0]).toBeGreaterThanOrEqual(
+        Math.round((heights[heights.length - 1] ?? 0) * 1.3),
+      );
+    }
+  });
+
+  it('fait suivre la taille du nom à celle du personnage', () => {
+    for (const compact of [false, true]) {
+      for (const participants of PARTICIPANT_COUNTS) {
+        const height = characterHeightPx(participants, compact);
+        const font = characterNameFontPx(participants, compact);
+        const reference = characterHeightPx(CHARACTER_IDS.length, compact);
+        // La proportion texte / silhouette ne dépend pas de l'effectif.
+        expect(font / height).toBeCloseTo(
+          (compact ? VIEW.CHARACTER_NAME_FONT_COMPACT_PX : VIEW.CHARACTER_NAME_FONT_PX) / reference,
+          2,
+        );
+      }
     }
   });
 
   it('agrandit les personnages en petit paysage, dans la fourchette demandée', () => {
-    const compactHeight = characterHeightPx(true);
-    expect(compactHeight).toBeGreaterThan(characterHeightPx(false));
+    const compactHeight = characterHeightPx(CHARACTER_IDS.length, true);
+    expect(compactHeight).toBeGreaterThan(characterHeightPx(CHARACTER_IDS.length, false));
     // Fourchette issue du test joueur sur iPhone : 104 à 106 px logiques, la plus grande valeur qui
     // respecte les contraintes ci-dessus (séparation visible) étant retenue.
     expect(compactHeight).toBeGreaterThanOrEqual(104);
     expect(compactHeight).toBeLessThanOrEqual(106);
     // Le nom grandit aussi : le canvas d'un téléphone est réduit à ≈ 0,54, donc la police nominale
     // rendrait ≈ 7,5 px CSS, sous le plancher de lisibilité.
-    expect(characterNameFontPx(true)).toBeGreaterThan(characterNameFontPx(false));
+    expect(characterNameFontPx(CHARACTER_IDS.length, true)).toBeGreaterThan(
+      characterNameFontPx(CHARACTER_IDS.length, false),
+    );
   });
 
   it('agrandit les personnages de bureau sans sortir du canvas', () => {
     // Passe de finition 2D : les personnages de bureau étaient « plus petits relativement à l'espace
     // disponible ». La taille est choisie pour 1280×720 et 1920×1080, qui partagent la même géométrie
     // logique : 92 px de haut, soit ≈ 68 px CSS en 1280×720 et 92 px CSS en 1920×1080.
-    const height = characterHeightPx(false);
+    const height = characterHeightPx(CHARACTER_IDS.length, false);
     expect(height).toBeGreaterThanOrEqual(88);
     expect(height).toBeLessThanOrEqual(96);
     const centers = laneCenters(false);
@@ -229,7 +338,7 @@ describe('zone des voies', () => {
     expect(first - height / 2).toBeGreaterThanOrEqual(0);
     expect(last + height / 2).toBeLessThanOrEqual(VIEW.BASE_HEIGHT);
     // Le nom de la première voie ne sort pas non plus par le haut.
-    expect(nameLabelTop(first, false)).toBeGreaterThanOrEqual(0);
+    expect(nameLabelTop(first, false, CHARACTER_IDS.length)).toBeGreaterThanOrEqual(0);
   });
 });
 

@@ -1,6 +1,6 @@
-import { CHARACTERS } from '../../core/characters';
+import { characterById } from '../../core/characters';
 import { RACE_CONFIG } from '../../core/config';
-import type { RacePhase, RaceState } from '../../core/types';
+import type { CharacterId, RacePhase, RaceState } from '../../core/types';
 import { leaderboardOf } from '../../sim/leaderboard';
 import type { SimPhase } from '../../sim/types';
 import { VIEW } from '../viewConfig';
@@ -62,6 +62,16 @@ export function checkpointTimeS(checkpoint: number): number {
 }
 
 /**
+ * Couleur d'un personnage, lue dans le roster officiel.
+ *
+ * Le repli neutre n'existe que pour un identifiant hors roster : il ne peut pas désigner un
+ * personnage, donc il ne peut pas non plus afficher une couleur qui lui prêterait une identité.
+ */
+function colorOf(id: CharacterId): string {
+  return characterById(id)?.color ?? '#888888';
+}
+
+/**
  * Assemble le modèle du HUD à partir d'un unique instantané du noyau.
  *
  * Toutes les valeurs viennent de `RaceState` ou de `leaderboardOf` — la seule source de classement du
@@ -83,10 +93,12 @@ export function buildHudModel(
     segment: buildSegment(state.phase),
     rows,
     markers: minimapMarkers(
-      CHARACTERS.map((character, index) => ({
+      // Les marqueurs suivent les **partants** de la course : une course à trois coureurs n'affiche
+      // pas trois marqueurs immobiles restés à zéro, et aucun personnage absent du plateau n'apparaît.
+      state.characters.map((character) => ({
         id: character.id,
-        distance: state.characters[index]?.x ?? 0,
-        color: character.color,
+        distance: character.x,
+        color: colorOf(character.id),
       })),
       VIEW.NOMINAL_SCALE_M,
     ),

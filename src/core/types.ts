@@ -15,10 +15,12 @@
 /**
  * Identifiant stable d'un personnage.
  *
- * La V1 compte exactement 6 personnages. Cet index est le départage déterministe des égalités de
- * distance et l'ordre d'itération de la physique : il ne change jamais, même quand les noms
- * définitifs seront choisis (P014). `characters.ts` est la source de vérité **côté données** ; un
- * test vérifie que le roster correspond exactement à cette liste.
+ * Le **roster** de la V1 compte exactement 6 personnages, mais une course peut n'en aligner que 3, 4
+ * ou 5 (`core/participants.ts`) : l'effectif d'une course est donc distinct du roster, et cet index
+ * reste l'ordre **canonique** du roster — c'est lui qui départage les égalités de distance et qui
+ * fixe l'ordre d'itération de la physique, même quand un personnage ne court pas. Il ne change jamais,
+ * même quand les noms définitifs seront choisis (P014). `characters.ts` est la source de vérité
+ * **côté données** ; un test vérifie que le roster correspond exactement à cette liste.
  */
 export type CharacterId = 'c0' | 'c1' | 'c2' | 'c3' | 'c4' | 'c5';
 

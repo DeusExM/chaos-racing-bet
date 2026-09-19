@@ -1,3 +1,8 @@
+import {
+  MAX_PARTICIPANTS,
+  MIN_PARTICIPANTS,
+  normalizeParticipants,
+} from '../core/participants';
 import { SEED_TEXT_LENGTH, seedTextFromBytes } from '../core/seed';
 import { createGame, type GameHandle } from '../render/Game';
 import { CharacterGallery } from '../render/view/CharacterGallery';
@@ -21,6 +26,7 @@ import { createVoiceOutput, webSpeechScope } from './tts';
  */
 
 const SEED_PARAM = 'seed';
+const PLAYERS_PARAM = 'players';
 const FAST_PARAM = 'fast';
 const DEBUG_PARAM = 'debug';
 const AUTOSTART_PARAM = 'autostart';
@@ -29,6 +35,16 @@ const AUTOSTART_PARAM = 'autostart';
 function readSeedFromUrl(search: string): string | null {
   const value = new URLSearchParams(search).get(SEED_PARAM);
   return value === null || value.length === 0 ? null : value;
+}
+
+/**
+ * Lit le nombre de coureurs dans l'URL.
+ *
+ * Toute valeur absente ou illisible (`2`, `7`, `abc`) retombe sur l'effectif complet, et c'est
+ * `core/participants.ts` qui en décide : `app/` ne réinvente pas la règle de lecture, elle l'appelle.
+ */
+function readPlayersFromUrl(search: string): number {
+  return normalizeParticipants(new URLSearchParams(search).get(PLAYERS_PARAM));
 }
 
 /**
@@ -45,32 +61,29 @@ function createRandomSeedText(): string {
 }
 
 /**
- * Détermine la seed de la course et l'inscrit dans l'URL.
+ * Détermine la seed de la course.
  *
- * Écrire la seed dans l'URL est ce qui rend un rechargement reproductible : la course rejouée est
- * exactement la même, y compris lorsque la seed vient d'être tirée au hasard. Le numéro d'historique
- * n'est pas touché, donc le bouton « Précédent » du navigateur reste intact.
+ * Elle vient de l'URL quand elle y est, sinon elle est tirée : l'appelant inscrit ensuite **l'identité
+ * complète** de la course (seed et nombre de coureurs) dans l'URL, ce qui rend un rechargement
+ * reproductible. Le numéro d'historique n'est pas touché, donc le bouton « Précédent » du navigateur
+ * reste intact.
  */
 function resolveSeedText(): string {
-  const fromUrl = readSeedFromUrl(window.location.search);
-  if (fromUrl !== null) {
-    return fromUrl;
-  }
-
-  const generated = createRandomSeedText();
-  writeSeedToUrl(generated);
-  return generated;
+  return readSeedFromUrl(window.location.search) ?? createRandomSeedText();
 }
 
 /**
- * Inscrit la seed dans l'URL sans toucher à l'historique.
+ * Inscrit la seed **et** le nombre de coureurs dans l'URL sans toucher à l'historique.
  *
- * Utilisé au démarrage **et** par « Nouvelle course » (P013) : la seed affichée reste donc toujours
- * celle qui est dans l'URL, et un rechargement de page rejoue la course en cours.
+ * Utilisé au démarrage **et** à chaque nouvelle course (P013) : la seed affichée reste donc toujours
+ * celle qui est dans l'URL, et un rechargement de page rejoue exactement la même course. Le nombre de
+ * coureurs fait partie de cette identité : la même seed à quatre coureurs n'aligne pas le même plateau
+ * qu'à six, donc une URL qui ne le porterait pas ne serait pas reproductible.
  */
-function writeSeedToUrl(seedText: string): void {
+function writeRaceToUrl(seedText: string, players: number): void {
   const params = new URLSearchParams(window.location.search);
   params.set(SEED_PARAM, seedText);
+  params.set(PLAYERS_PARAM, String(players));
   window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
 }
 
@@ -131,9 +144,17 @@ function bootstrap(): void {
   // et c'est le seul affichage de seed de l'application, sur tous les formats.
   const seedText = resolveSeedText();
 
+  // Nombre de coureurs : lu dans l'URL (toute valeur illisible retombe sur 6), il fait partie de
+  // l'identité de la course au même titre que la seed. `pendingPlayers` est le choix **affiché** par
+  // le sélecteur ; il n'est appliqué qu'à une course neuve, jamais à une course en cours.
+  let pendingPlayers = readPlayersFromUrl(window.location.search);
+
   // Le mode test ne touche pas au noyau : il ne change que le temps réel.
   const preset = params.get(FAST_PARAM) === '1' ? SIM_PRESETS.fast : SIM_PRESETS.normal;
-  const simulation = new RaceSimulation(seedText, preset);
+  const simulation = new RaceSimulation(seedText, preset, pendingPlayers);
+  // L'URL décrit désormais exactement la course en cours : seed **et** effectif, même si l'un des deux
+  // manquait ou était illisible.
+  writeRaceToUrl(simulation.seed, pendingPlayers);
 
   // Réglages locaux (P012) : lus une fois au démarrage, persistés à chaque changement. Ils ne
   // touchent ni la simulation, ni la seed, ni le speaker.
@@ -214,6 +235,74 @@ function bootstrap(): void {
     new CharacterGallery(galleryButton, UI_TEXT_FR);
   }
 
+  // Sélecteur du nombre de coureurs (courses de 3 à 6). Il vit dans le HUD, mais il appartient à
+  // `app/` : c'est la seule couche qui connaît l'URL et qui décide quand une course commence. Le
+  // rendu ne le voit pas et ne peut donc pas s'en servir pour changer une course.
+  const playersLabel = querySelector('[data-testid="players-label"]');
+  if (playersLabel !== null) {
+    playersLabel.textContent = UI_TEXT_FR.playersLabel;
+  }
+
+  const playersSelect = elementById('players-select');
+  if (playersSelect instanceof HTMLSelectElement) {
+    playersSelect.setAttribute('aria-label', UI_TEXT_FR.playersLabel);
+    for (const [value, label] of [
+      [MIN_PARTICIPANTS, UI_TEXT_FR.playersOption3],
+      [MIN_PARTICIPANTS + 1, UI_TEXT_FR.playersOption4],
+      [MIN_PARTICIPANTS + 2, UI_TEXT_FR.playersOption5],
+      [MAX_PARTICIPANTS, UI_TEXT_FR.playersOption6],
+    ] as const) {
+      const option = document.createElement('option');
+      option.value = String(value);
+      option.textContent = label;
+      playersSelect.append(option);
+    }
+    playersSelect.value = String(pendingPlayers);
+    playersSelect.addEventListener('change', () => {
+      changePlayers(playersSelect.value);
+    });
+  }
+
+  /**
+   * Applique un nouveau nombre de coureurs.
+   *
+   * **Avant** toute course (`idle`), le choix prend effet immédiatement : « Lancer » aligne donc bien
+   * l'effectif demandé, et l'URL décrit déjà la course à venir. **Pendant** une course, il est
+   * seulement mémorisé : une course lancée ne change jamais d'effectif, et le choix s'appliquera à la
+   * prochaine (« Rejouer », « Nouvelle course »). Après l'arrivée, le classement affiché est conservé
+   * tel quel — l'écran d'arrivée n'est pas escamoté par un changement de réglage.
+   */
+  function changePlayers(raw: string): void {
+    const next = normalizeParticipants(raw);
+    if (next === pendingPlayers) {
+      return;
+    }
+    pendingPlayers = next;
+    if (simulation.phase === 'idle') {
+      simulation.restart(simulation.seed, pendingPlayers);
+      writeRaceToUrl(simulation.seed, pendingPlayers);
+    }
+    syncPlayersControl();
+  }
+
+  /**
+   * Aligne le contrôle sur la phase réelle : l'effectif n'est modifiable qu'avant une course.
+   *
+   * Pendant une course, la liste est **désactivée** — un réglage qui n'aurait aucun effet immédiat
+   * serait trompeur. Le choix reste mémorisé, et redevient modifiable à l'arrivée.
+   */
+  function syncPlayersControl(): void {
+    if (!(playersSelect instanceof HTMLSelectElement)) {
+      return;
+    }
+    const phase = simulation.phase;
+    const locked = phase !== 'idle' && phase !== 'finished';
+    playersSelect.disabled = locked;
+    if (!locked) {
+      playersSelect.value = String(pendingPlayers);
+    }
+  }
+
   // Écran de rotation (correction iPhone ciblée) : son texte appartient à `app/`, comme tous les
   // libellés visibles, et sa visibilité est décidée par la surveillance de la fenêtre ci-dessous.
   const rotationGateTitle = querySelector('[data-testid="rotation-gate-title"]');
@@ -257,6 +346,9 @@ function bootstrap(): void {
     exposeView: hooksEnabled,
     commentary,
     allowsGameplay: () => gameplayAllowed,
+    onPhase: () => {
+      syncPlayersControl();
+    },
     finishActions: {
       replaySameSeed: () => {
         startSameSeedRace();
@@ -281,7 +373,8 @@ function bootstrap(): void {
    * bit près, podium compris. Aucun nouveau tirage n'a lieu.
    */
   function startSameSeedRace(): void {
-    simulation.restart();
+    simulation.restart(undefined, pendingPlayers);
+    writeRaceToUrl(simulation.seed, simulation.players);
     commentary.reset(simulation.view.seedValue);
     simulation.start();
   }
@@ -296,8 +389,8 @@ function bootstrap(): void {
    */
   function startNewRace(): void {
     const nextSeed = createRandomSeedText();
-    writeSeedToUrl(nextSeed);
-    simulation.restart(nextSeed);
+    simulation.restart(nextSeed, pendingPlayers);
+    writeRaceToUrl(simulation.seed, simulation.players);
     commentary.reset(simulation.view.seedValue);
     simulation.start();
   }

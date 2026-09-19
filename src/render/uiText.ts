@@ -132,6 +132,13 @@ export interface UiText {
   readonly finishReplaySameSeed: string;
   /** Libellé du bouton qui tire une nouvelle seed et démarre réellement une nouvelle course. */
   readonly finishNewRace: string;
+  /**
+   * Nom accessible du bouton qui referme l'écran d'arrivée.
+   *
+   * Le bouton n'affiche qu'un `×` : sans ce libellé, il serait annoncé comme « bouton » par un lecteur
+   * d'écran, sans dire ce qu'il ferme.
+   */
+  readonly finishCloseLabel: string;
   /** Libellé du bouton discret qui ouvre le panneau des personnages (petit paysage). */
   readonly galleryButton: string;
   /** Titre du panneau des personnages, également son nom accessible. */
@@ -142,4 +149,11 @@ export interface UiText {
   readonly rotationGateTitle: string;
   /** Seconde ligne de l'écran de rotation : ce qui se passera une fois le téléphone tourné. */
   readonly rotationGateHint: string;
+  /** Libellé visible du sélecteur du nombre de coureurs (masqué en petit paysage). */
+  readonly playersLabel: string;
+  /** Libellés des quatre effectifs proposés : `3`, `4`, `5`, `6`. */
+  readonly playersOption3: string;
+  readonly playersOption4: string;
+  readonly playersOption5: string;
+  readonly playersOption6: string;
 }

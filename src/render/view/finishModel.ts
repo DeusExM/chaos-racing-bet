@@ -81,9 +81,9 @@ export interface FinishModel {
   readonly steps: number;
   /** Premier du classement final, tel que le noyau le donne. */
   readonly winner: LeaderboardRow;
-  /** Les `FINISH_PODIUM_SIZE` premiers, dans l'ordre du noyau. */
+  /** Les `FINISH_PODIUM_SIZE` premiers, dans l'ordre du noyau — soit `min(3, partants)`. */
   readonly podium: readonly LeaderboardRow[];
-  /** Les six marcheurs, dans l'ordre exact du classement final. */
+  /** Tous les partants, dans l'ordre exact du classement final. */
   readonly rows: readonly LeaderboardRow[];
   /**
    * Passages en tête : les checkpoints **réellement observés**, puis l'arrivée.
@@ -165,7 +165,7 @@ export function decelerationOffset(coastSpeed: number, elapsedMs: number): numbe
 /**
  * Distances **de rendu** après l'arrivée : celles du classement figé, plus une inertie commune.
  *
- * Le décalage est identique pour les six marcheurs : l'ordre visuel ne peut donc pas diverger de
+ * Le décalage est identique pour tous les partants : l'ordre visuel ne peut donc pas diverger de
  * l'ordre du noyau, et aucune position d'écran ne peut devenir un critère de victoire.
  */
 export function deceleratedDistances(
@@ -218,7 +218,9 @@ export function photoFinishOf(arrival: RaceFact | null): FinishPhotoFinish | nul
  * Assemble le modèle d'affichage de l'arrivée.
  *
  * Le podium est le **début** de la liste du noyau, pas une sélection : il ne décide donc jamais qui
- * gagne. Un instantané sans les six marcheurs est refusé plutôt que complété.
+ * gagne. Sa taille vaut `min(FINISH_PODIUM_SIZE, partants)` : une course à trois coureurs présente
+ * trois lignes, jamais un podium à trou. Un instantané sans aucun partant est refusé plutôt que
+ * complété.
  *
  * Les `passages` reçus sont ceux **réellement observés** aux checkpoints (`passageModel.ts`) ; la
  * dernière ligne — l'arrivée — est ajoutée ici à partir du classement final figé, donc du même

@@ -237,7 +237,7 @@ for (const viewport of VIEWPORTS) {
       // courant et la largeur se déduit du ratio du fichier. Une image écrasée, une texture manquante
       // ou une résolution utilisée comme taille d'affichage seraient détectées ici, aux résolutions de
       // référence — et le format compact est celui où les personnages sont les plus grands.
-      const expectedHeight = characterHeightPx(sample.compact) * sample.scale;
+      const expectedHeight = characterHeightPx(CHARACTER_IDS.length, sample.compact) * sample.scale;
       for (const character of sample.characters) {
         expect(
           character.height,
@@ -379,9 +379,10 @@ for (const viewport of VIEWPORTS) {
       throw new Error('aucun échantillon');
     }
 
-    // La taille logique est celle du format : 92 px sur bureau, 106 px en petit paysage. Le test la
-    // compare à la constante du format courant, donc une régression de réglage est détectée ici.
-    const expected = characterHeightPx(first.compact);
+    // La taille logique est celle du format **et de l'effectif** : 92 px sur bureau à six coureurs,
+    // 106 px en petit paysage à six, davantage dès que la course aligne moins de monde. Le test la
+    // compare à la fonction du format courant, donc une régression de réglage est détectée ici.
+    const expected = characterHeightPx(CHARACTER_IDS.length, first.compact);
     for (const sample of samples) {
       for (const character of sample.characters) {
         expect(character.logicalHeight).toBeCloseTo(expected, 0);

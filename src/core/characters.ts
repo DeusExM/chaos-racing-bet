@@ -60,6 +60,17 @@ export const CHARACTERS: readonly CharacterConfig[] = Object.freeze([
 ]);
 
 /**
+ * Fiche d'un personnage du roster, ou `undefined` si l'identifiant n'en fait pas partie.
+ *
+ * Le roster reste la **seule** source des noms et des couleurs : une course à trois coureurs pioche
+ * dans ces fiches, elle n'en fabrique jamais, et le rendu ne peut donc pas afficher un personnage
+ * absent du roster officiel.
+ */
+export function characterById(id: CharacterId): CharacterConfig | undefined {
+  return CHARACTERS.find((character) => character.id === id);
+}
+
+/**
  * Vérifie que le roster est bien celui des 6 personnages équivalents.
  *
  * Contrôle trois choses : l'effectif, l'identité exacte des identifiants dans l'ordre du roster, et

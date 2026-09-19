@@ -17,10 +17,11 @@ import type { ActiveEvent, CharacterId, EventId, RaceFact, RaceFactType } from '
  *
  * ## Contrat d'entrée
  *
- * Le roster de la V1 est **fixe** : exactement les 6 `CHARACTER_IDS` officiels, dans leur ordre
- * stable. Toute autre liste — taille différente, identifiant inconnu ou ordre permuté — lève une
- * `RangeError`. Les détections indexées par personnage supposent cet ordre : le vérifier est ce qui
- * empêche d'attribuer un fait au mauvais personnage.
+ * Les partants sont **fixés à la construction**, dans l'ordre canonique du roster (`c0` … `c5`) :
+ * toute autre liste — identifiant inconnu ou ordre permuté — lève une `RangeError`. Les détections
+ * indexées par personnage supposent cet ordre : le vérifier est ce qui empêche d'attribuer un fait au
+ * mauvais personnage. À six partants, la liste est le roster complet, donc le contrat d'origine est
+ * conservé à l'identique.
  *
  * Les relevés doivent former une suite **exactement consécutive** : le premier est le pas
  * `FIRST_STEP` (1), puis chaque relevé vaut le précédent plus un. Répéter un pas, revenir en arrière
@@ -34,7 +35,7 @@ import type { ActiveEvent, CharacterId, EventId, RaceFact, RaceFactType } from '
  *   confirmation, jamais au premier échange de rang. L'importance est
  *   `45 + min(25, secondes de règne du précédent)` ; le premier leader (celui du premier relevé) est
  *   en place sans fait et son règne est compté depuis `tSim = 0`.
- * * `BIG_COMEBACK` : gain d'au moins `FACT.BIG_COMEBACK_PLACES` places en au plus
+ * * `BIG_COMEBACK` : gain d'au moins `min(FACT.BIG_COMEBACK_PLACES, count - 1)` places en au plus
  *   `FACT.BIG_COMEBACK_WINDOW_S`. Le gain est le **meilleur rang occupé dans la fenêtre** moins le
  *   rang courant.
  * * `OVERTAKE_STREAK` : au moins `FACT.OVERTAKE_STREAK_MIN` dépassements du **même** personnage en au
@@ -48,8 +49,9 @@ import type { ActiveEvent, CharacterId, EventId, RaceFact, RaceFactType } from '
  *   est celui d'avant l'intégration du pas — jamais un rang observé quelques pas plus tard.
  * * `CLOSE_RACE` : écart P1–P3 ≤ 15 m pendant ≥ 5 s **consécutives**. Un seul fait par entrée dans
  *   l'état : il faut sortir (écart > 15 m) puis rester 5 s de nouveau sous le seuil pour réémettre.
- * * `LAST_COMEBACK` : le personnage passé dernier dans les 30 s atteint la 3e place ou mieux, **ou**
- *   gagne au moins 4 places en ≤ 30 s.
+ * * `LAST_COMEBACK` : le personnage passé dernier dans les 30 s atteint la
+ *   `min(FACT.LAST_COMEBACK_RANK, count - 1)`-ème place ou mieux, **ou** gagne au moins
+ *   `min(FACT.LAST_COMEBACK_PLACES, count - 1)` places en ≤ 30 s.
  * * `CHECKPOINT_SPLIT` : aux instants 20 et 40 s, avec le classement et les distances du moment,
  *   et l'importance `38` augmentée de `+20` si un `LEADER_CHANGE` a été confirmé depuis le checkpoint
  *   précédent, `+10` si l'écart P1–P2 est inférieur à 20 m.
@@ -67,27 +69,32 @@ import type { ActiveEvent, CharacterId, EventId, RaceFact, RaceFactType } from '
  *
  * ## Mémoire : bornée, explicite, constante
  *
- * Aucun état complet des 6 personnages n'est conservé. Les fenêtres longues (10 s et 30 s) sont
- * représentées de façon compacte : pour chaque personnage et chaque rang possible (1 à 6), un unique
- * **horodatage du dernier pas où ce rang a été occupé**. « Le meilleur rang de la fenêtre » se lit
- * donc en au plus `CHARACTER_COUNT` comparaisons, et le fait qu'un personnage ait été dernier dans les
+ * Aucun état complet des partants n'est conservé. Les fenêtres longues (10 s et 30 s) sont
+ * représentées de façon compacte : pour chaque personnage et chaque rang possible (1 à `count`), un
+ * unique **horodatage du dernier pas où ce rang a été occupé**. « Le meilleur rang de la fenêtre » se
+ * lit donc en au plus `count` comparaisons, et le fait qu'un personnage ait été dernier dans les
  * 30 s est une simple lecture.
  *
- * Contenu exact de la mémoire interne :
+ * Contenu exact de la mémoire interne, pour `count` partants :
  *
  * | Structure | Taille maximale | Fenêtre |
  * | --- | --- | --- |
- * | `rankLastStep` | `6 × 6 = 36` entiers | 10 s / 30 s |
- * | `overtakeRing` | `300 × 6 = 1800` entiers | 5 s |
- * | compteurs et verrous | `6` chacun | — |
+ * | `rankLastStep` | `count × count` entiers (`36` à six) | 10 s / 30 s |
+ * | `overtakeRing` | `300 × count` entiers (`1800` à six) | 5 s |
+ * | compteurs et verrous | `count` chacun | — |
  * | `OvertakeTracker` | `15` entiers | — |
  *
  * Aucune de ces tailles ne dépend du nombre de pas déjà joués : la mémoire est **constante** sur une
  * course entière comme sur mille courses enchaînées après `reset()`.
+ *
+ * ## Effectif variable (courses de 3 à 6 coureurs)
+ *
+ * L'observateur n'est plus écrit « pour six » : il reçoit la **liste des partants** et dimensionne
+ * toutes ses fenêtres sur elle (`count`). Les règles de détection ne changent pas ; seuls les seuils
+ * qui **dépendent mathématiquement** de la taille du plateau sont bornés par `count - 1` : on ne peut
+ * pas gagner plus de places qu'il n'en existe, et « dernier » veut dire dernier de **ce** plateau.
+ * Les valeurs publiées dans les faits restent, elles, les gains réellement mesurés.
  */
-
-/** Roster officiel de la V1 : l'observateur n'est pas générique, et c'est volontaire. */
-const CHARACTER_COUNT = CHARACTER_IDS.length;
 
 /** Clés techniques des textes. Le noyau ne contient **aucun** texte visible. */
 const TEXT_KEYS: Readonly<Record<RaceFactType, string>> = Object.freeze({
@@ -140,42 +147,51 @@ function stepsForSeconds(seconds: number, config: GameConfig): number {
 export class RaceObserver {
   private readonly config: GameConfig;
 
+  /**
+   * Partants observés, dans l'ordre canonique du roster.
+   *
+   * L'observateur ne travaille que sur eux : un personnage qui ne court pas ne peut donc jamais
+   * recevoir un fait, apparaître dans un classement de fait ou être compté comme « dernier ».
+   */
+  private readonly participants: readonly CharacterId[];
+
+  /** Nombre de partants : la seule taille du plateau, et la borne de tous les seuils dépendants. */
+  private readonly count: number;
+
   /** Détecteur de dépassements à hystérésis, alimenté à **chaque** pas simulé. */
   private readonly tracker = new OvertakeTracker();
 
   /**
-   * Pour chaque personnage et chaque rang de 1 à `CHARACTER_COUNT`, le dernier pas où ce rang a été
-   * occupé (`-1` si jamais). Suffit à répondre à « meilleur rang des 10 / 30 dernières secondes ».
+   * Pour chaque personnage et chaque rang de 1 à `count`, le dernier pas où ce rang a été occupé
+   * (`-1` si jamais). Suffit à répondre à « meilleur rang des 10 / 30 dernières secondes ».
    */
-  private readonly rankLastStep = new Int32Array(CHARACTER_COUNT * CHARACTER_COUNT).fill(-1);
+  private readonly rankLastStep: Int32Array;
 
-  /** Rang courant de chaque personnage, aligné sur le roster. */
-  private readonly ranks = new Int32Array(CHARACTER_COUNT);
+  /** Rang courant de chaque personnage, aligné sur les partants. */
+  private readonly ranks: Int32Array;
 
   /** Rang du relevé précédent : c'est le rang **au moment du tirage** d'un événement. */
-  private readonly previousRanks = new Int32Array(CHARACTER_COUNT);
+  private readonly previousRanks: Int32Array;
 
   /** Distances du pas courant, réutilisées pour ne rien allouer dans la boucle. */
-  private readonly distances: number[] = new Array<number>(CHARACTER_COUNT).fill(0);
+  private readonly distances: number[];
 
-  /** Classement du pas courant (index de roster, du 1er au dernier), réutilisé à chaque pas. */
-  private readonly order = new Int32Array(CHARACTER_COUNT);
+  /** Classement du pas courant (index de partant, du 1er au dernier), réutilisé à chaque pas. */
+  private readonly order: Int32Array;
 
   /** Dépassements par personnage et par pas sur la fenêtre de streak, et totaux glissants. */
   private readonly overtakeRing: Int32Array;
-  private readonly overtakeTotals = new Int32Array(CHARACTER_COUNT);
+  private readonly overtakeTotals: Int32Array;
   private ringCursor = 0;
 
   /** Verrous de front montant : un fait par épisode, jamais un par pas. */
-  private readonly comebackLatch = new Uint8Array(CHARACTER_COUNT);
-  private readonly lastComebackLatch = new Uint8Array(CHARACTER_COUNT);
-  private readonly streakLatch = new Uint8Array(CHARACTER_COUNT);
+  private readonly comebackLatch: Uint8Array;
+  private readonly lastComebackLatch: Uint8Array;
+  private readonly streakLatch: Uint8Array;
 
   /** Dernier couple `(événement, instant de début)` vu par personnage : détecte un vrai début. */
-  private readonly previousEventId: (EventId | null)[] = new Array<EventId | null>(
-    CHARACTER_COUNT,
-  ).fill(null);
-  private readonly previousEventStart: number[] = new Array<number>(CHARACTER_COUNT).fill(0);
+  private readonly previousEventId: (EventId | null)[];
+  private readonly previousEventStart: number[];
 
   /** `CLOSE_RACE` : pas consécutifs sous le seuil, et verrou d'état (une émission par entrée). */
   private closeRaceSteps = 0;
@@ -196,12 +212,33 @@ export class RaceObserver {
   private readonly lastComebackWindowSteps: number;
   private readonly closeRaceStepsMin: number;
 
+  /**
+   * Nombre de places qu'un fait de remontée peut réellement annoncer.
+   *
+   * `min(seuil du design, count - 1)` : sur un plateau de trois coureurs, deux places au maximum —
+   * annoncer « gagne 4 places » y serait arithmétiquement impossible. La mesure publiée dans le fait
+   * reste, elle, le gain réellement observé.
+   */
+  private readonly bigComebackPlaces: number;
+
+  /** Rang à atteindre pour un `LAST_COMEBACK`, borné par la taille du plateau (dernier → 2e à trois). */
+  private readonly lastComebackRank: number;
+
+  /** Gain minimal d'un `LAST_COMEBACK`, borné lui aussi par `count - 1`. */
+  private readonly lastComebackPlaces: number;
+
   private firstSnapshot = true;
   private arrivalEmitted = false;
   private lastSteps = -1;
 
-  constructor(config: GameConfig = GAME_CONFIG) {
+  constructor(config: GameConfig = GAME_CONFIG, participants: readonly CharacterId[] = CHARACTER_IDS) {
     this.config = config;
+    this.participants = participants;
+    this.count = participants.length;
+    if (this.count < 2) {
+      throw new RangeError(`L'observateur exige au moins 2 partants (reçu : ${this.count}).`);
+    }
+
     this.leaderDebounceSteps = stepsForSeconds(config.LEADER.DEBOUNCE_S, config);
     this.streakWindowSteps = Math.max(1, stepsForSeconds(config.FACT.OVERTAKE_STREAK_WINDOW_S, config));
     this.bigComebackWindowSteps = stepsForSeconds(config.FACT.BIG_COMEBACK_WINDOW_S, config);
@@ -210,7 +247,25 @@ export class RaceObserver {
       1,
       stepsForSeconds(config.FACT.CLOSE_RACE_MIN_DURATION_S, config),
     );
-    this.overtakeRing = new Int32Array(this.streakWindowSteps * CHARACTER_COUNT);
+
+    // Les seuils dépendants du plateau sont calculés **une fois** : aucune soustraction dans la boucle.
+    const maxPlaces = this.count - 1;
+    this.bigComebackPlaces = Math.min(config.FACT.BIG_COMEBACK_PLACES, maxPlaces);
+    this.lastComebackRank = Math.min(config.FACT.LAST_COMEBACK_RANK, maxPlaces);
+    this.lastComebackPlaces = Math.min(config.FACT.LAST_COMEBACK_PLACES, maxPlaces);
+
+    this.rankLastStep = new Int32Array(this.count * this.count).fill(-1);
+    this.ranks = new Int32Array(this.count);
+    this.previousRanks = new Int32Array(this.count);
+    this.distances = new Array<number>(this.count).fill(0);
+    this.order = new Int32Array(this.count);
+    this.overtakeRing = new Int32Array(this.streakWindowSteps * this.count);
+    this.overtakeTotals = new Int32Array(this.count);
+    this.comebackLatch = new Uint8Array(this.count);
+    this.lastComebackLatch = new Uint8Array(this.count);
+    this.streakLatch = new Uint8Array(this.count);
+    this.previousEventId = new Array<EventId | null>(this.count).fill(null);
+    this.previousEventStart = new Array<number>(this.count).fill(0);
   }
 
   /**
@@ -224,7 +279,7 @@ export class RaceObserver {
 
     const { tSim, steps, characters } = input;
     const xs = this.distances;
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    for (let index = 0; index < this.count; index += 1) {
       xs[index] = this.xAt(characters, index);
     }
 
@@ -256,7 +311,7 @@ export class RaceObserver {
     this.recordArrival(facts, tSim, steps, xs);
 
     this.previousRanks.set(this.ranks);
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    for (let index = 0; index < this.count; index += 1) {
       const event = characters[index]?.activeEvent ?? null;
       this.previousEventId[index] = event === null ? null : event.id;
       this.previousEventStart[index] = event === null ? 0 : event.startSimS;
@@ -279,7 +334,7 @@ export class RaceObserver {
     this.comebackLatch.fill(0);
     this.lastComebackLatch.fill(0);
     this.streakLatch.fill(0);
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    for (let index = 0; index < this.count; index += 1) {
       this.previousEventId[index] = null;
       this.previousEventStart[index] = 0;
     }
@@ -350,15 +405,23 @@ export class RaceObserver {
     this.leaderChanges += 1;
   }
 
-  /** `BIG_COMEBACK` : au moins 3 places gagnées en 10 s, mesurées sur la fenêtre de rangs. */
+  /**
+   * `BIG_COMEBACK` : au moins 3 places gagnées en 10 s, mesurées sur la fenêtre de rangs.
+   *
+   * Le seuil de places est borné par la taille du plateau (`count - 1`) : sur trois coureurs, la
+   * remontée maximale possible vaut deux places, et le seuil du design (3) y serait inatteignable —
+   * le fait n'existerait jamais. La **mesure** publiée (`gain`) reste le gain réellement observé, donc
+   * jamais un nombre de places impossible.
+   */
   private detectBigComeback(facts: RaceFact[], tSim: number, steps: number): void {
-    const { BIG_COMEBACK_PLACES, BIG_COMEBACK_BONUS_PER_PLACE, BIG_COMEBACK_IMPORTANCE } = this.config.FACT;
+    const { BIG_COMEBACK_BONUS_PER_PLACE, BIG_COMEBACK_IMPORTANCE } = this.config.FACT;
+    const places = this.bigComebackPlaces;
 
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    for (let index = 0; index < this.count; index += 1) {
       const rank = this.rankAt(index);
       const gain = this.worstRankWithin(index, this.bigComebackWindowSteps, steps) - rank;
 
-      if (gain < BIG_COMEBACK_PLACES) {
+      if (gain < places) {
         this.comebackLatch[index] = 0;
         continue;
       }
@@ -367,7 +430,7 @@ export class RaceObserver {
       }
 
       this.comebackLatch[index] = 1;
-      const bonus = BIG_COMEBACK_BONUS_PER_PLACE * (gain - BIG_COMEBACK_PLACES);
+      const bonus = BIG_COMEBACK_BONUS_PER_PLACE * (gain - places);
       facts.push(
         this.buildFact(
           'BIG_COMEBACK',
@@ -390,17 +453,17 @@ export class RaceObserver {
     const { OVERTAKE_STREAK_MIN, OVERTAKE_STREAK_BONUS_PER_OVERTAKE, OVERTAKE_STREAK_IMPORTANCE } =
       this.config.FACT;
 
-    const overtakes = this.tracker.observe(xs, CHARACTER_IDS);
+    const overtakes = this.tracker.observe(xs, this.participants);
 
     // Le pas qui sort de la fenêtre est retiré avant d'ajouter le pas courant.
-    const base = this.ringCursor * CHARACTER_COUNT;
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    const base = this.ringCursor * this.count;
+    for (let index = 0; index < this.count; index += 1) {
       const slot = base + index;
       this.overtakeTotals[index] = this.countAt(this.overtakeTotals, index) - this.countAt(this.overtakeRing, slot);
       this.overtakeRing[slot] = 0;
     }
     for (const overtake of overtakes) {
-      const index = CHARACTER_IDS.indexOf(overtake.overtaker);
+      const index = this.participants.indexOf(overtake.overtaker);
       if (index < 0) {
         throw new RangeError(`Dépassement attribué à un personnage hors roster : « ${overtake.overtaker} ».`);
       }
@@ -410,7 +473,7 @@ export class RaceObserver {
     }
     this.ringCursor = (this.ringCursor + 1) % this.streakWindowSteps;
 
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    for (let index = 0; index < this.count; index += 1) {
       const count = this.countAt(this.overtakeTotals, index);
       if (count < OVERTAKE_STREAK_MIN) {
         this.streakLatch[index] = 0;
@@ -446,7 +509,7 @@ export class RaceObserver {
     tSim: number,
     characters: readonly ObservedCharacter[],
   ): void {
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    for (let index = 0; index < this.count; index += 1) {
       const event = characters[index]?.activeEvent ?? null;
       if (event === null) {
         continue;
@@ -468,7 +531,7 @@ export class RaceObserver {
         if (rank === 1) {
           bonus += this.config.FACT.BIG_BONUS_LEADER_BONUS;
         }
-        if (rank === CHARACTER_COUNT) {
+        if (rank === this.count) {
           bonus += this.config.FACT.BIG_BONUS_LAST_BONUS;
         }
         facts.push(
@@ -539,17 +602,25 @@ export class RaceObserver {
    *
    * Les deux branches sont mesurées sur la même fenêtre bornée de 30 s : au-delà, aucun fait n'est
    * émis, ce qui évite aussi bien une recherche infinie qu'un fait « historique » sans cause proche.
+   *
+   * Sur un plateau réduit, les deux seuils sont bornés par `count - 1` : à trois coureurs, « dernier
+   * puis 2e ou mieux » remplace « dernier puis 3e ou mieux » (il n'existe pas de 3e place à gagner
+   * depuis la dernière), et le gain minimal devient deux places. Le sens du fait — une remontée
+   * spectaculaire depuis la dernière place — est donc conservé, sans jamais annoncer un gain
+   * impossible.
    */
   private detectLastComeback(facts: RaceFact[], tSim: number, steps: number): void {
-    const { LAST_COMEBACK_RANK, LAST_COMEBACK_PLACES, LAST_COMEBACK_IMPORTANCE } = this.config.FACT;
+    const { LAST_COMEBACK_IMPORTANCE } = this.config.FACT;
+    const targetRank = this.lastComebackRank;
+    const places = this.lastComebackPlaces;
 
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    for (let index = 0; index < this.count; index += 1) {
       const rank = this.rankAt(index);
       const worst = this.worstRankWithin(index, this.lastComebackWindowSteps, steps);
       const gain = worst - rank;
-      const cameFromLast = worst === CHARACTER_COUNT && rank <= LAST_COMEBACK_RANK;
+      const cameFromLast = worst === this.count && rank <= targetRank;
 
-      if (!cameFromLast && gain < LAST_COMEBACK_PLACES) {
+      if (!cameFromLast && gain < places) {
         this.lastComebackLatch[index] = 0;
         continue;
       }
@@ -594,7 +665,7 @@ export class RaceObserver {
 
     const characterIds: CharacterId[] = [];
     const distances: number[] = [];
-    for (let position = 0; position < CHARACTER_COUNT; position += 1) {
+    for (let position = 0; position < this.count; position += 1) {
       const index = this.rankIndexAt(position);
       characterIds.push(this.idAt(index));
       distances.push(this.valueAt(xs, index));
@@ -659,11 +730,11 @@ export class RaceObserver {
    */
   private updateRanks(xs: readonly number[], steps: number): Int32Array {
     const order = this.order;
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    for (let index = 0; index < this.count; index += 1) {
       order[index] = index;
     }
 
-    for (let i = 1; i < CHARACTER_COUNT; i += 1) {
+    for (let i = 1; i < this.count; i += 1) {
       const current = this.rankIndexAt(i);
       let j = i - 1;
       while (j >= 0) {
@@ -677,10 +748,10 @@ export class RaceObserver {
       order[j + 1] = current;
     }
 
-    for (let position = 0; position < CHARACTER_COUNT; position += 1) {
+    for (let position = 0; position < this.count; position += 1) {
       const index = this.rankIndexAt(position);
       this.ranks[index] = position + 1;
-      this.rankLastStep[index * CHARACTER_COUNT + position] = steps;
+      this.rankLastStep[index * this.count + position] = steps;
     }
 
     return order;
@@ -706,8 +777,8 @@ export class RaceObserver {
    * n'y a été observé (tout début de course).
    */
   private worstRankWithin(index: number, windowSteps: number, steps: number): number {
-    for (let rank = CHARACTER_COUNT; rank >= 1; rank -= 1) {
-      const last = this.rankLastStep[index * CHARACTER_COUNT + (rank - 1)];
+    for (let rank = this.count; rank >= 1; rank -= 1) {
+      const last = this.rankLastStep[index * this.count + (rank - 1)];
       if (last !== undefined && last >= 0 && steps - last <= windowSteps) {
         return rank;
       }
@@ -716,11 +787,11 @@ export class RaceObserver {
   }
 
   private rankAt(index: number): number {
-    return this.ranks[index] ?? CHARACTER_COUNT;
+    return this.ranks[index] ?? this.count;
   }
 
   private previousRankAt(index: number): number {
-    return this.previousRanks[index] ?? CHARACTER_COUNT;
+    return this.previousRanks[index] ?? this.count;
   }
 
   /** Index de roster en position `position` du classement ; refuse un classement incomplet. */
@@ -753,9 +824,9 @@ export class RaceObserver {
   }
 
   private idAt(index: number): CharacterId {
-    const id = CHARACTER_IDS[index];
+    const id = this.participants[index];
     if (id === undefined) {
-      throw new RangeError(`Aucun personnage officiel pour l'index ${index}.`);
+      throw new RangeError(`Aucun partant pour l'index ${index}.`);
     }
     return id;
   }
@@ -801,21 +872,21 @@ export class RaceObserver {
         `Les observations doivent être des pas consécutifs : ${this.lastSteps + 1} attendu après le pas ${this.lastSteps} (reçu : ${input.steps}).`,
       );
     }
-    if (input.characters.length !== CHARACTER_COUNT) {
+    if (input.characters.length !== this.count) {
       throw new RangeError(
-        `L'observateur exige exactement ${CHARACTER_COUNT} personnages (reçu : ${input.characters.length}).`,
+        `L'observateur exige exactement ${this.count} partants (reçu : ${input.characters.length}).`,
       );
     }
 
-    for (let index = 0; index < CHARACTER_COUNT; index += 1) {
+    for (let index = 0; index < this.count; index += 1) {
       const character = input.characters[index];
-      const expected = CHARACTER_IDS[index];
+      const expected = this.participants[index];
       if (character === undefined) {
         throw new RangeError(`Aucun personnage pour l'index ${index}.`);
       }
       if (character.id !== expected) {
         throw new RangeError(
-          `L'observateur exige les identifiants officiels dans leur ordre stable : « ${expected} » attendu en position ${index}, « ${character.id} » reçu.`,
+          `L'observateur exige les identifiants des partants dans leur ordre stable : « ${expected} » attendu en position ${index}, « ${character.id} » reçu.`,
         );
       }
       if (!Number.isFinite(character.x)) {

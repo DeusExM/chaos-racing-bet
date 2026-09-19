@@ -1,4 +1,4 @@
-import { CHARACTER_IDS } from '../core/characters';
+import { MAX_PARTICIPANTS } from '../core/participants';
 import { RACE_CONFIG, SPEED } from '../core/config';
 
 /**
@@ -298,6 +298,10 @@ export const VIEW: ViewConfig = Object.freeze({
  * Une seule fonction décide : le décor (`TrackView`), les sprites et leurs noms (`CharacterSprite`)
  * l'appellent tous, donc les bandes de voie, les personnages, les noms et les repères de distance
  * restent alignés par construction, quel que soit le format.
+ *
+ * La **bande** ne dépend pas de l'effectif : c'est la zone que le format réserve à la course (le HUD
+ * du haut, sur bureau, n'y entre jamais). Ce qui dépend de l'effectif, c'est la **taille** des
+ * personnages à l'intérieur de cette bande — voir `characterHeightPx`.
  */
 export function laneRatios(compact: boolean): { readonly top: number; readonly bottom: number } {
   return compact
@@ -305,14 +309,89 @@ export function laneRatios(compact: boolean): { readonly top: number; readonly b
     : { top: VIEW.LANE_TOP_RATIO, bottom: VIEW.LANE_BOTTOM_RATIO };
 }
 
-/** Hauteur d'affichage d'un personnage, en pixels logiques, selon le format. */
-export function characterHeightPx(compact: boolean): number {
-  return compact ? VIEW.CHARACTER_HEIGHT_COMPACT_PX : VIEW.CHARACTER_HEIGHT_PX;
+/**
+ * Part du cadre occupée par la silhouette visible, dans le cas le plus défavorable.
+ *
+ * Mesurée sur les fichiers réellement servis (`tools/optimizeCharacterAssets.mjs`) : la silhouette la
+ * plus haute occupe 95,6 % de la hauteur du cadre, le reste étant transparent. C'est cette fraction —
+ * et non 100 % — qui décide de la séparation **visible** entre deux voies voisines : deux cadres qui
+ * se touchent peuvent donner deux silhouettes nettement séparées.
+ */
+const MAX_VISIBLE_FRACTION = 0.956;
+
+/**
+ * Séparation **visible** minimale entre deux silhouettes voisines, en pixels logiques.
+ *
+ * C'est la contrainte de lisibilité du projet (elle existait déjà pour six coureurs) : en dessous,
+ * l'œil ne distingue plus deux voies, même si les cadres ne se recouvrent pas.
+ */
+const MIN_VISIBLE_GAP_PX = 10;
+
+/** Effectif de référence : le roster complet, dont la taille des personnages est **figée**. */
+const REFERENCE_PARTICIPANTS = MAX_PARTICIPANTS;
+
+/**
+ * Hauteur d'affichage d'un personnage, en pixels logiques, selon le format **et l'effectif**.
+ *
+ * ## Pourquoi la taille dépend du nombre de coureurs
+ *
+ * La bande des voies est la même ressource pour tout le monde : à trois coureurs, chacun dispose de
+ * deux fois plus d'espace vertical qu'à six. Laisser les sprites à leur taille « six » gaspillerait
+ * cet espace — c'est exactement ce que corrige cette fonction.
+ *
+ * ## La valeur retenue est la plus grande qui tienne, jamais un réglage arbitraire
+ *
+ * Pour un effectif donné, la hauteur est la **plus grande** valeur qui respecte les trois contraintes
+ * mesurables du projet, dans cet ordre :
+ *
+ * 1. `séparation visible ≥ MIN_VISIBLE_GAP_PX`, mesurée sur la silhouette réelle
+ *    (`MAX_VISIBLE_FRACTION`) et non sur le cadre ;
+ * 2. le **cadre** de la première voie reste dans l'arène (`centre − h/2 ≥ 0`) ;
+ * 3. le cadre de la dernière voie aussi (`centre + h/2 ≤ BASE_HEIGHT`).
+ *
+ * Ces contraintes se lisent directement : `h ≤ (espacement − 10) / 0,956` et
+ * `h ≤ 2 × min(haut de bande, bas d'arène − bas de bande)`. Aucune constante n'est ajoutée à la main.
+ *
+ * ## À six coureurs, rien ne change
+ *
+ * L'effectif de référence court avec **exactement** les constantes historiques
+ * (`CHARACTER_HEIGHT_PX`, `CHARACTER_HEIGHT_COMPACT_PX`) : elles sont plus petites que le maximum
+ * autorisé par les contraintes ci-dessus, et c'est ce qui garantit qu'une course à six reste, au
+ * pixel près, celle d'avant cette fonctionnalité.
+ */
+export function characterHeightPx(participants: number, compact: boolean): number {
+  const reference = compact ? VIEW.CHARACTER_HEIGHT_COMPACT_PX : VIEW.CHARACTER_HEIGHT_PX;
+  const count = Math.min(Math.max(Math.trunc(participants), 2), REFERENCE_PARTICIPANTS);
+  if (count >= REFERENCE_PARTICIPANTS) {
+    return reference;
+  }
+
+  const ratios = laneRatios(compact);
+  const bandTop = VIEW.BASE_HEIGHT * ratios.top;
+  const bandBottom = VIEW.BASE_HEIGHT * ratios.bottom;
+  const spacing = (bandBottom - bandTop) / (count - 1);
+
+  const separationBound = (spacing - MIN_VISIBLE_GAP_PX) / MAX_VISIBLE_FRACTION;
+  const canvasBound = 2 * Math.min(bandTop, VIEW.BASE_HEIGHT - bandBottom);
+
+  return Math.max(reference, Math.floor(Math.min(separationBound, canvasBound)));
 }
 
-/** Taille de police du nom d'un personnage, en pixels logiques, selon le format. */
-export function characterNameFontPx(compact: boolean): number {
-  return compact ? VIEW.CHARACTER_NAME_FONT_COMPACT_PX : VIEW.CHARACTER_NAME_FONT_PX;
+/**
+ * Taille de police du nom d'un personnage, en pixels logiques, selon le format et l'effectif.
+ *
+ * Elle suit la **même proportion** que sur l'effectif de référence : un personnage deux fois plus
+ * grand porte un nom deux fois plus grand, donc le rapport entre le texte et la silhouette ne dépend
+ * jamais du nombre de coureurs. À six, la valeur est exactement la constante historique.
+ */
+export function characterNameFontPx(participants: number, compact: boolean): number {
+  const reference = compact ? VIEW.CHARACTER_NAME_FONT_COMPACT_PX : VIEW.CHARACTER_NAME_FONT_PX;
+  const referenceHeight = compact ? VIEW.CHARACTER_HEIGHT_COMPACT_PX : VIEW.CHARACTER_HEIGHT_PX;
+  const height = characterHeightPx(participants, compact);
+  if (height === referenceHeight) {
+    return reference;
+  }
+  return Math.round((reference * height) / referenceHeight);
 }
 
 /**
@@ -348,11 +427,25 @@ export function characterNameOrigin(): { readonly x: number; readonly y: number 
   return { x: 1, y: 0.5 };
 }
 
-/** Ordonnée écran d'une voie, répartie uniformément entre les deux ratios du format courant. */
-export function laneY(index: number, heightPx: number, compact = false): number {
+/**
+ * Ordonnée écran d'une voie, répartie uniformément entre les deux ratios du format courant.
+ *
+ * `participants` est le nombre de **partants** de la course : c'est lui qui décide de l'espacement.
+ * Il est obligatoire, et non optionnel : un appelant qui l'oublierait dessinerait six voies pour une
+ * course à trois, ce qui est exactement le genre d'erreur silencieuse que ce paramètre interdit.
+ *
+ * À six partants, l'expression est **identique** à celle d'avant cette fonctionnalité
+ * (`span = 5`), donc les positions restent bit à bit les mêmes.
+ */
+export function laneY(
+  index: number,
+  heightPx: number,
+  compact: boolean,
+  participants: number,
+): number {
   const ratios = laneRatios(compact);
   const top = heightPx * ratios.top;
   const bottom = heightPx * ratios.bottom;
-  const span = CHARACTER_IDS.length - 1;
-  return span === 0 ? top : top + ((bottom - top) * index) / span;
+  const span = Math.max(1, Math.trunc(participants) - 1);
+  return span === 1 ? top : top + ((bottom - top) * index) / span;
 }

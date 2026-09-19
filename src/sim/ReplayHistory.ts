@@ -18,7 +18,7 @@ import type { ActiveEvent, CharacterState, RaceState } from '../core/types';
  *
  * | donnée | forme | taille |
  * |---|---|---|
- * | distance des 6 personnages, à chaque pas | `Float64Array` de `3601 × 6` | 172,8 Ko |
+ * | distance des partants, à chaque pas | `Float64Array` de `3601 × N` (`172,8 Ko` à six) |
  * | événements rares, par **intervalles** de pas | tableau de fiches (une par occurrence) | quelques centaines d'octets |
  *
  * Tout le reste se **déduit** de l'index de pas : `tSim = steps × DT_S`, le segment vient de
@@ -82,12 +82,30 @@ export class ReplayHistory {
   /** Index de l'intervalle ouvert par personnage, ou `null` : détecte début et fin sans table par pas. */
   private readonly openIntervals: (number | null)[];
 
+  /**
+   * Nombre de partants enregistrés.
+   *
+   * Il est **fixé à la construction** : l'historique appartient à une course, et une course ne change
+   * pas d'effectif. Un changement de nombre de coureurs reconstruit donc l'historique (voir
+   * `RaceSimulation`), plutôt que de le redimensionner en place.
+   */
+  private readonly participants: number;
+
   /** Nombre d'instants déjà enregistrés : `recordedSteps` vaut aussi le prochain pas attendu. */
   private recordedSteps = 0;
 
-  constructor() {
-    this.distanceValues = new Float64Array(ReplayHistory.CAPACITY * CHARACTERS.length);
-    this.openIntervals = new Array<number | null>(CHARACTERS.length).fill(null);
+  constructor(participants: number = CHARACTERS.length) {
+    if (!Number.isInteger(participants) || participants < 1) {
+      throw new RangeError(`Nombre de partants invalide pour l'historique : ${participants}.`);
+    }
+    this.participants = participants;
+    this.distanceValues = new Float64Array(ReplayHistory.CAPACITY * participants);
+    this.openIntervals = new Array<number | null>(participants).fill(null);
+  }
+
+  /** Nombre de partants couverts par l'historique. */
+  get participantCount(): number {
+    return this.participants;
   }
 
   /** Nombre d'instants que l'historique peut contenir. */
@@ -138,7 +156,7 @@ export class ReplayHistory {
       );
     }
 
-    const base = step * CHARACTERS.length;
+    const base = step * this.participants;
     for (let index = 0; index < state.characters.length; index += 1) {
       this.distanceValues[base + index] = state.characters[index]?.x ?? 0;
       this.trackEvent(index, state.characters[index] ?? null, step);
@@ -165,13 +183,13 @@ export class ReplayHistory {
       return null;
     }
 
-    const base = step * CHARACTERS.length;
+    const base = step * this.participants;
     const distances: number[] = [];
-    for (let index = 0; index < CHARACTERS.length; index += 1) {
+    for (let index = 0; index < this.participants; index += 1) {
       distances.push(this.distanceValues[base + index] ?? 0);
     }
 
-    const events: (ActiveEvent | null)[] = new Array<ActiveEvent | null>(CHARACTERS.length).fill(null);
+    const events: (ActiveEvent | null)[] = new Array<ActiveEvent | null>(this.participants).fill(null);
     for (const interval of this.intervals) {
       if (interval.startStep <= step && step < interval.endStep) {
         events[interval.characterIndex] = interval.event;

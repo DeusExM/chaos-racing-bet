@@ -1,6 +1,7 @@
 import { AUTO, Game, Scale } from 'phaser';
 
 import type { RaceSimulation } from '../sim/RaceSimulation';
+import type { SimPhase } from '../sim/types';
 import { BootScene } from './scenes/BootScene';
 import { RaceScene } from './scenes/RaceScene';
 import type { CommentaryView } from './scenes/RaceScene';
@@ -38,6 +39,13 @@ export interface GameOptions {
    * jouer derrière l'écran. Le rendu ne fait que **lire** cette permission.
    */
   readonly allowsGameplay: () => boolean;
+  /**
+   * Annonce chaque changement de phase temps réel à `app/`.
+   *
+   * Utilisé par le sélecteur du nombre de coureurs, qui n'est modifiable qu'avant une course : le
+   * rendu ne connaît pas ce contrôle, il signale seulement **quand** la phase change.
+   */
+  readonly onPhase?: ((phase: SimPhase) => void) | undefined;
 }
 
 /**
@@ -93,6 +101,7 @@ export function createGame(options: GameOptions): GameHandle {
     commentary: options.commentary,
     finishActions: options.finishActions,
     allowsGameplay: options.allowsGameplay,
+    onPhase: options.onPhase,
   });
 
   const base = arenaBaseSizeFor(options.parent);

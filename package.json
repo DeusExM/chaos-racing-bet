@@ -12,6 +12,7 @@
     "test": "vitest run",
     "balance": "node tools/balanceRunner.mjs",
     "balance:leaders": "node tools/leaderAuditRunner.mjs",
+    "balance:participants": "node tools/participantsAuditRunner.mjs",
     "test:e2e": "node --env-file=.playwright.env node_modules/@playwright/test/cli.js test",
     "test:e2e:install": "node --env-file=.playwright.env node_modules/@playwright/test/cli.js install chromium",
     "verify": "npm run typecheck && npm run test && npm run build && npm run test:e2e"

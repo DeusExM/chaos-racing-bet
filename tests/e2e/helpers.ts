@@ -86,6 +86,13 @@ export interface ConsoleWatch {
 
 export interface RaceUrlOptions {
   readonly seed: string;
+  /**
+   * Nombre de coureurs (`?players=3..6`).
+   *
+   * Absent, l'URL ne porte aucun effectif : c'est exactement le cas d'un lien partagé avant cette
+   * fonctionnalité, et il doit retomber proprement sur six coureurs.
+   */
+  readonly players?: number | string;
   readonly fast?: boolean;
   readonly debug?: boolean;
   readonly autostart?: boolean;
@@ -94,6 +101,9 @@ export interface RaceUrlOptions {
 /** Construit l'URL d'une course. `?e2e=1` est toujours présent : sans lui, aucun hook n'existe. */
 export function raceUrl(options: RaceUrlOptions): string {
   const params = new URLSearchParams({ seed: options.seed, e2e: '1' });
+  if (options.players !== undefined) {
+    params.set('players', String(options.players));
+  }
   if (options.fast === true) {
     params.set('fast', '1');
   }

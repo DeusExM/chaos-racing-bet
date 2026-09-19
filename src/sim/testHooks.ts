@@ -1,4 +1,4 @@
-import type { RaceResult, RaceState } from '../core/types';
+import type { CharacterId, RaceResult, RaceState } from '../core/types';
 import { leaderboardOf } from './leaderboard';
 import type { LeaderboardRow } from './leaderboard';
 import type { RaceSimulation } from './RaceSimulation';
@@ -27,6 +27,10 @@ export interface ChaosRaceTestApi {
   ranks(): readonly LeaderboardRow[];
   /** Distances de chaque personnage, dans l'ordre du roster. */
   distances(): readonly number[];
+  /** Identifiants des **partants** de la course en cours, dans l'ordre canonique du roster. */
+  participants(): readonly CharacterId[];
+  /** Effectif de la course en cours (3 à 6). */
+  players(): number;
   /** Joue la course entière sans rendu et renvoie le résultat final. */
   runToCompletion(seed?: string): RaceResult;
   /** Secondes simulées par seconde réelle. */
@@ -70,6 +74,8 @@ export function createTestApi(simulation: RaceSimulation): ChaosRaceTestApi {
     state: () => simulation.view,
     ranks: () => leaderboardOf(simulation.view),
     distances: () => simulation.view.characters.map((character) => character.x),
+    participants: () => simulation.participants,
+    players: () => simulation.players,
     runToCompletion: (seed?: string) => simulation.runToCompletion(seed),
     timeScale: () => simulation.timeScale,
     seed: () => simulation.seed,

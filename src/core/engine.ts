@@ -1,4 +1,3 @@
-import { CHARACTER_IDS } from './characters';
 import type { GameConfig } from './config';
 import { GAME_CONFIG, SQRT_DT, validateConfig } from './config';
 import type { EventDefinition, EventParams, EventPlanState } from './events';
@@ -6,6 +5,7 @@ import { EVENT_CATALOG, activeEventAt, createEventPlan, eventParams, stepEvents 
 import { gaussianFrom, stepOrnsteinUhlenbeck } from './math';
 import type { OrnsteinUhlenbeckParams } from './math';
 import { RaceObserver } from './observer';
+import { DEFAULT_PARTICIPANTS, normalizeParticipants, selectParticipants } from './participants';
 import { sortByRank } from './ranking';
 import type { RngStream } from './rng';
 import { forkStream } from './rng';
@@ -61,6 +61,13 @@ import type {
  * rend. L'observateur est **purement passif** : il ne consomme aucun flux aléatoire, n'écrit ni `x`
  * ni `v`, et ne décide jamais de la course. C'est cet observateur, et lui seul, qui produit les
  * `CHECKPOINT_SPLIT` depuis P009-A : il n'existe pas deux sources de faits concurrentes.
+ *
+ * **Les courses de 3 à 6 coureurs** (`participants.ts`) ne changent rien à ces règles : le moteur
+ * reçoit un **effectif** et aligne le sous-ensemble de roster correspondant, tiré de la seed. Tout ce
+ * qui était écrit « six » devient « les partants » — les flux restent nommés **par personnage**
+ * (`drift:c0` ne dépend pas de qui court), l'observateur reçoit la liste réelle, et le classement,
+ * l'arrivée et les faits se calculent sur elle. À six partants, la liste **est** `CHARACTER_IDS` et
+ * aucun tirage supplémentaire n'a lieu : les courses à six sont donc bit à bit celles d'avant.
  */
 
 /** Numéros humains des segments, dans l'ordre. `RacePhase.segment` est en base 1 (contrat P003). */
@@ -155,6 +162,24 @@ export class RaceEngine {
   private readonly catalog: readonly EventDefinition[];
 
   /**
+   * Effectif demandé pour la course (3 à 6).
+   *
+   * Il est **fixé à la construction** : changer de nombre de coureurs ne se fait pas en cours de
+   * course, mais en repartant sur une nouvelle course. `reset()` conserve donc cet effectif et
+   * recalcule seulement les **partants**, qui dépendent de la seed.
+   */
+  private readonly players: number;
+
+  /**
+   * Partants de la course en cours, dans l'ordre canonique du roster.
+   *
+   * Recalculés à chaque `reset()` : une nouvelle seed peut donc changer le sous-ensemble, ce qui est
+   * le comportement voulu (mêmes règles, autre plateau). À six partants, la liste est exactement
+   * `CHARACTER_IDS` et aucun flux n'est consommé pour la choisir.
+   */
+  private participants: readonly CharacterId[];
+
+  /**
    * Faits produits depuis le dernier `drainFacts()`, dans l'ordre chronologique.
    *
    * Depuis P009-A, tous les faits — `CHECKPOINT_SPLIT` compris — viennent de l'observateur, alimenté
@@ -179,11 +204,15 @@ export class RaceEngine {
    * une variante du catalogue §7.1 sans muter un export partagé — un diagnostic qui réécrit l'état
    * global n'est ni reproductible ni parallélisable. En production, l'argument est absent et le
    * catalogue est celui du noyau (`EVENT_CATALOG`, valeur par défaut de `eventParams`).
+   *
+   * `options.players` fixe l'**effectif** (3 à 6, `6` par défaut). Une valeur illisible retombe sur
+   * `DEFAULT_PARTICIPANTS` plutôt que de lever : c'est un paramètre d'entrée, pas une constante de
+   * jeu, et un effectif invalide ne doit jamais empêcher une course de démarrer.
    */
   constructor(
     seed: string,
     config: GameConfig = GAME_CONFIG,
-    options: { readonly catalog?: readonly EventDefinition[] } = {},
+    options: { readonly catalog?: readonly EventDefinition[]; readonly players?: number } = {},
   ) {
     validateConfig(config);
 
@@ -197,6 +226,8 @@ export class RaceEngine {
     });
 
     this.seedValue = normalizeSeed(seed);
+    this.players = normalizeParticipants(options.players ?? DEFAULT_PARTICIPANTS);
+    this.participants = selectParticipants(this.seedValue, this.players);
     this.surgeConfig = surgeParams(config);
     this.catalog = options.catalog ?? EVENT_CATALOG;
     this.eventConfig = eventParams(config, this.catalog);
@@ -204,9 +235,19 @@ export class RaceEngine {
     this.surgeStreams = this.createSurgeStreams();
     this.surgeStates = this.createSurgeStates();
     this.eventStream = forkStream(this.seedValue, EVENT_STREAM_LABEL);
-    this.eventPlan = createEventPlan(CHARACTER_IDS.length);
-    this.observer = new RaceObserver(config);
-    this.state = RaceEngine.createInitialState(seed, this.seedValue, config);
+    this.eventPlan = createEventPlan(this.participants.length);
+    this.observer = new RaceObserver(config, this.participants);
+    this.state = RaceEngine.createInitialState(seed, this.seedValue, config, this.participants);
+  }
+
+  /** Effectif de la course (3 à 6) : il ne change pas d'une course à l'autre pour cette instance. */
+  get playersCount(): number {
+    return this.players;
+  }
+
+  /** Partants réellement alignés, dans l'ordre canonique du roster. */
+  get participantIds(): readonly CharacterId[] {
+    return this.participants;
   }
 
   /**
@@ -231,7 +272,7 @@ export class RaceEngine {
     // Les événements du pas sont décidés **avant** la boucle des personnages (P008) : l'événement qui
     // démarre à ce pas en fait donc déjà partie, et celui qui s'achève à ce pas n'en fait déjà plus
     // partie. Aucun événement n'est tiré pendant une pause, puisque `step()` n'est alors pas appelé.
-    stepEvents(this.eventPlan, this.eventStream, this.eventConfig, CHARACTER_IDS, stepNumber);
+    stepEvents(this.eventPlan, this.eventStream, this.eventConfig, this.participants, stepNumber);
 
     // Ordre physique = ordre stable du roster, jamais celui d'un Map ou d'un Set.
     for (const [index, character] of this.state.characters.entries()) {
@@ -338,30 +379,36 @@ export class RaceEngine {
   /** Repart de zéro sur une nouvelle seed : distances, vitesses, dérives, surges, événements, faits et flux. */
   reset(seed: string): void {
     this.seedValue = normalizeSeed(seed);
+    // Les partants sont **retirés** pour cette seed : une nouvelle course peut donc changer de plateau
+    // sans changer d'effectif. À six, le tirage n'a pas lieu et la liste reste le roster entier.
+    this.participants = selectParticipants(this.seedValue, this.players);
     this.driftStreams = this.createDriftStreams();
     this.surgeStreams = this.createSurgeStreams();
     this.surgeStates = this.createSurgeStates();
     this.eventStream = forkStream(this.seedValue, EVENT_STREAM_LABEL);
-    this.eventPlan = createEventPlan(CHARACTER_IDS.length);
-    this.observer = new RaceObserver(this.config);
+    this.eventPlan = createEventPlan(this.participants.length);
+    this.observer = new RaceObserver(this.config, this.participants);
     this.facts = [];
-    this.state = RaceEngine.createInitialState(seed, this.seedValue, this.config);
+    this.state = RaceEngine.createInitialState(seed, this.seedValue, this.config, this.participants);
   }
 
   /** Un flux nommé par personnage, dérivé de la seed : consommer `c0` ne touche jamais `c1`. */
   private createDriftStreams(): readonly RngStream[] {
-    return CHARACTER_IDS.map((id) => forkStream(this.seedValue, `${DRIFT_STREAM_PREFIX}${id}`));
+    return this.participants.map((id) => forkStream(this.seedValue, `${DRIFT_STREAM_PREFIX}${id}`));
   }
 
   /**
    * Un flux de surge par personnage, nommé `surge:<charId>`.
    *
    * La séparation des noms est la seule chose qui garantit l'indépendance : `forkStream` dérive un
-   * état complet par couple `(seed, label)`, donc les six surges et les six dérives sont douze suites
-   * indépendantes, et l'ordre dans lequel on les consomme n'a aucune importance.
+   * état complet par couple `(seed, label)`, donc les surges et les dérives des partants sont des
+   * suites indépendantes, et l'ordre dans lequel on les consomme n'a aucune importance.
+   *
+   * Le nom ne dépend que du **personnage**, jamais de l'effectif : un coureur aligné à trois comme à
+   * six reçoit exactement la même suite de surges pour une seed donnée.
    */
   private createSurgeStreams(): readonly RngStream[] {
-    return CHARACTER_IDS.map((id) => forkStream(this.seedValue, `${SURGE_STREAM_PREFIX}${id}`));
+    return this.participants.map((id) => forkStream(this.seedValue, `${SURGE_STREAM_PREFIX}${id}`));
   }
 
   /** Plannings de surge initiaux : le premier surge de chaque personnage est tiré comme les suivants. */
@@ -414,13 +461,14 @@ export class RaceEngine {
     return Object.freeze({ tSim: this.state.tSim, ranking: Object.freeze(ranking), distances });
   }
 
-  /** État de départ : tout le monde à zéro, même vitesse de base, ni dérive ni surge. */
+  /** État de départ : tous les partants à zéro, même vitesse de base, ni dérive ni surge. */
   private static createInitialState(
     seed: string,
     seedValue: number,
     config: GameConfig,
+    participants: readonly CharacterId[],
   ): RaceState {
-    const characters: CharacterState[] = CHARACTER_IDS.map((id) => ({
+    const characters: CharacterState[] = participants.map((id) => ({
       id,
       x: 0,
       v: config.SPEED.BASE,

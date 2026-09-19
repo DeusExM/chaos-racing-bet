@@ -72,6 +72,17 @@
             type="button"
             data-testid="gallery-button"
           ></button>
+          <!--
+            Sélecteur du nombre de coureurs (courses de 3 à 6). Il vit dans la rangée de la seed, à
+            côté du bouton « persos », et c'est une liste **native** (`<select>`) : sur iPhone, elle
+            ouvre le sélecteur système, qui reste utilisable au doigt. Le libellé est masqué en petit
+            paysage ; seule la valeur reste visible. `app/` remplit les options et le libellé, comme
+            tous les textes visibles du projet.
+          -->
+          <label class="hud-players" data-testid="players-control">
+            <span class="hud-players-label" data-testid="players-label"></span>
+            <select id="players-select" class="hud-players-select" data-testid="players-select"></select>
+          </label>
         </div>
         <!--
           Les retours d'événement (bonus/malus attachés aux personnages) et les réglages sont créés

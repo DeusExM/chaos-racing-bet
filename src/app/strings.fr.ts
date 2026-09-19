@@ -116,6 +116,16 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   finishPhotoBadge: 'Photo finish',
   finishReplaySameSeed: 'Rejouer la même seed',
   finishNewRace: 'Nouvelle course',
+  // Fermeture de l'écran d'arrivée : le bouton n'affiche qu'un `×`, ce libellé est son nom accessible.
+  finishCloseLabel: "Fermer l'écran d'arrivée",
+
+  // Sélecteur du nombre de coureurs (courses de 3 à 6). Le libellé est masqué en petit paysage, où
+  // seule la valeur reste : « 3 », « 4 », « 5 » ou « 6 » dans une liste native, utilisable au doigt.
+  playersLabel: 'Coureurs',
+  playersOption3: '3',
+  playersOption4: '4',
+  playersOption5: '5',
+  playersOption6: '6',
 
   // Panneau « persos » (micro-correction responsive) : un bouton discret à côté de la seed ouvre les
   // six personnages en grand. Ces libellés décrivent l'interface ; ils ne sont jamais prononcés.
@@ -189,6 +199,17 @@ export function characterNameFr(id: CharacterId): string {
 /** Nom du personnage à l'index `index` du fait. */
 function nameAt(fact: RaceFact, index: number): string {
   return characterNameFr(characterAt(fact, index));
+}
+
+/**
+ * Index du **dernier** rang réellement mesuré d'un fait.
+ *
+ * Une course aligne trois à six coureurs : « le dernier » n'est donc pas l'index 5 en dur, mais le
+ * dernier rang du fait. Écrire 5 aurait fait lever une erreur sur une course à trois — et, si on
+ * l'avait toléré, aurait nommé un personnage absent du plateau.
+ */
+function lastIndex(fact: RaceFact): number {
+  return fact.characterIds.length - 1;
 }
 
 /** Nombre à une décimale, virgule française : `3.24` → `« 3,2 »`. */
@@ -345,9 +366,9 @@ export const SPEAKER_LINES_FR: Readonly<Record<RaceFactType, readonly ((fact: Ra
     CHECKPOINT_SPLIT: Object.freeze([
       (fact: RaceFact) => `Checkpoint : ${formatTruncatedMetresFr(magnitudeAt(fact, 0))} pour ${nameAt(fact, 0)}, ${formatTruncatedMetresFr(magnitudeAt(fact, 1))} pour ${nameAt(fact, 1)}, ${formatTruncatedMetresFr(magnitudeAt(fact, 2))} pour ${nameAt(fact, 2)} !`,
       (fact: RaceFact) => `Les compteurs parlent : ${nameAt(fact, 0)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, ${nameAt(fact, 1)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 1))}, ${nameAt(fact, 2)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 2))} !`,
-      (fact: RaceFact) => `Relevé de mi-course : ${nameAt(fact, 0)} mène à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, dernier ${nameAt(fact, 5)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 5))} !`,
-      (fact: RaceFact) => `Checkpoint officiel : ${nameAt(fact, 0)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, ${nameAt(fact, 5)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 5))}, et tout le monde transpire !`,
-      (fact: RaceFact) => `Ça se resserre : ${nameAt(fact, 0)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, ${nameAt(fact, 5)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 5))}, et personne ne lâche !`,
+      (fact: RaceFact) => `Relevé de mi-course : ${nameAt(fact, 0)} mène à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, dernier ${nameAt(fact, lastIndex(fact))} à ${formatTruncatedMetresFr(magnitudeAt(fact, lastIndex(fact)))} !`,
+      (fact: RaceFact) => `Checkpoint officiel : ${nameAt(fact, 0)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, ${nameAt(fact, lastIndex(fact))} à ${formatTruncatedMetresFr(magnitudeAt(fact, lastIndex(fact)))}, et tout le monde transpire !`,
+      (fact: RaceFact) => `Ça se resserre : ${nameAt(fact, 0)} à ${formatTruncatedMetresFr(magnitudeAt(fact, 0))}, ${nameAt(fact, lastIndex(fact))} à ${formatTruncatedMetresFr(magnitudeAt(fact, lastIndex(fact)))}, et personne ne lâche !`,
     ]),
 
     // magnitudes = [écart P1–P2, distance du 1er, distance du 2e]

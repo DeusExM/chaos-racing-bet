@@ -31,8 +31,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { CHARACTER_IDS } from '../../src/core/characters';
-import { FACT, RACE_CONFIG } from '../../src/core/config';
+import { FACT, GAME_CONFIG, RACE_CONFIG } from '../../src/core/config';
 import { computeRanks } from '../../src/core/ranking';
+import { intervalStepRange, intervalStepRangeForMean } from '../../src/core/surges';
 import { corpusSeeds } from '../../tools/balanceStats';
 import {
   COMEBACK_RANKS,
@@ -50,9 +51,13 @@ import {
   LEADER_BOUND_LABELS,
   SUSPENSE_PLAYERS,
   SUSPENSE_REFERENCES,
+  SURGE_INTERVAL_BASELINE_MEAN_S,
+  SURGE_INTERVAL_CANDIDATE_MEAN_S,
+  SURGE_INTERVAL_FROM_S,
   VISIBLE_LEADER_CHANGE_S,
   auditSuspenseRace,
   buildNoiseSweepJson,
+  buildSurgeIntervalComparisonJson,
   buildSuspenseAuditJson,
   characterTrajectory,
   conclusionLines,
@@ -67,8 +72,10 @@ import {
   rankVector,
   referenceChecks,
   renderNoiseSweepText,
+  renderSurgeIntervalComparisonText,
   renderSuspenseAuditText,
   runNoiseSweep,
+  runSurgeIntervalComparison,
   stepsForSeconds,
   summarizeSuspenseAudit,
   visibleSuspense,
@@ -1335,11 +1342,13 @@ describe('sweep du bruit de dérive', () => {
     // Deux moteurs identiques ne divergent jamais.
     expect(firstDivergentStep(seed)).toBe(-1);
     // Un facteur de 1 est inerte : la course de mesure est exactement celle de production.
-    expect(firstDivergentStep(seed, () => 1)).toBe(-1);
+    expect(firstDivergentStep(seed, { driftNoiseScale: () => 1 })).toBe(-1);
     expect(auditSuspenseRace(seed, { driftNoiseScale: () => 1 })).toEqual(auditSuspenseRace(seed));
 
     // Avec un facteur réel, la divergence commence juste après la borne, jamais avant.
-    const divergent = firstDivergentStep(seed, noiseScaleAfter(fromStep, 1.45));
+    const divergent = firstDivergentStep(seed, {
+      driftNoiseScale: noiseScaleAfter(fromStep, 1.45),
+    });
     expect(divergent).toBeGreaterThan(fromStep);
     expect(divergent).toBeLessThanOrEqual(fromStep + 2);
   });
@@ -1423,6 +1432,107 @@ describe('sweep du bruit de dérive', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// Candidat « surges plus fréquents après 40 s » (mode expérimental)
+// ---------------------------------------------------------------------------------------------
+
+describe('surges plus fréquents après 40 s', () => {
+  const fromStep = stepsForSeconds(SURGE_INTERVAL_FROM_S);
+
+  it('dérive ses bornes de la moyenne, sans toucher au minimum', () => {
+    expect(SURGE_INTERVAL_BASELINE_MEAN_S).toBe(GAME_CONFIG.SURGE.INTERVAL_MEAN_S);
+    expect(SURGE_INTERVAL_CANDIDATE_MEAN_S).toBe(6);
+    expect(SURGE_INTERVAL_FROM_S).toBe(LEADER_BOUNDS_S[1]);
+
+    // La borne basse reste celle de la production : c'est elle qui garantit « un seul surge actif ».
+    const candidate = intervalStepRangeForMean(GAME_CONFIG, SURGE_INTERVAL_CANDIDATE_MEAN_S);
+    const baseline = intervalStepRange(GAME_CONFIG);
+    expect(candidate.min).toBe(baseline.min);
+    expect(candidate.min).toBe(stepsForSeconds(GAME_CONFIG.SURGE.INTERVAL_MIN_S));
+    // La borne haute reste dérivée : `2 × moyenne − min`, donc la moyenne de la loi est exacte.
+    expect(candidate.max).toBe(stepsForSeconds(2 * SURGE_INTERVAL_CANDIDATE_MEAN_S - GAME_CONFIG.SURGE.INTERVAL_MIN_S));
+    expect((candidate.min + candidate.max) / 2).toBe(stepsForSeconds(SURGE_INTERVAL_CANDIDATE_MEAN_S));
+    // La garantie structurelle tient : l'intervalle minimal ne descend pas sous la durée maximale.
+    expect(candidate.min).toBeGreaterThanOrEqual(stepsForSeconds(GAME_CONFIG.SURGE.DURATION_MAX_S));
+    expect(() => intervalStepRangeForMean(GAME_CONFIG, 1)).toThrow(RangeError);
+  });
+
+  it('ne change rien avant 40 s et ne touche ni durée, ni magnitude, ni freinage', () => {
+    const seed = 'KR7Z8NAR';
+    const candidate = { surgeIntervalAfter: { fromStep, meanS: SURGE_INTERVAL_CANDIDATE_MEAN_S } };
+    const baseline = auditSuspenseRace(seed);
+    const variant = auditSuspenseRace(seed, candidate);
+
+    // Identité stricte jusqu'à 40 s : rangs et écarts des deux premières bornes confondus.
+    expect(variant.leadersAtBounds[0]).toBe(baseline.leadersAtBounds[0]);
+    expect(variant.leadersAtBounds[1]).toBe(baseline.leadersAtBounds[1]);
+    expect(variant.gapAtBoundsM[0]).toBe(baseline.gapAtBoundsM[0]);
+    expect(variant.gapAtBoundsM[1]).toBe(baseline.gapAtBoundsM[1]);
+    const divergent = firstDivergentStep(seed, candidate);
+    expect(divergent).toBeGreaterThan(fromStep);
+  });
+
+  it('n’ajoute aucun tirage : un candidat identique à la production est inerte', () => {
+    const seed = 'KR7Z8NAR';
+    // Même moyenne que la production : les bornes sont identiques, donc la course doit l'être aussi.
+    const sameMean = {
+      surgeIntervalAfter: { fromStep, meanS: SURGE_INTERVAL_BASELINE_MEAN_S },
+    };
+    expect(firstDivergentStep(seed, sameMean)).toBe(-1);
+    expect(auditSuspenseRace(seed, sameMean)).toEqual(auditSuspenseRace(seed));
+  });
+
+  it('compare production et candidat sur le même corpus', () => {
+    const seeds = corpusSeeds(2);
+    const report = runSurgeIntervalComparison(seeds, { meanS: 6 });
+
+    expect(report.seeds).toBe(2);
+    expect(report.fromS).toBe(SURGE_INTERVAL_FROM_S);
+    expect(report.fromStep).toBe(fromStep);
+    expect(report.points).toHaveLength(2);
+
+    const [baseline, candidate] = report.points;
+    expect(baseline?.label).toContain('production');
+    expect(candidate?.label).toContain('6 s');
+    // Le point de production est exactement l'audit du même corpus.
+    expect(baseline?.metrics).toEqual(
+      noiseSweepMetrics(summarizeSuspenseAudit(seeds.map((seed) => auditSuspenseRace(seed)))),
+    );
+    for (const point of report.points) {
+      expect(point.inertness.divergentAtOrBeforeBound).toBe(0);
+      expect(point.metrics.winnerSharesPercent).toHaveLength(SUSPENSE_PLAYERS);
+    }
+    expect(candidate?.inertness.firstDivergentStepMin).toBeGreaterThan(fromStep);
+  });
+
+  it('rend un tableau avec la cible annoncée et un JSON sans constante modifiée', () => {
+    const report = runSurgeIntervalComparison(corpusSeeds(1), { meanS: 6 });
+    const text = renderSurgeIntervalComparisonText(report);
+
+    expect(text).toContain('surges plus fréquents après 40 s');
+    expect(text).toContain('production');
+    expect(text).toContain('leader à 40 s qui gagne');
+    expect(text).toContain('leader à 40 s qui perd la tête après 50 s');
+    expect(text).toContain('changement visible dans les 10 dernières secondes');
+    expect(text).toContain('5e/6e à 40 s → top 3');
+    expect(text).toContain('même leader 20/40/60');
+    expect(text).toContain('écart P1–P2 médian à l’arrivée');
+    expect(text).toContain('arrivée sous 15 m');
+    expect(text).toContain('répartition des vainqueurs');
+    expect(text).toContain('identité bit à bit jusqu’à 40 s');
+    expect(text).toContain('48–55 %');
+
+    const json = JSON.stringify(buildSurgeIntervalComparisonJson(report));
+    expect(json).toContain('chaos-race-surge-interval-comparison');
+    expect(json).toContain('"productionConstantsChanged":false');
+    expect(json).toContain('"extraRngDraws":0');
+    expect(json).toContain('"newRngStreams":0');
+    expect(json).toContain('"durationRangeUnchanged":true');
+    expect(json).toContain('"brakeProbabilityUnchanged":true');
+    expect(json).not.toContain('undefined');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Ligne de commande
 // ---------------------------------------------------------------------------------------------
 
@@ -1482,6 +1592,28 @@ describe('ligne de commande', () => {
 
     expect(() => parseSuspenseAuditArgs(['--sweep-factors=1,0'])).toThrow(RangeError);
     expect(() => parseSuspenseAuditArgs(['--sweep-factors=abc'])).toThrow(RangeError);
+  });
+
+  it('active le mode surges plus fréquents et lit sa moyenne', () => {
+    const defaults = parseSuspenseAuditArgs(['--surge-interval']);
+    expect(defaults).not.toBe('help');
+    if (defaults === 'help') {
+      throw new Error('aide inattendue');
+    }
+    expect(defaults.surgeInterval).toBe(true);
+    expect(defaults.surgeIntervalMeanS).toBe(SURGE_INTERVAL_CANDIDATE_MEAN_S);
+    expect(defaults.sweep).toBe(false);
+
+    const explicit = parseSuspenseAuditArgs(['--surge-interval-mean=7.5']);
+    expect(explicit).not.toBe('help');
+    if (explicit === 'help') {
+      throw new Error('aide inattendue');
+    }
+    expect(explicit.surgeInterval).toBe(true);
+    expect(explicit.surgeIntervalMeanS).toBe(7.5);
+
+    expect(() => parseSuspenseAuditArgs(['--surge-interval-mean=0'])).toThrow(RangeError);
+    expect(() => parseSuspenseAuditArgs(['--surge-interval-mean=abc'])).toThrow(RangeError);
   });
 
   it('refuse une entrée invalide et répond à --help', () => {

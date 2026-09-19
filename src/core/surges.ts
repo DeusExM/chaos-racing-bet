@@ -108,6 +108,35 @@ export function intervalStepRange(config: GameConfig): SurgeStepRange {
   });
 }
 
+/**
+ * Intervalle `[min, max]` pour une **moyenne imposée**, en pas inclusifs.
+ *
+ * Même loi et même logique de génération que `intervalStepRange` — un `nextInt(min, max)` uniforme,
+ * tiré au même moment, dans le même ordre, sur le même flux — seule la moyenne change :
+ *
+ * * la borne **basse** reste `INTERVAL_MIN_S` : elle porte la garantie structurelle « un seul surge
+ *   actif par personnage » (`INTERVAL_MIN_S ≥ DURATION_MAX_S`, vérifiée par `validateConfig`) ;
+ * * la borne **haute** reste **dérivée** par `2 × moyenne − min`, donc la moyenne de la loi uniforme
+ *   vaut exactement la valeur demandée.
+ *
+ * Avec `moyenne = 6 s` et `INTERVAL_MIN_S = 4 s`, la loi devient donc `[4 s ; 8 s]` : c'est ce que
+ * donnerait un `INTERVAL_MEAN_S = 6` dans `GAME_DESIGN.md` §6.4, borne haute recalculée comprise.
+ *
+ * N'existe que pour la **mesure** (voir `RaceEngine`) : la production appelle `intervalStepRange`.
+ */
+export function intervalStepRangeForMean(config: GameConfig, meanS: number): SurgeStepRange {
+  const min = config.SURGE.INTERVAL_MIN_S;
+  if (!(meanS >= min)) {
+    throw new RangeError(
+      `intervalStepRangeForMean : moyenne ${String(meanS)} s sous l'intervalle minimal ${String(min)} s.`,
+    );
+  }
+  return Object.freeze({
+    min: stepsForSeconds(min, config),
+    max: stepsForSeconds(2 * meanS - min, config),
+  });
+}
+
 /** Durée `[min, max]` d'un surge, en pas inclusifs. */
 export function durationStepRange(config: GameConfig): SurgeStepRange {
   return Object.freeze({
@@ -172,12 +201,18 @@ function drawMagnitude(stream: RngStream, params: SurgeParams): number {
  * Les numéros de pas sont en base 1 et correspondent à `RaceState.steps` **après** le pas exécuté.
  * Les appels sont donc consécutifs, et la comparaison `stepNumber >= nextStartStep` est en pratique
  * une égalité ; le `>=` évite simplement de rester bloqué si un pas était sauté un jour.
+ *
+ * `intervalRange` n'existe que pour la **mesure** : il remplace la seule borne de l'intervalle tiré
+ * **à ce pas**, sans changer ni l'ordre, ni le nombre, ni la nature des tirages (voir
+ * `intervalStepRangeForMean`). Absent — le cas de la production — le tirage est celui de
+ * `params.intervalSteps`.
  */
 export function stepSurge(
   state: SurgeState,
   stream: RngStream,
   params: SurgeParams,
   stepNumber: number,
+  intervalRange?: SurgeStepRange,
 ): number {
   // Fin : `endStep` est exclu, donc le pas `endStep` ne subit déjà plus le surge.
   if (state.endStep !== null && stepNumber >= state.endStep) {
@@ -190,7 +225,8 @@ export function stepSurge(
   // un autre, même si une configuration incohérente le proposait.
   if (state.endStep === null && stepNumber >= state.nextStartStep) {
     const durationSteps = stream.nextInt(params.durationSteps.min, params.durationSteps.max);
-    const intervalSteps = stream.nextInt(params.intervalSteps.min, params.intervalSteps.max);
+    const range = intervalRange ?? params.intervalSteps;
+    const intervalSteps = stream.nextInt(range.min, range.max);
 
     state.endStep = stepNumber + durationSteps;
     state.nextStartStep = stepNumber + intervalSteps;

@@ -209,6 +209,23 @@ export const DRIFT_NOISE_SWEEP_FACTORS: readonly number[] = Object.freeze([1, 1.
 /** Seconde à partir de laquelle le sweep dilate le bruit : la dernière borne de `LEADER_BOUNDS_S`. */
 export const DRIFT_NOISE_SWEEP_FROM_S = LEADER_BOUNDS_S[1] ?? 40;
 
+/** Moyenne d'intervalle entre deux débuts de surge en production, en secondes (`GAME_DESIGN.md` §6.4). */
+export const SURGE_INTERVAL_BASELINE_MEAN_S = GAME_CONFIG.SURGE.INTERVAL_MEAN_S;
+
+/** Moyenne d'intervalle du candidat testé **après** 40 s, en secondes. */
+export const SURGE_INTERVAL_CANDIDATE_MEAN_S = 6;
+
+/** Borne du candidat « surges plus fréquents » : le premier pas qui la suit change de moyenne. */
+export const SURGE_INTERVAL_FROM_S = LEADER_BOUNDS_S[1] ?? 40;
+
+/** Cible annoncée du test : leader de 40 s vainqueur, et changements visibles tardifs. */
+export const SURGE_INTERVAL_TARGETS: readonly string[] = Object.freeze([
+  'leader à 40 s gagnant : 48–55 %',
+  'changement visible dans les 10 dernières secondes : ≥ 35 %',
+  'plus de remontées tardives, écarts à l’arrivée non explosifs',
+  'aucun déséquilibre significatif entre les six personnages',
+]);
+
 /**
  * Seuils d'écart P1–P2, en mètres, **pris dans le jeu** (voir l'en-tête) et du plus serré au plus
  * large. Ils servent deux fois : « les deux premiers sont encore proches » et « le leader avait une
@@ -873,6 +890,20 @@ function topTwo(xs: readonly number[]): readonly [number, number] {
 }
 
 /**
+ * Options de **mesure** passées au noyau, et à elles seules.
+ *
+ * Ce sont des passe-plats vers les options expérimentales de `RaceEngine` : l'outil ne modifie aucune
+ * constante de jeu, il demande au moteur de dilater un bruit déjà tiré ou de changer la fréquence des
+ * surges après une borne. Absentes, la course est exactement celle de production.
+ */
+export interface AuditRaceOptions {
+  /** Facteur d'amplitude du bruit de dérive **déjà tiré**, par numéro de pas. */
+  readonly driftNoiseScale?: (stepNumber: number) => number;
+  /** Moyenne d'intervalle de surge appliquée aux intervalles tirés **après** `fromStep`. */
+  readonly surgeIntervalAfter?: { readonly fromStep: number; readonly meanS: number };
+}
+
+/**
  * Joue **une** course complète à six coureurs et relève tout le suspense mesurable.
  *
  * Le relevé est fait à chaque pas : distances, rangs, leader, écarts. Les rangs sont écrits dans un
@@ -881,21 +912,16 @@ function topTwo(xs: readonly number[]): readonly [number, number] {
  */
 export function auditSuspenseRace(
   seed: string,
-  options: {
-    /**
-     * Facteur d'amplitude du bruit de dérive **déjà tiré**, par numéro de pas.
-     *
-     * Passe-plat vers l'option de mesure du noyau : l'outil ne modifie aucune constante de jeu, il
-     * demande au moteur de dilater un bruit existant. Absent, la course est celle de production.
-     */
-    readonly driftNoiseScale?: (stepNumber: number) => number;
-  } = {},
+  options: AuditRaceOptions = {},
 ): SuspenseRaceAudit {
   const engine = new RaceEngine(seed, GAME_CONFIG, {
     players: SUSPENSE_PLAYERS,
     ...(options.driftNoiseScale === undefined
       ? {}
       : { driftNoiseScale: options.driftNoiseScale }),
+    ...(options.surgeIntervalAfter === undefined
+      ? {}
+      : { surgeIntervalAfter: options.surgeIntervalAfter }),
   });
   const ids = CHARACTER_IDS;
   const characters = ids.length;
@@ -2465,14 +2491,16 @@ export function noiseScaleAfter(fromStep: number, factor: number): (stepNumber: 
  * La comparaison est **bit à bit** (`!==` sur des `number`) : elle ne tolère aucun écart, pas même
  * un dernier bit. C'est la seule façon de prouver que le levier est inerte avant 40 s.
  */
-export function firstDivergentStep(
-  seed: string,
-  driftNoiseScale?: (stepNumber: number) => number,
-): number {
+export function firstDivergentStep(seed: string, options: AuditRaceOptions = {}): number {
   const baseline = new RaceEngine(seed, GAME_CONFIG, { players: SUSPENSE_PLAYERS });
   const variant = new RaceEngine(seed, GAME_CONFIG, {
     players: SUSPENSE_PLAYERS,
-    ...(driftNoiseScale === undefined ? {} : { driftNoiseScale }),
+    ...(options.driftNoiseScale === undefined
+      ? {}
+      : { driftNoiseScale: options.driftNoiseScale }),
+    ...(options.surgeIntervalAfter === undefined
+      ? {}
+      : { surgeIntervalAfter: options.surgeIntervalAfter }),
   });
 
   let state = baseline.getState();
@@ -2572,55 +2600,30 @@ export function runNoiseSweep(
   const factors = options.factors ?? DRIFT_NOISE_SWEEP_FACTORS;
   const fromS = options.fromS ?? DRIFT_NOISE_SWEEP_FROM_S;
   const fromStep = stepsForSeconds(fromS);
-  const startedAt = performance.now();
-  const points: NoiseSweepPoint[] = [];
-
-  for (const [index, factor] of factors.entries()) {
-    const scale = noiseScaleAfter(fromStep, factor);
-    const races: SuspenseRaceAudit[] = [];
-    let divergentAtOrBeforeBound = 0;
-    let firstDivergentStepMin = -1;
-    let firstDivergentStepMax = -1;
-
-    for (const seed of seeds) {
-      races.push(auditSuspenseRace(seed, { driftNoiseScale: scale }));
-      const divergent = firstDivergentStep(seed, scale);
-      if (divergent > 0 && divergent <= fromStep) {
-        divergentAtOrBeforeBound += 1;
-      }
-      if (divergent > 0) {
-        if (firstDivergentStepMin < 0 || divergent < firstDivergentStepMin) {
-          firstDivergentStepMin = divergent;
-        }
-        if (divergent > firstDivergentStepMax) {
-          firstDivergentStepMax = divergent;
-        }
-      }
-    }
-
-    points.push(
-      Object.freeze({
-        factor,
-        metrics: noiseSweepMetrics(summarizeSuspenseAudit(races)),
-        inertness: Object.freeze({
-          seeds: seeds.length,
-          fromStep,
-          divergentAtOrBeforeBound,
-          firstDivergentStepMin,
-          firstDivergentStepMax,
-        }),
-      }),
-    );
-    options.onPoint?.(index + 1, factors.length);
-  }
+  const comparison = compareSuspenseVariants(
+    seeds,
+    factors.map((factor) => ({
+      label: `×${decimal(factor)}`,
+      options: { driftNoiseScale: noiseScaleAfter(fromStep, factor) },
+    })),
+    { fromS, ...(options.onPoint === undefined ? {} : { onVariant: options.onPoint }) },
+  );
 
   return Object.freeze({
-    seeds: seeds.length,
+    seeds: comparison.seeds,
     fromS,
     fromStep,
     factors: Object.freeze([...factors]),
-    points: Object.freeze(points),
-    elapsedMs: performance.now() - startedAt,
+    points: Object.freeze(
+      comparison.points.map((point, index) =>
+        Object.freeze({
+          factor: factors[index] ?? 1,
+          metrics: point.metrics,
+          inertness: point.inertness,
+        }),
+      ),
+    ),
+    elapsedMs: comparison.elapsedMs,
   });
 }
 
@@ -2668,30 +2671,18 @@ export function renderNoiseSweepText(report: NoiseSweepReport): string {
     row.label,
     ...report.points.map((point) => row.pick(point.metrics)),
   ]);
-  const widths = headers.map((header, column) =>
-    Math.max(header.length, ...rows.map((row) => (row[column] ?? '').length)),
-  );
-  const format = (row: readonly string[]): string =>
-    row.map((cell, column) => cell.padEnd(widths[column] ?? cell.length)).join('  ').trimEnd();
-  lines.push(format(headers));
-  for (const row of rows) {
-    lines.push(format(row));
-  }
+  lines.push(...formatMetricsTable(headers, rows));
 
   lines.push('');
   lines.push(
-    `identité bit à bit jusqu’à ${decimal(report.fromS, 0)} s (x, v et drift des six, pas à pas) :`,
+    ...inertnessLines(
+      report.points.map((point) => ({
+        label: `×${decimal(point.factor)}`,
+        inertness: point.inertness,
+      })),
+      report.fromS,
+    ),
   );
-  for (const point of report.points) {
-    const inertness = point.inertness;
-    lines.push(
-      `  ×${decimal(point.factor)} : ${String(inertness.seeds - inertness.divergentAtOrBeforeBound)}/${String(inertness.seeds)} courses identiques | ` +
-        `premier pas divergent : ${inertness.firstDivergentStepMin < 0 ? 'aucun' : `${String(inertness.firstDivergentStepMin)} à ${String(inertness.firstDivergentStepMax)}`}` +
-        (inertness.divergentAtOrBeforeBound > 0
-          ? ` | ANOMALIE : ${String(inertness.divergentAtOrBeforeBound)} course(s) divergent à 40 s ou avant`
-          : ''),
-    );
-  }
   lines.push('');
   lines.push(
     'Lecture : le baseline ×1,00 est la course de production ; les autres ne changent que l’amplitude ' +
@@ -2730,6 +2721,231 @@ export function buildNoiseSweepJson(report: NoiseSweepReport): unknown {
   };
 }
 
+/** Un point de comparaison : une variante de mesure, ses neuf mesures et son innocuité. */
+export interface SuspenseComparisonPoint {
+  readonly label: string;
+  readonly metrics: NoiseSweepMetrics;
+  readonly inertness: NoiseSweepInertness;
+}
+
+/** Résultat d'une comparaison de variantes de mesure sur un même corpus. */
+export interface SuspenseComparisonReport {
+  readonly seeds: number;
+  readonly fromS: number;
+  readonly fromStep: number;
+  readonly points: readonly SuspenseComparisonPoint[];
+  readonly elapsedMs: number;
+}
+
+/**
+ * Joue plusieurs variantes de mesure sur le **même** corpus, chacune avec son contrôle d'innocuité.
+ *
+ * Le contrôle rejoue deux moteurs en parallèle, seed par seed, et s'arrête au premier pas divergent :
+ * son coût reste donc celui des 40 premières secondes, pas celui de la course entière. Aucune
+ * constante de jeu n'est modifiée : chaque variante ne vit que dans l'instance de mesure.
+ */
+export function compareSuspenseVariants(
+  seeds: readonly string[],
+  variants: readonly { readonly label: string; readonly options: AuditRaceOptions }[],
+  options: { readonly fromS: number; readonly onVariant?: (index: number, total: number) => void },
+): SuspenseComparisonReport {
+  const fromStep = stepsForSeconds(options.fromS);
+  const startedAt = performance.now();
+  const points: SuspenseComparisonPoint[] = [];
+
+  for (const [index, variant] of variants.entries()) {
+    const races: SuspenseRaceAudit[] = [];
+    let divergentAtOrBeforeBound = 0;
+    let firstDivergentStepMin = -1;
+    let firstDivergentStepMax = -1;
+
+    for (const seed of seeds) {
+      races.push(auditSuspenseRace(seed, variant.options));
+      const divergent = firstDivergentStep(seed, variant.options);
+      if (divergent > 0 && divergent <= fromStep) {
+        divergentAtOrBeforeBound += 1;
+      }
+      if (divergent > 0) {
+        if (firstDivergentStepMin < 0 || divergent < firstDivergentStepMin) {
+          firstDivergentStepMin = divergent;
+        }
+        if (divergent > firstDivergentStepMax) {
+          firstDivergentStepMax = divergent;
+        }
+      }
+    }
+
+    points.push(
+      Object.freeze({
+        label: variant.label,
+        metrics: noiseSweepMetrics(summarizeSuspenseAudit(races)),
+        inertness: Object.freeze({
+          seeds: seeds.length,
+          fromStep,
+          divergentAtOrBeforeBound,
+          firstDivergentStepMin,
+          firstDivergentStepMax,
+        }),
+      }),
+    );
+    options.onVariant?.(index + 1, variants.length);
+  }
+
+  return Object.freeze({
+    seeds: seeds.length,
+    fromS: options.fromS,
+    fromStep,
+    points: Object.freeze(points),
+    elapsedMs: performance.now() - startedAt,
+  });
+}
+
+/**
+ * Le candidat « surges plus fréquents après 40 s » : intervalle moyen `9 s → 6 s`.
+ *
+ * Rien d'autre ne bouge — durées, magnitudes et probabilité de freinage sont celles de la production,
+ * et le tirage reste un `nextInt(min, max)` unique sur le flux `surge:<charId>` : aucun tirage
+ * supplémentaire, aucun nouveau flux. La borne basse et la borne haute dérivée sont conservées, donc
+ * la loi reste uniforme et sa moyenne vaut exactement la valeur demandée.
+ */
+export function runSurgeIntervalComparison(
+  seeds: readonly string[],
+  options: {
+    readonly meanS?: number;
+    readonly onVariant?: (index: number, total: number) => void;
+  } = {},
+): SuspenseComparisonReport {
+  const meanS = options.meanS ?? SURGE_INTERVAL_CANDIDATE_MEAN_S;
+  const fromS = SURGE_INTERVAL_FROM_S;
+  const fromStep = stepsForSeconds(fromS);
+  return compareSuspenseVariants(
+    seeds,
+    [
+      {
+        label: `intervalle ${decimal(SURGE_INTERVAL_BASELINE_MEAN_S, 0)} s (production)`,
+        options: {},
+      },
+      {
+        label: `intervalle ${decimal(meanS, 0)} s après ${decimal(fromS, 0)} s`,
+        options: { surgeIntervalAfter: { fromStep, meanS } },
+      },
+    ],
+    { fromS, ...(options.onVariant === undefined ? {} : { onVariant: options.onVariant }) },
+  );
+}
+
+/** Tableau à colonnes : la première colonne est un libellé de mesure, les suivantes des valeurs. */
+function formatMetricsTable(
+  headers: readonly string[],
+  rows: readonly (readonly string[])[],
+): readonly string[] {
+  const widths = headers.map((header, column) =>
+    Math.max(header.length, ...rows.map((row) => (row[column] ?? '').length)),
+  );
+  const format = (row: readonly string[]): string =>
+    row.map((cell, column) => cell.padEnd(widths[column] ?? cell.length)).join('  ').trimEnd();
+  return [format(headers), ...rows.map((row) => format(row))];
+}
+
+/** Lignes du tableau des neuf mesures, partagées par le sweep et la comparaison de surges. */
+function metricsTableLines(
+  labels: readonly string[],
+  metrics: readonly NoiseSweepMetrics[],
+): readonly string[] {
+  const headers = ['mesure', ...labels];
+  const rows = NOISE_SWEEP_ROWS.map((row) => [
+    row.label,
+    ...metrics.map((value) => row.pick(value)),
+  ]);
+  return formatMetricsTable(headers, rows);
+}
+
+/** Lignes du contrôle d'innocuité avant la borne, partagées par les deux rapports. */
+function inertnessLines(
+  points: readonly { readonly label: string; readonly inertness: NoiseSweepInertness }[],
+  fromS: number,
+): readonly string[] {
+  const lines: string[] = [
+    `identité bit à bit jusqu’à ${decimal(fromS, 0)} s (x, v et drift des six, pas à pas) :`,
+  ];
+  for (const point of points) {
+    const inertness = point.inertness;
+    lines.push(
+      `  ${point.label} : ${String(inertness.seeds - inertness.divergentAtOrBeforeBound)}/${String(inertness.seeds)} courses identiques | ` +
+        `premier pas divergent : ${inertness.firstDivergentStepMin < 0 ? 'aucun' : `${String(inertness.firstDivergentStepMin)} à ${String(inertness.firstDivergentStepMax)}`}` +
+        (inertness.divergentAtOrBeforeBound > 0
+          ? ` | ANOMALIE : ${String(inertness.divergentAtOrBeforeBound)} course(s) divergent à ${decimal(fromS, 0)} s ou avant`
+          : ''),
+    );
+  }
+  return lines;
+}
+
+/** Rapport texte de la comparaison « surges plus fréquents après 40 s ». */
+export function renderSurgeIntervalComparisonText(report: SuspenseComparisonReport): string {
+  const lines: string[] = [];
+  lines.push(
+    `Chaos Race — surges plus fréquents après ${decimal(report.fromS, 0)} s (courses à 6 coureurs)`,
+  );
+  lines.push(
+    `corpus : ${String(report.seeds)} seeds | intervalle moyen ` +
+      `${decimal(SURGE_INTERVAL_BASELINE_MEAN_S, 0)} s → ${decimal(SURGE_INTERVAL_CANDIDATE_MEAN_S, 0)} s ` +
+      `à partir du pas ${String(report.fromStep + 1)} | durée : ${decimal(report.elapsedMs / 1_000, 1)} s`,
+  );
+  lines.push(
+    'Levier : fréquence des surges seulement — durées, magnitudes et probabilité de freinage inchangées, ' +
+      'aucun tirage supplémentaire, aucun nouveau flux.',
+  );
+  lines.push('');
+  lines.push(...metricsTableLines(report.points.map((point) => point.label), report.points.map((point) => point.metrics)));
+  lines.push('');
+  lines.push(...inertnessLines(report.points, report.fromS));
+  lines.push('');
+  lines.push('Cible annoncée :');
+  for (const target of SURGE_INTERVAL_TARGETS) {
+    lines.push(`  - ${target}`);
+  }
+  lines.push('');
+  lines.push(
+    'Lecture : le point « production » est la course actuelle ; l’autre ne change que la fréquence des ' +
+      'surges après 40 s. Aucune constante du jeu n’a été modifiée, et aucune règle ne lit le rang.',
+  );
+  return lines.join('\n');
+}
+
+/** Rapport structuré de la comparaison, à clés ASCII. */
+export function buildSurgeIntervalComparisonJson(report: SuspenseComparisonReport): unknown {
+  return {
+    tool: 'chaos-race-surge-interval-comparison',
+    scope: { players: SUSPENSE_PLAYERS, note: 'N=6 uniquement, mode expérimental' },
+    lever: {
+      kind: 'surge-interval-mean-after-bound',
+      fromS: report.fromS,
+      firstStepWithNewMean: report.fromStep + 1,
+      baselineMeanS: SURGE_INTERVAL_BASELINE_MEAN_S,
+      candidateMeanS: SURGE_INTERVAL_CANDIDATE_MEAN_S,
+      durationRangeUnchanged: true,
+      magnitudeRangeUnchanged: true,
+      brakeProbabilityUnchanged: true,
+      extraRngDraws: 0,
+      newRngStreams: 0,
+      rankIndependent: true,
+      productionConstantsChanged: false,
+    },
+    corpus: { seeds: report.seeds, prefix: DEFAULT_AUDIT_CORPUS, dtS: RACE_CONFIG.DT_S },
+    timing: { elapsedMs: Number(report.elapsedMs.toFixed(1)) },
+    points: report.points.map((point) => ({
+      label: point.label,
+      metrics: {
+        ...point.metrics,
+        winnerSharesPercent: [...point.metrics.winnerSharesPercent],
+        gapAtFinishMedianM: Number(point.metrics.gapAtFinishMedianM.toFixed(4)),
+      },
+      inertness: { ...point.inertness },
+    })),
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Ligne de commande
 // ---------------------------------------------------------------------------------------------
@@ -2745,6 +2961,9 @@ export interface SuspenseAuditCliOptions {
   /** Mode expérimental : sweep du bruit de dérive après 40 s au lieu de l'audit. */
   readonly sweep: boolean;
   readonly sweepFactors: readonly number[];
+  /** Mode expérimental : comparaison « surges plus fréquents après 40 s ». */
+  readonly surgeInterval: boolean;
+  readonly surgeIntervalMeanS: number;
 }
 
 const AUDIT_HELP: readonly string[] = Object.freeze([
@@ -2761,6 +2980,8 @@ const AUDIT_HELP: readonly string[] = Object.freeze([
   '  --no-replay-check            saute le contrôle de reproductibilité bit à bit',
   '  --sweep                      mode expérimental : sweep du bruit de dérive après 40 s',
   `  --sweep-factors=<liste>      facteurs du sweep (défaut : ${DRIFT_NOISE_SWEEP_FACTORS.map((factor) => decimal(factor)).join(', ')})`,
+  `  --surge-interval             mode expérimental : surges plus fréquents après ${decimal(SURGE_INTERVAL_FROM_S, 0)} s`,
+  `  --surge-interval-mean=<s>    intervalle moyen du candidat (défaut : ${decimal(SURGE_INTERVAL_CANDIDATE_MEAN_S, 0)} s)`,
   '  --help                       affiche cette aide',
   '',
 ]);
@@ -2775,6 +2996,8 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
   let replayCheck = true;
   let sweep = false;
   let sweepFactors: readonly number[] = DRIFT_NOISE_SWEEP_FACTORS;
+  let surgeInterval = false;
+  let surgeIntervalMeanS = SURGE_INTERVAL_CANDIDATE_MEAN_S;
 
   const integer = (value: string, label: string): number => {
     const parsed = Number.parseInt(value, 10);
@@ -2831,6 +3054,21 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
       sweep = true;
       continue;
     }
+    if (argument === '--surge-interval') {
+      surgeInterval = true;
+      continue;
+    }
+    if (argument.startsWith('--surge-interval-mean=')) {
+      const parsed = Number(argument.slice('--surge-interval-mean='.length));
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new RangeError(
+          `--surge-interval-mean attend une durée en secondes > 0 (reçu : ${argument.slice('--surge-interval-mean='.length)}).`,
+        );
+      }
+      surgeIntervalMeanS = parsed;
+      surgeInterval = true;
+      continue;
+    }
     if (argument === '--help' || argument === '-h') {
       return 'help';
     }
@@ -2846,6 +3084,8 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
     replayCheck,
     sweep,
     sweepFactors,
+    surgeInterval,
+    surgeIntervalMeanS,
   });
 }
 
@@ -2883,6 +3123,32 @@ export function runSuspenseAuditWithReport(argv: readonly string[]): SuspenseAud
     `corpus « ${options.corpusPrefix} » : ${String(options.seeds)} seeds | ` +
       `première ${seeds[0] ?? '—'} | dernière ${seeds[seeds.length - 1] ?? '—'}`,
   );
+
+  if (options.surgeInterval) {
+    console.log(
+      `surges plus fréquents après ${decimal(SURGE_INTERVAL_FROM_S, 0)} s : intervalle moyen ` +
+        `${decimal(SURGE_INTERVAL_BASELINE_MEAN_S, 0)} s → ${decimal(options.surgeIntervalMeanS, 0)} s`,
+    );
+    const comparison = runSurgeIntervalComparison(seeds, {
+      meanS: options.surgeIntervalMeanS,
+      onVariant: (index, total) => {
+        console.log(`  … variante ${String(index)}/${String(total)}`);
+      },
+    });
+    const text = renderSurgeIntervalComparisonText(comparison);
+    console.log('');
+    console.log(text);
+    const anomaly = comparison.points.some(
+      (point) => point.inertness.divergentAtOrBeforeBound > 0,
+    );
+    return {
+      exitCode: anomaly ? 1 : 0,
+      text,
+      report: buildSurgeIntervalComparisonJson(comparison),
+      jsonPath: options.jsonPath,
+      textPath: options.textPath,
+    };
+  }
 
   if (options.sweep) {
     // Mode expérimental : aucune constante de jeu n'est touchée, le facteur ne vit que dans les

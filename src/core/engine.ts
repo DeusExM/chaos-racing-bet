@@ -11,8 +11,8 @@ import type { RngStream } from './rng';
 import { forkStream } from './rng';
 import { normalizeSeed } from './seed';
 import { computeTargetSpeed, integratePosition, integrateSpeed } from './speedModel';
-import type { SurgeParams, SurgeState } from './surges';
-import { createSurgeState, stepSurge, surgeParams } from './surges';
+import type { SurgeParams, SurgeState, SurgeStepRange } from './surges';
+import { createSurgeState, intervalStepRangeForMean, stepSurge, surgeParams } from './surges';
 import { segmentElapsedS, segmentIndexAt } from './track';
 import type {
   CharacterId,
@@ -129,6 +129,16 @@ export class RaceEngine {
   private readonly driftNoiseScale: ((stepNumber: number) => number) | undefined;
 
   /**
+   * Intervalle de surge de mesure, **après** la borne uniquement (voir le constructeur).
+   *
+   * `undefined` en production. La plage est pré-calculée une fois par course : rien n'est recalculé
+   * dans la boucle, et le tirage reste un `nextInt(min, max)` sur le flux `surge:<charId>`.
+   */
+  private readonly surgeIntervalAfter:
+    | { readonly fromStep: number; readonly range: SurgeStepRange }
+    | undefined;
+
+  /**
    * Un flux de dérive par personnage, créé **une seule fois** par course.
    *
    * C'est le point le plus facile à casser de tout le moteur : reconstruire ces flux à chaque pas
@@ -228,6 +238,14 @@ export class RaceEngine {
    * (il ne fait que dilater un bruit centré) et **indépendant du rang** : la fonction ne reçoit que le
    * numéro du pas, jamais une position, une distance ni un classement. Ce n'est donc ni un
    * rubber-band ni un boost du dernier.
+   *
+   * `options.surgeIntervalAfter` n'existe lui aussi que pour la **mesure** : à partir du premier pas
+   * qui **suit** `fromStep`, l'intervalle entre deux débuts de surge est tiré dans une loi de moyenne
+   * `meanS` au lieu de `SURGE.INTERVAL_MEAN_S`. Rien d'autre ne change : mêmes tirages, même ordre,
+   * même flux, même durée, mêmes magnitudes, même probabilité de freinage. La borne basse
+   * (`INTERVAL_MIN_S`) et la borne haute **dérivée** (`2 × moyenne − min`) sont conservées, donc la
+   * garantie « un seul surge actif » tient toujours. Un intervalle tiré **avant** la borne n'est pas
+   * retouché : le levier ne peut donc rien changer avant `fromStep`.
    */
   constructor(
     seed: string,
@@ -236,12 +254,20 @@ export class RaceEngine {
       readonly catalog?: readonly EventDefinition[];
       readonly players?: number;
       readonly driftNoiseScale?: (stepNumber: number) => number;
+      readonly surgeIntervalAfter?: { readonly fromStep: number; readonly meanS: number };
     } = {},
   ) {
     validateConfig(config);
 
     this.config = config;
     this.driftNoiseScale = options.driftNoiseScale;
+    this.surgeIntervalAfter =
+      options.surgeIntervalAfter === undefined
+        ? undefined
+        : Object.freeze({
+            fromStep: options.surgeIntervalAfter.fromStep,
+            range: intervalStepRangeForMean(config, options.surgeIntervalAfter.meanS),
+          });
     this.driftParams = Object.freeze({
       dt: config.RACE.DT_S,
       theta: config.DRIFT.THETA,
@@ -320,7 +346,15 @@ export class RaceEngine {
       // Ordre imposé et testé (P007) : le surge du pas est décidé **avant** la dérive, donc avant la
       // vitesse cible. Un surge qui démarre à ce pas en fait donc déjà partie, et un surge dont la
       // fin tombe sur ce pas n'en fait déjà plus partie.
-      character.surge = stepSurge(surgeState, surgeStream, this.surgeConfig, stepNumber);
+      character.surge = stepSurge(
+        surgeState,
+        surgeStream,
+        this.surgeConfig,
+        stepNumber,
+        this.surgeIntervalAfter !== undefined && stepNumber > this.surgeIntervalAfter.fromStep
+          ? this.surgeIntervalAfter.range
+          : undefined,
+      );
 
       const gaussian = gaussianFrom(stream);
       // Le bruit est dilaté **après** le tirage : aucun flux n'est consommé en plus, et un facteur de

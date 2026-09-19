@@ -27,6 +27,40 @@ export function computeTargetSpeed(character: CharacterState, config: GameConfig
 }
 
 /**
+ * Facteur multiplicatif d'une **forme de fin de course**, monté progressivement (mesure uniquement).
+ *
+ * `form` est un écart relatif constant propre à un personnage (`+0,08` = « 8 % plus vite que sa
+ * propre cible »). Le facteur vaut exactement `1` jusqu'à `fromStep` **inclus** — le pas qui atteint
+ * la borne ne subit donc rien — puis croît linéairement jusqu'à `1 + form` à `fullAtStep`, et reste
+ * à cette valeur ensuite. Exemple : `form = +0,08`, `fromStep` = 40 s, `fullAtStep` = 42 s donnent
+ * `+0 %` à 40 s, `+4 %` à 41 s, `+8 %` à 42 s et au-delà.
+ *
+ * Le facteur ne reçoit que le numéro du pas et la forme du personnage : il ne peut donc lire ni le
+ * rang, ni la distance, ni l'écart, et il n'est pas un rubber-band (toutes les formes sont de moyenne
+ * nulle et tirées indépendamment, aucune règle ne réagit à la position). Il multiplie la **vitesse
+ * cible** et non la position : l'effet passe donc toujours par la rampe d'accélération et de
+ * décélération de `integrateSpeed`, et par l'écrêtage `SPEED.MIN`/`SPEED.MAX`.
+ *
+ * Aucune fonction transcendante : une soustraction, une division et une multiplication, dont
+ * l'arrondi est exactement spécifié par ECMAScript.
+ */
+export function lateFormFactor(
+  form: number,
+  stepNumber: number,
+  fromStep: number,
+  fullAtStep: number,
+): number {
+  if (form === 0 || stepNumber <= fromStep) {
+    return 1;
+  }
+  if (fullAtStep <= fromStep) {
+    return 1 + form;
+  }
+  const progress = Math.min(1, (stepNumber - fromStep) / (fullAtStep - fromStep));
+  return 1 + form * progress;
+}
+
+/**
  * Fait évoluer la vitesse d'un pas, **progressivement** : jamais de saut instantané.
  *
  * La rampe est directionnelle (`approach`) — montée bornée par `MAX_ACCEL × DT`, descente bornée par

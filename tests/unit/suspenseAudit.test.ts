@@ -32,7 +32,12 @@ import { describe, expect, it } from 'vitest';
 
 import { CHARACTER_IDS } from '../../src/core/characters';
 import { FACT, GAME_CONFIG, RACE_CONFIG } from '../../src/core/config';
+import { RaceEngine } from '../../src/core/engine';
+import { selectParticipants } from '../../src/core/participants';
 import { computeRanks } from '../../src/core/ranking';
+import { forkStream } from '../../src/core/rng';
+import { normalizeSeed } from '../../src/core/seed';
+import { lateFormFactor } from '../../src/core/speedModel';
 import { intervalStepRange, intervalStepRangeForMean } from '../../src/core/surges';
 import { corpusSeeds } from '../../tools/balanceStats';
 import {
@@ -54,8 +59,13 @@ import {
   SURGE_INTERVAL_BASELINE_MEAN_S,
   SURGE_INTERVAL_CANDIDATE_MEAN_S,
   SURGE_INTERVAL_FROM_S,
+  LATE_FORM_AMPLITUDE,
+  LATE_FORM_FROM_S,
+  LATE_FORM_FULL_S,
+  LATE_FORM_STREAM_PREFIX,
   VISIBLE_LEADER_CHANGE_S,
   auditSuspenseRace,
+  buildLateFormComparisonJson,
   buildNoiseSweepJson,
   buildSurgeIntervalComparisonJson,
   buildSuspenseAuditJson,
@@ -64,6 +74,8 @@ import {
   firstDivergentStep,
   gapSummary,
   homogeneityTest,
+  lateFormStats,
+  lateFormValues,
   noiseScaleAfter,
   noiseSweepMetrics,
   parseSuspenseAuditArgs,
@@ -71,9 +83,11 @@ import {
   raceComebackFlags,
   rankVector,
   referenceChecks,
+  renderLateFormComparisonText,
   renderNoiseSweepText,
   renderSurgeIntervalComparisonText,
   renderSuspenseAuditText,
+  runLateFormComparison,
   runNoiseSweep,
   runSurgeIntervalComparison,
   stepsForSeconds,
@@ -1533,6 +1547,162 @@ describe('surges plus fréquents après 40 s', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// Candidat « forme de fin de course persistante » (mode expérimental)
+// ---------------------------------------------------------------------------------------------
+
+describe('forme de fin de course persistante ±8 %', () => {
+  const fromStep = stepsForSeconds(LATE_FORM_FROM_S);
+  const fullAtStep = stepsForSeconds(LATE_FORM_FULL_S);
+
+  it('monte progressivement de 0 % à 40 s jusqu’à 100 % à 42 s', () => {
+    expect(LATE_FORM_FROM_S).toBe(LEADER_BOUNDS_S[1]);
+    expect(LATE_FORM_FULL_S).toBe(LATE_FORM_FROM_S + 2);
+    expect(LATE_FORM_AMPLITUDE).toBe(0.08);
+
+    // Le pas qui atteint 40 s ne subit rien : l'identité jusqu'à 40 s incluse est exacte.
+    expect(lateFormFactor(0.08, fromStep, fromStep, fullAtStep)).toBe(1);
+    expect(lateFormFactor(0.08, fromStep - 1, fromStep, fullAtStep)).toBe(1);
+    // 41 s : la moitié de l'effet ; 42 s : l'effet complet.
+    expect(lateFormFactor(0.08, stepsForSeconds(41), fromStep, fullAtStep)).toBeCloseTo(1.04, 12);
+    expect(lateFormFactor(0.08, fullAtStep, fromStep, fullAtStep)).toBeCloseTo(1.08, 12);
+    // Puis constant jusqu'à l'arrivée.
+    expect(lateFormFactor(0.08, RACE_CONFIG.TOTAL_STEPS, fromStep, fullAtStep)).toBeCloseTo(1.08, 12);
+    // Symétrique : une forme négative freine exactement autant.
+    expect(lateFormFactor(-0.08, fullAtStep, fromStep, fullAtStep)).toBeCloseTo(0.92, 12);
+    // Une forme nulle est inerte, à tout pas.
+    expect(lateFormFactor(0, RACE_CONFIG.TOTAL_STEPS, fromStep, fullAtStep)).toBe(1);
+  });
+
+  it('tire une forme par personnage sur un flux dédié, dans les bornes', () => {
+    const seed = 'KR7Z8NAR';
+    const values = lateFormValues(seed, LATE_FORM_AMPLITUDE);
+
+    expect(values).toHaveLength(SUSPENSE_PLAYERS);
+    expect(lateFormValues(seed, LATE_FORM_AMPLITUDE)).toEqual(values);
+    for (const value of values) {
+      expect(Math.abs(value)).toBeLessThanOrEqual(LATE_FORM_AMPLITUDE);
+    }
+    // Six tirages indépendants : ils ne sont pas tous identiques, et changer de seed les change tous.
+    expect(new Set(values).size).toBeGreaterThan(1);
+    expect(lateFormValues('MFFX4731', LATE_FORM_AMPLITUDE)).not.toEqual(values);
+    // Le flux est bien distinct de ceux du moteur : la forme n'est pas corrélée à la dérive.
+    const drift = forkStream(normalizeSeed(seed), 'drift:c0');
+    const lateForm = forkStream(normalizeSeed(seed), `${LATE_FORM_STREAM_PREFIX}c0`);
+    expect(lateForm.next()).not.toBe(drift.next());
+  });
+
+  it('aligne les formes sur l’ordre des partants, qui est le roster à six', () => {
+    // C'est ce qui autorise l'outil à fournir les formes dans l'ordre de `CHARACTER_IDS`.
+    for (const seed of corpusSeeds(5)) {
+      expect(selectParticipants(normalizeSeed(seed), SUSPENSE_PLAYERS)).toEqual(CHARACTER_IDS);
+    }
+  });
+
+  it('ne change rien jusqu’à 40 s inclus et ne touche à rien d’autre', () => {
+    const seed = 'KR7Z8NAR';
+    const candidate = {
+      lateForm: { fromStep, fullAtStep, values: lateFormValues(seed, LATE_FORM_AMPLITUDE) },
+    };
+    const baseline = auditSuspenseRace(seed);
+    const variant = auditSuspenseRace(seed, candidate);
+
+    expect(variant.leadersAtBounds[0]).toBe(baseline.leadersAtBounds[0]);
+    expect(variant.leadersAtBounds[1]).toBe(baseline.leadersAtBounds[1]);
+    expect(variant.gapAtBoundsM[0]).toBe(baseline.gapAtBoundsM[0]);
+    expect(variant.gapAtBoundsM[1]).toBe(baseline.gapAtBoundsM[1]);
+
+    const divergent = firstDivergentStep(seed, candidate);
+    // Premier pas du levier : 2401, soit le premier pas **après** 40 s. Jamais 2400.
+    expect(divergent).toBe(fromStep + 1);
+  });
+
+  it('est inerte si les formes sont nulles, et déterministe sinon', () => {
+    const seed = 'KR7Z8NAR';
+    const zeros = {
+      lateForm: { fromStep, fullAtStep, values: new Array<number>(SUSPENSE_PLAYERS).fill(0) },
+    };
+    expect(firstDivergentStep(seed, zeros)).toBe(-1);
+    expect(auditSuspenseRace(seed, zeros)).toEqual(auditSuspenseRace(seed));
+
+    const candidate = {
+      lateForm: { fromStep, fullAtStep, values: lateFormValues(seed, LATE_FORM_AMPLITUDE) },
+    };
+    expect(auditSuspenseRace(seed, candidate)).toEqual(auditSuspenseRace(seed, candidate));
+    // Une forme par partant : un tableau de la mauvaise taille est refusé.
+    expect(() =>
+      new RaceEngine(
+        seed,
+        GAME_CONFIG,
+        { players: SUSPENSE_PLAYERS, lateForm: { fromStep, fullAtStep, values: [0.01] } },
+      ),
+    ).toThrow(RangeError);
+  });
+
+  it('compare production et candidat, et contrôle le biais des formes', () => {
+    const seeds = corpusSeeds(3);
+    const report = runLateFormComparison(seeds, { amplitude: LATE_FORM_AMPLITUDE });
+
+    expect(report.comparison.seeds).toBe(3);
+    expect(report.comparison.points).toHaveLength(2);
+    expect(report.comparison.fromS).toBe(LATE_FORM_FROM_S);
+    expect(report.fromStep).toBe(fromStep);
+    expect(report.fullAtStep).toBe(fullAtStep);
+    expect(report.amplitude).toBe(LATE_FORM_AMPLITUDE);
+
+    const [baseline, candidate] = report.comparison.points;
+    expect(baseline?.label).toBe('production');
+    expect(candidate?.label).toContain('±8 %');
+    expect(baseline?.metrics).toEqual(
+      noiseSweepMetrics(summarizeSuspenseAudit(seeds.map((seed) => auditSuspenseRace(seed)))),
+    );
+    for (const point of report.comparison.points) {
+      expect(point.inertness.divergentAtOrBeforeBound).toBe(0);
+      expect(point.metrics.winnerSharesPercent).toHaveLength(SUSPENSE_PLAYERS);
+    }
+    // Le levier ne peut agir qu'après 40 s : le premier pas divergent est 2401.
+    expect(candidate?.inertness.firstDivergentStepMin).toBe(fromStep + 1);
+    expect(baseline?.inertness.firstDivergentStepMin).toBe(-1);
+
+    // Contrôle de biais : six personnages, des bornes respectées, une moyenne globale proche de zéro.
+    expect(report.statsByCharacter.map((stats) => stats.id)).toEqual([...CHARACTER_IDS]);
+    expect(lateFormStats(seeds, LATE_FORM_AMPLITUDE).byCharacter).toEqual([...report.statsByCharacter]);
+    expect(lateFormStats(seeds, LATE_FORM_AMPLITUDE).pooledMean).toBe(report.pooledMean);
+    for (const stats of report.statsByCharacter) {
+      expect(stats.min).toBeGreaterThanOrEqual(-LATE_FORM_AMPLITUDE);
+      expect(stats.max).toBeLessThanOrEqual(LATE_FORM_AMPLITUDE);
+      expect(Math.abs(stats.mean)).toBeLessThan(LATE_FORM_AMPLITUDE / 2);
+    }
+    expect(Math.abs(report.pooledMean)).toBeLessThan(LATE_FORM_AMPLITUDE / 2);
+  });
+
+  it('rend un tableau avec les formes et un JSON sans constante modifiée', () => {
+    const report = runLateFormComparison(corpusSeeds(1), { amplitude: LATE_FORM_AMPLITUDE });
+    const text = renderLateFormComparisonText(report);
+
+    expect(text).toContain('forme de fin de course persistante ±8 %');
+    expect(text).toContain('leader à 40 s qui gagne');
+    expect(text).toContain('changement visible dans les 10 dernières secondes');
+    expect(text).toContain('5e/6e à 40 s → top 3');
+    expect(text).toContain('même leader 20/40/60');
+    expect(text).toContain('écart P1–P2 médian à l’arrivée');
+    expect(text).toContain('répartition des vainqueurs');
+    expect(text).toContain('Formes tirées sur le corpus');
+    expect(text).toContain('espérance théorique : 0,000 %');
+    expect(text).toContain('identité bit à bit jusqu’à 40 s');
+    expect(text).toContain('48–55 %');
+
+    const json = JSON.stringify(buildLateFormComparisonJson(report));
+    expect(json).toContain('chaos-race-late-form-comparison');
+    expect(json).toContain('"dedicatedStream":true');
+    expect(json).toContain('"appliesTo":"targetSpeed"');
+    expect(json).toContain('"productionConstantsChanged":false');
+    expect(json).toContain('"extraRngDraws":0');
+    expect(json).toContain('"zeroMean":true');
+    expect(json).not.toContain('undefined');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Ligne de commande
 // ---------------------------------------------------------------------------------------------
 
@@ -1614,6 +1784,33 @@ describe('ligne de commande', () => {
 
     expect(() => parseSuspenseAuditArgs(['--surge-interval-mean=0'])).toThrow(RangeError);
     expect(() => parseSuspenseAuditArgs(['--surge-interval-mean=abc'])).toThrow(RangeError);
+  });
+
+  it('active le mode forme de fin de course et lit son amplitude', () => {
+    const defaults = parseSuspenseAuditArgs(['--late-form']);
+    expect(defaults).not.toBe('help');
+    if (defaults === 'help') {
+      throw new Error('aide inattendue');
+    }
+    expect(defaults.lateForm).toBe(true);
+    expect(defaults.lateFormAmplitude).toBe(LATE_FORM_AMPLITUDE);
+    expect(defaults.sweep).toBe(false);
+    expect(defaults.surgeInterval).toBe(false);
+
+    // L'amplitude s'accepte en fraction comme en pourcentage.
+    const fraction = parseSuspenseAuditArgs(['--late-form-amplitude=0.05']);
+    const percent = parseSuspenseAuditArgs(['--late-form-amplitude=5']);
+    for (const options of [fraction, percent]) {
+      expect(options).not.toBe('help');
+      if (options === 'help') {
+        throw new Error('aide inattendue');
+      }
+      expect(options.lateForm).toBe(true);
+      expect(options.lateFormAmplitude).toBeCloseTo(0.05, 12);
+    }
+
+    expect(() => parseSuspenseAuditArgs(['--late-form-amplitude=0'])).toThrow(RangeError);
+    expect(() => parseSuspenseAuditArgs(['--late-form-amplitude=abc'])).toThrow(RangeError);
   });
 
   it('refuse une entrée invalide et répond à --help', () => {

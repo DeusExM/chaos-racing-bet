@@ -10,7 +10,7 @@ import { sortByRank } from './ranking';
 import type { RngStream } from './rng';
 import { forkStream } from './rng';
 import { normalizeSeed } from './seed';
-import { computeTargetSpeed, integratePosition, integrateSpeed } from './speedModel';
+import { computeTargetSpeed, integratePosition, integrateSpeed, lateFormFactor } from './speedModel';
 import type { SurgeParams, SurgeState, SurgeStepRange } from './surges';
 import { createSurgeState, intervalStepRangeForMean, stepSurge, surgeParams } from './surges';
 import { segmentElapsedS, segmentIndexAt } from './track';
@@ -139,6 +139,22 @@ export class RaceEngine {
     | undefined;
 
   /**
+   * Formes de fin de course de mesure, **alignées sur l'ordre des partants** (`state.characters`).
+   *
+   * `undefined` en production. Les valeurs sont **fournies** par l'appelant : le noyau ne tire rien
+   * lui-même, donc cette option ne consomme aucun tirage et ne peut décaler ni les dérives, ni les
+   * surges, ni les événements. Chaque forme multiplie la vitesse **cible** du personnage
+   * correspondant, progressivement entre `fromStep` et `fullAtStep` (voir `lateFormFactor`).
+   */
+  private readonly lateForm:
+    | {
+        readonly fromStep: number;
+        readonly fullAtStep: number;
+        readonly values: readonly number[];
+      }
+    | undefined;
+
+  /**
    * Un flux de dérive par personnage, créé **une seule fois** par course.
    *
    * C'est le point le plus facile à casser de tout le moteur : reconstruire ces flux à chaque pas
@@ -246,6 +262,13 @@ export class RaceEngine {
    * (`INTERVAL_MIN_S`) et la borne haute **dérivée** (`2 × moyenne − min`) sont conservées, donc la
    * garantie « un seul surge actif » tient toujours. Un intervalle tiré **avant** la borne n'est pas
    * retouché : le levier ne peut donc rien changer avant `fromStep`.
+   *
+   * `options.lateForm` n'existe lui aussi que pour la **mesure** : une forme relative par personnage
+   * (moyenne nulle sur le roster, une valeur par partant, dans l'ordre des partants), montée
+   * linéairement de `0 %` à `fromStep` jusqu'à `100 %` à `fullAtStep`, puis maintenue. Elle multiplie
+   * la vitesse **cible**, donc l'effet passe par les rampes existantes. Le noyau ne tire aucune
+   * valeur : c'est l'appelant qui fournit le tableau, ce qui garantit qu'aucun flux du moteur n'est
+   * décalé.
    */
   constructor(
     seed: string,
@@ -255,6 +278,11 @@ export class RaceEngine {
       readonly players?: number;
       readonly driftNoiseScale?: (stepNumber: number) => number;
       readonly surgeIntervalAfter?: { readonly fromStep: number; readonly meanS: number };
+      readonly lateForm?: {
+        readonly fromStep: number;
+        readonly fullAtStep: number;
+        readonly values: readonly number[];
+      };
     } = {},
   ) {
     validateConfig(config);
@@ -268,6 +296,14 @@ export class RaceEngine {
             fromStep: options.surgeIntervalAfter.fromStep,
             range: intervalStepRangeForMean(config, options.surgeIntervalAfter.meanS),
           });
+    this.lateForm =
+      options.lateForm === undefined
+        ? undefined
+        : Object.freeze({
+            fromStep: options.lateForm.fromStep,
+            fullAtStep: options.lateForm.fullAtStep,
+            values: Object.freeze([...options.lateForm.values]),
+          });
     this.driftParams = Object.freeze({
       dt: config.RACE.DT_S,
       theta: config.DRIFT.THETA,
@@ -279,6 +315,13 @@ export class RaceEngine {
     this.seedValue = normalizeSeed(seed);
     this.players = normalizeParticipants(options.players ?? DEFAULT_PARTICIPANTS);
     this.participants = selectParticipants(this.seedValue, this.players);
+    // Le contrôle d'alignement ne peut avoir lieu qu'une fois les partants connus : une forme est
+    // fournie par partant, dans l'ordre des partants.
+    if (this.lateForm !== undefined && this.lateForm.values.length !== this.participants.length) {
+      throw new RangeError(
+        `lateForm attend ${String(this.participants.length)} valeurs, une par partant (reçu : ${String(this.lateForm.values.length)}).`,
+      );
+    }
     this.surgeConfig = surgeParams(config);
     this.catalog = options.catalog ?? EVENT_CATALOG;
     this.eventConfig = eventParams(config, this.catalog);
@@ -366,8 +409,18 @@ export class RaceEngine {
         this.driftParams,
       );
 
+      // Forme de fin de course éventuelle (mesure uniquement) : un facteur multiplicatif sur la
+      // vitesse **cible**, jamais sur `x`. Absente, le facteur vaut exactement 1 et le pas est celui
+      // de production, au bit près.
+      const form = this.lateForm === undefined ? 0 : (this.lateForm.values[index] ?? 0);
+      const formFactor =
+        this.lateForm === undefined || form === 0
+          ? 1
+          : lateFormFactor(form, stepNumber, this.lateForm.fromStep, this.lateForm.fullAtStep);
+
       const targetV = computeTargetSpeed(character, this.config);
-      character.v = integrateSpeed(character.v, targetV, this.config, DT_S);
+      const modulatedV = formFactor === 1 ? targetV : targetV * formFactor;
+      character.v = integrateSpeed(character.v, modulatedV, this.config, DT_S);
       character.x = integratePosition(character.x, character.v, DT_S);
     }
 

@@ -39,6 +39,8 @@ import {
   DEFAULT_AUDIT_CORPUS,
   DEFAULT_SUSPENSE_SEEDS,
   DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS,
+  DRIFT_NOISE_SWEEP_FACTORS,
+  DRIFT_NOISE_SWEEP_FROM_S,
   FINAL_MARKS_S,
   FINAL_WINDOW_S,
   GAP_THRESHOLDS_M,
@@ -50,17 +52,23 @@ import {
   SUSPENSE_REFERENCES,
   VISIBLE_LEADER_CHANGE_S,
   auditSuspenseRace,
+  buildNoiseSweepJson,
   buildSuspenseAuditJson,
   characterTrajectory,
   conclusionLines,
+  firstDivergentStep,
   gapSummary,
   homogeneityTest,
+  noiseScaleAfter,
+  noiseSweepMetrics,
   parseSuspenseAuditArgs,
   quantile,
   raceComebackFlags,
   rankVector,
   referenceChecks,
+  renderNoiseSweepText,
   renderSuspenseAuditText,
+  runNoiseSweep,
   stepsForSeconds,
   summarizeSuspenseAudit,
   visibleSuspense,
@@ -1306,6 +1314,115 @@ describe('rapports', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// Sweep du bruit de dérive après 40 s (mode expérimental)
+// ---------------------------------------------------------------------------------------------
+
+describe('sweep du bruit de dérive', () => {
+  const fromStep = stepsForSeconds(DRIFT_NOISE_SWEEP_FROM_S);
+
+  it('n’amplifie rien avant la borne, et amplifie tout après', () => {
+    const scale = noiseScaleAfter(fromStep, 1.45);
+    expect(scale(1)).toBe(1);
+    expect(scale(fromStep - 1)).toBe(1);
+    // Le pas qui ATTEINT 40 s n'est pas amplifié : l'état publié au checkpoint reste celui du baseline.
+    expect(scale(fromStep)).toBe(1);
+    expect(scale(fromStep + 1)).toBe(1.45);
+    expect(scale(fromStep + 600)).toBe(1.45);
+  });
+
+  it('dilate le bruit déjà tiré sans consommer de tirage supplémentaire', () => {
+    const seed = 'KR7Z8NAR';
+    // Deux moteurs identiques ne divergent jamais.
+    expect(firstDivergentStep(seed)).toBe(-1);
+    // Un facteur de 1 est inerte : la course de mesure est exactement celle de production.
+    expect(firstDivergentStep(seed, () => 1)).toBe(-1);
+    expect(auditSuspenseRace(seed, { driftNoiseScale: () => 1 })).toEqual(auditSuspenseRace(seed));
+
+    // Avec un facteur réel, la divergence commence juste après la borne, jamais avant.
+    const divergent = firstDivergentStep(seed, noiseScaleAfter(fromStep, 1.45));
+    expect(divergent).toBeGreaterThan(fromStep);
+    expect(divergent).toBeLessThanOrEqual(fromStep + 2);
+  });
+
+  it('ne touche ni les rangs ni les écarts relevés à 40 s', () => {
+    const seed = 'KR7Z8NAR';
+    const baseline = auditSuspenseRace(seed);
+    const variant = auditSuspenseRace(seed, {
+      driftNoiseScale: noiseScaleAfter(fromStep, 1.45),
+    });
+
+    // Les bornes de 20 s et 40 s sont identiques ; le relevé de 50 s, lui, est après le levier.
+    expect(variant.leadersAtBounds[0]).toBe(baseline.leadersAtBounds[0]);
+    expect(variant.leadersAtBounds[1]).toBe(baseline.leadersAtBounds[1]);
+    expect(variant.gapAtBoundsM[0]).toBe(baseline.gapAtBoundsM[0]);
+    expect(variant.gapAtBoundsM[1]).toBe(baseline.gapAtBoundsM[1]);
+    expect(variant.gapAtMarksM[0]).toBeGreaterThanOrEqual(0);
+  });
+
+  it('produit un tableau par facteur, avec le contrôle d’innocuité', () => {
+    const seeds = corpusSeeds(2);
+    const report = runNoiseSweep(seeds, { factors: [1, 1.45] });
+
+    expect(report.seeds).toBe(2);
+    expect(report.fromS).toBe(DRIFT_NOISE_SWEEP_FROM_S);
+    expect(report.fromStep).toBe(fromStep);
+    expect(report.points).toHaveLength(2);
+    expect(report.factors).toEqual([1, 1.45]);
+
+    const [baseline, variant] = report.points;
+    expect(baseline?.factor).toBe(1);
+    expect(variant?.factor).toBe(1.45);
+
+    // Le point ×1,00 doit être exactement l'audit de production du même corpus.
+    const baselineMetrics = noiseSweepMetrics(
+      summarizeSuspenseAudit(seeds.map((seed) => auditSuspenseRace(seed))),
+    );
+    expect(baseline?.metrics).toEqual(baselineMetrics);
+
+    // Aucune course ne diverge à 40 s ou avant, pour aucun facteur.
+    for (const point of report.points) {
+      expect(point.inertness.seeds).toBe(2);
+      expect(point.inertness.fromStep).toBe(fromStep);
+      expect(point.inertness.divergentAtOrBeforeBound).toBe(0);
+      expect(point.metrics.winnerSharesPercent).toHaveLength(SUSPENSE_PLAYERS);
+      expect(point.metrics.gapAtFinishMedianM).toBeGreaterThanOrEqual(0);
+    }
+    expect(variant?.inertness.firstDivergentStepMin).toBeGreaterThan(fromStep);
+  });
+
+  it('rend un tableau lisible et un JSON sans constante de production modifiée', () => {
+    const report = runNoiseSweep(corpusSeeds(1), { factors: [1, 1.15] });
+    const text = renderNoiseSweepText(report);
+
+    expect(text).toContain('sweep du bruit de dérive');
+    expect(text).toContain('×1,00');
+    expect(text).toContain('×1,15');
+    expect(text).toContain('leader à 40 s qui gagne');
+    expect(text).toContain('leader à 40 s qui perd la tête après 50 s');
+    expect(text).toContain('changement visible dans les 10 dernières secondes');
+    expect(text).toContain('5e/6e à 40 s → top 3');
+    expect(text).toContain('5e/6e à 40 s → victoire');
+    expect(text).toContain('même leader 20/40/60');
+    expect(text).toContain('écart P1–P2 médian à l’arrivée');
+    expect(text).toContain('arrivée sous 15 m');
+    expect(text).toContain('répartition des vainqueurs');
+    expect(text).toContain('identité bit à bit jusqu’à 40 s');
+
+    const json = JSON.stringify(buildNoiseSweepJson(report));
+    expect(json).toContain('chaos-race-drift-noise-sweep');
+    expect(json).toContain('"productionConstantsChanged":false');
+    expect(json).toContain('"extraRngDraws":0');
+    expect(json).toContain('"rankIndependent":true');
+    expect(json).not.toContain('undefined');
+  });
+
+  it('compare les facteurs demandés dans l’ordre, baseline en tête', () => {
+    expect(DRIFT_NOISE_SWEEP_FACTORS).toEqual([1, 1.15, 1.3, 1.45]);
+    expect(DRIFT_NOISE_SWEEP_FROM_S).toBe(LEADER_BOUNDS_S[1]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Ligne de commande
 // ---------------------------------------------------------------------------------------------
 
@@ -1342,6 +1459,29 @@ describe('ligne de commande', () => {
     expect(options.jsonPath).toBe('x.json');
     expect(options.textPath).toBe('x.txt');
     expect(options.replayCheck).toBe(false);
+    expect(options.sweep).toBe(false);
+    expect(options.sweepFactors).toEqual(DRIFT_NOISE_SWEEP_FACTORS);
+  });
+
+  it('active le mode sweep et lit ses facteurs', () => {
+    const defaults = parseSuspenseAuditArgs(['--sweep']);
+    expect(defaults).not.toBe('help');
+    if (defaults === 'help') {
+      throw new Error('aide inattendue');
+    }
+    expect(defaults.sweep).toBe(true);
+    expect(defaults.sweepFactors).toEqual(DRIFT_NOISE_SWEEP_FACTORS);
+
+    const explicit = parseSuspenseAuditArgs(['--sweep-factors=1,1.2,1.5']);
+    expect(explicit).not.toBe('help');
+    if (explicit === 'help') {
+      throw new Error('aide inattendue');
+    }
+    expect(explicit.sweep).toBe(true);
+    expect(explicit.sweepFactors).toEqual([1, 1.2, 1.5]);
+
+    expect(() => parseSuspenseAuditArgs(['--sweep-factors=1,0'])).toThrow(RangeError);
+    expect(() => parseSuspenseAuditArgs(['--sweep-factors=abc'])).toThrow(RangeError);
   });
 
   it('refuse une entrée invalide et répond à --help', () => {

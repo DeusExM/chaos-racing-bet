@@ -199,6 +199,17 @@ export const DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS: VisibleSuspenseThresholds = Ob
 });
 
 /**
+ * Facteurs d'amplitude comparés par le sweep du bruit de dérive.
+ *
+ * `1` est le baseline de production : il ne doit rien changer, et l'outil le vérifie. Les autres
+ * dilatent le bruit **déjà tiré** à partir du premier pas qui suit 40 s.
+ */
+export const DRIFT_NOISE_SWEEP_FACTORS: readonly number[] = Object.freeze([1, 1.15, 1.3, 1.45]);
+
+/** Seconde à partir de laquelle le sweep dilate le bruit : la dernière borne de `LEADER_BOUNDS_S`. */
+export const DRIFT_NOISE_SWEEP_FROM_S = LEADER_BOUNDS_S[1] ?? 40;
+
+/**
  * Seuils d'écart P1–P2, en mètres, **pris dans le jeu** (voir l'en-tête) et du plus serré au plus
  * large. Ils servent deux fois : « les deux premiers sont encore proches » et « le leader avait une
  * avance significative ».
@@ -868,8 +879,24 @@ function topTwo(xs: readonly number[]): readonly [number, number] {
  * historique de taille `TOTAL_STEPS × 6`, réutilisé par les trajectoires ; c'est ce qui permet de
  * mesurer les remontées dans l'ordre du temps.
  */
-export function auditSuspenseRace(seed: string): SuspenseRaceAudit {
-  const engine = new RaceEngine(seed, GAME_CONFIG, { players: SUSPENSE_PLAYERS });
+export function auditSuspenseRace(
+  seed: string,
+  options: {
+    /**
+     * Facteur d'amplitude du bruit de dérive **déjà tiré**, par numéro de pas.
+     *
+     * Passe-plat vers l'option de mesure du noyau : l'outil ne modifie aucune constante de jeu, il
+     * demande au moteur de dilater un bruit existant. Absent, la course est celle de production.
+     */
+    readonly driftNoiseScale?: (stepNumber: number) => number;
+  } = {},
+): SuspenseRaceAudit {
+  const engine = new RaceEngine(seed, GAME_CONFIG, {
+    players: SUSPENSE_PLAYERS,
+    ...(options.driftNoiseScale === undefined
+      ? {}
+      : { driftNoiseScale: options.driftNoiseScale }),
+  });
   const ids = CHARACTER_IDS;
   const characters = ids.length;
   const slotOf = new Map<CharacterId, number>(ids.map((id, index) => [id, index]));
@@ -2417,6 +2444,293 @@ export function conclusionLines(summary: SuspenseAuditSummary): readonly string[
 }
 
 // ---------------------------------------------------------------------------------------------
+// Sweep du bruit de dérive après 40 s (mode expérimental)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Facteur d'amplitude du bruit de dérive : `1` jusqu'à la borne incluse, `factor` ensuite.
+ *
+ * Le pas qui **atteint** 40 s (`fromStep`) n'est pas amplifié : l'état publié au checkpoint de 40 s
+ * est donc, par construction, bit à bit celui du baseline. C'est ce que le sweep vérifie ensuite
+ * course par course, plutôt que de le supposer.
+ */
+export function noiseScaleAfter(fromStep: number, factor: number): (stepNumber: number) => number {
+  return (stepNumber: number): number => (stepNumber > fromStep ? factor : 1);
+}
+
+/**
+ * Premier pas où deux courses de la même seed divergent, en comparant `x`, `v` et `drift` des
+ * partants pas à pas. `-1` si elles restent identiques jusqu'à l'arrivée.
+ *
+ * La comparaison est **bit à bit** (`!==` sur des `number`) : elle ne tolère aucun écart, pas même
+ * un dernier bit. C'est la seule façon de prouver que le levier est inerte avant 40 s.
+ */
+export function firstDivergentStep(
+  seed: string,
+  driftNoiseScale?: (stepNumber: number) => number,
+): number {
+  const baseline = new RaceEngine(seed, GAME_CONFIG, { players: SUSPENSE_PLAYERS });
+  const variant = new RaceEngine(seed, GAME_CONFIG, {
+    players: SUSPENSE_PLAYERS,
+    ...(driftNoiseScale === undefined ? {} : { driftNoiseScale }),
+  });
+
+  let state = baseline.getState();
+  while (state.phase.kind !== 'finished') {
+    baseline.step();
+    variant.step();
+    state = baseline.getState();
+    const other = variant.getState();
+    for (let slot = 0; slot < state.characters.length; slot += 1) {
+      const left = state.characters[slot];
+      const right = other.characters[slot];
+      if (left === undefined || right === undefined) {
+        throw new RangeError(`Course sans personnage à l'index ${String(slot)}.`);
+      }
+      if (left.x !== right.x || left.v !== right.v || left.drift !== right.drift) {
+        return state.steps;
+      }
+    }
+  }
+  return -1;
+}
+
+/** Contrôle d'innocuité du levier : la variante doit être identique au baseline jusqu'à 40 s. */
+export interface NoiseSweepInertness {
+  readonly seeds: number;
+  /** Dernier pas non amplifié : `tSim = fromStep × DT`. */
+  readonly fromStep: number;
+  /** Courses dont la variante diverge du baseline **au plus tard** à ce pas (doit valoir `0`). */
+  readonly divergentAtOrBeforeBound: number;
+  /** Plus petit et plus grand premiers pas divergents observés (`-1` si aucune divergence). */
+  readonly firstDivergentStepMin: number;
+  readonly firstDivergentStepMax: number;
+}
+
+/** Les mesures comparées par le sweep, extraites d'une synthèse d'audit. */
+export interface NoiseSweepMetrics {
+  readonly leader40WinsPercent: number;
+  readonly leader40LosesLeadAfter50Percent: number;
+  readonly visibleChangeInFinalWindowPercent: number;
+  readonly at40FifthOrSixthToTop3Percent: number;
+  readonly at40FifthOrSixthToWinPercent: number;
+  readonly sameLeaderAllBoundsPercent: number;
+  readonly gapAtFinishMedianM: number;
+  readonly finishUnder15mPercent: number;
+  readonly winnerSharesPercent: readonly number[];
+}
+
+/** Un point du sweep : un facteur, ses mesures, et la preuve qu'il ne touche rien avant 40 s. */
+export interface NoiseSweepPoint {
+  readonly factor: number;
+  readonly metrics: NoiseSweepMetrics;
+  readonly inertness: NoiseSweepInertness;
+}
+
+/** Résultat complet du sweep. */
+export interface NoiseSweepReport {
+  readonly seeds: number;
+  readonly fromS: number;
+  readonly fromStep: number;
+  readonly factors: readonly number[];
+  readonly points: readonly NoiseSweepPoint[];
+  readonly elapsedMs: number;
+}
+
+/** Extrait les neuf mesures comparées d'une synthèse, sans recalculer quoi que ce soit. */
+export function noiseSweepMetrics(summary: SuspenseAuditSummary): NoiseSweepMetrics {
+  const finishIndex = Math.max(0, summary.gapThresholdsM.indexOf(FACT.CLOSE_RACE_MAX_GAP_M));
+  const finish = summary.finalSuspense.gapAtBounds[summary.finalSuspense.gapAtBounds.length - 1];
+  return Object.freeze({
+    leader40WinsPercent: summary.persistence.leader40EqualsWinnerPercent,
+    leader40LosesLeadAfter50Percent: summary.qualifiedComebacks.leader40LosesLeadAfter50Percent,
+    visibleChangeInFinalWindowPercent: summary.visibleChanges.visibleInFinalWindowPercent,
+    at40FifthOrSixthToTop3Percent: summary.qualifiedComebacks.at40FifthOrSixthToTop3Percent,
+    at40FifthOrSixthToWinPercent: summary.qualifiedComebacks.at40FifthOrSixthToWinPercent,
+    sameLeaderAllBoundsPercent: summary.persistence.sameLeaderAllBoundsPercent,
+    gapAtFinishMedianM: finish?.median ?? Number.NaN,
+    finishUnder15mPercent: summary.finalSuspense.photoAtFinishPercent[finishIndex] ?? Number.NaN,
+    winnerSharesPercent: Object.freeze([...summary.winnerShares.shares]),
+  });
+}
+
+/**
+ * Joue le sweep : pour chaque facteur, le corpus entier **et** le contrôle d'innocuité avant 40 s.
+ *
+ * Le contrôle d'innocuité rejoue deux moteurs en parallèle, seed par seed, et s'arrête au premier pas
+ * divergent : son coût reste donc celui des 40 premières secondes, pas celui de la course entière.
+ * Aucune constante de jeu n'est modifiée : le facteur n'existe que dans l'instance de mesure.
+ */
+export function runNoiseSweep(
+  seeds: readonly string[],
+  options: {
+    readonly factors?: readonly number[];
+    readonly fromS?: number;
+    readonly onPoint?: (index: number, total: number) => void;
+  } = {},
+): NoiseSweepReport {
+  const factors = options.factors ?? DRIFT_NOISE_SWEEP_FACTORS;
+  const fromS = options.fromS ?? DRIFT_NOISE_SWEEP_FROM_S;
+  const fromStep = stepsForSeconds(fromS);
+  const startedAt = performance.now();
+  const points: NoiseSweepPoint[] = [];
+
+  for (const [index, factor] of factors.entries()) {
+    const scale = noiseScaleAfter(fromStep, factor);
+    const races: SuspenseRaceAudit[] = [];
+    let divergentAtOrBeforeBound = 0;
+    let firstDivergentStepMin = -1;
+    let firstDivergentStepMax = -1;
+
+    for (const seed of seeds) {
+      races.push(auditSuspenseRace(seed, { driftNoiseScale: scale }));
+      const divergent = firstDivergentStep(seed, scale);
+      if (divergent > 0 && divergent <= fromStep) {
+        divergentAtOrBeforeBound += 1;
+      }
+      if (divergent > 0) {
+        if (firstDivergentStepMin < 0 || divergent < firstDivergentStepMin) {
+          firstDivergentStepMin = divergent;
+        }
+        if (divergent > firstDivergentStepMax) {
+          firstDivergentStepMax = divergent;
+        }
+      }
+    }
+
+    points.push(
+      Object.freeze({
+        factor,
+        metrics: noiseSweepMetrics(summarizeSuspenseAudit(races)),
+        inertness: Object.freeze({
+          seeds: seeds.length,
+          fromStep,
+          divergentAtOrBeforeBound,
+          firstDivergentStepMin,
+          firstDivergentStepMax,
+        }),
+      }),
+    );
+    options.onPoint?.(index + 1, factors.length);
+  }
+
+  return Object.freeze({
+    seeds: seeds.length,
+    fromS,
+    fromStep,
+    factors: Object.freeze([...factors]),
+    points: Object.freeze(points),
+    elapsedMs: performance.now() - startedAt,
+  });
+}
+
+/** Libellés des lignes du tableau de sweep, dans l'ordre d'affichage. */
+const NOISE_SWEEP_ROWS: readonly { readonly label: string; readonly pick: (m: NoiseSweepMetrics) => string }[] =
+  Object.freeze([
+    { label: 'leader à 40 s qui gagne', pick: (m) => percent(m.leader40WinsPercent) },
+    {
+      label: 'leader à 40 s qui perd la tête après 50 s',
+      pick: (m) => percent(m.leader40LosesLeadAfter50Percent),
+    },
+    {
+      label: 'changement visible dans les 10 dernières secondes',
+      pick: (m) => percent(m.visibleChangeInFinalWindowPercent),
+    },
+    { label: '5e/6e à 40 s → top 3', pick: (m) => percent(m.at40FifthOrSixthToTop3Percent) },
+    { label: '5e/6e à 40 s → victoire', pick: (m) => percent(m.at40FifthOrSixthToWinPercent) },
+    { label: 'même leader 20/40/60', pick: (m) => percent(m.sameLeaderAllBoundsPercent) },
+    { label: 'écart P1–P2 médian à l’arrivée', pick: (m) => `${decimal(m.gapAtFinishMedianM)} m` },
+    { label: 'arrivée sous 15 m', pick: (m) => percent(m.finishUnder15mPercent) },
+    {
+      label: 'répartition des vainqueurs (c0→c5)',
+      pick: (m) => m.winnerSharesPercent.map((share) => decimal(share, 1)).join(' / '),
+    },
+  ]);
+
+/** Rapport texte du sweep : un tableau facteur par colonne, mesure par ligne. */
+export function renderNoiseSweepText(report: NoiseSweepReport): string {
+  const lines: string[] = [];
+  lines.push(
+    `Chaos Race — sweep du bruit de dérive après ${decimal(report.fromS, 0)} s (courses à 6 coureurs)`,
+  );
+  lines.push(
+    `corpus : ${String(report.seeds)} seeds | bruit dilaté à partir du pas ${String(report.fromStep + 1)} ` +
+      `(tSim > ${decimal(report.fromS, 0)} s) | ${String(report.points.length)} variantes | ` +
+      `durée : ${decimal(report.elapsedMs / 1_000, 1)} s`,
+  );
+  lines.push(
+    'Levier : amplitude du bruit de dérive DÉJÀ TIRÉ, identique pour les six, sans tirage supplémentaire.',
+  );
+  lines.push('');
+
+  const headers = ['mesure', ...report.points.map((point) => `×${decimal(point.factor)}`)];
+  const rows = NOISE_SWEEP_ROWS.map((row) => [
+    row.label,
+    ...report.points.map((point) => row.pick(point.metrics)),
+  ]);
+  const widths = headers.map((header, column) =>
+    Math.max(header.length, ...rows.map((row) => (row[column] ?? '').length)),
+  );
+  const format = (row: readonly string[]): string =>
+    row.map((cell, column) => cell.padEnd(widths[column] ?? cell.length)).join('  ').trimEnd();
+  lines.push(format(headers));
+  for (const row of rows) {
+    lines.push(format(row));
+  }
+
+  lines.push('');
+  lines.push(
+    `identité bit à bit jusqu’à ${decimal(report.fromS, 0)} s (x, v et drift des six, pas à pas) :`,
+  );
+  for (const point of report.points) {
+    const inertness = point.inertness;
+    lines.push(
+      `  ×${decimal(point.factor)} : ${String(inertness.seeds - inertness.divergentAtOrBeforeBound)}/${String(inertness.seeds)} courses identiques | ` +
+        `premier pas divergent : ${inertness.firstDivergentStepMin < 0 ? 'aucun' : `${String(inertness.firstDivergentStepMin)} à ${String(inertness.firstDivergentStepMax)}`}` +
+        (inertness.divergentAtOrBeforeBound > 0
+          ? ` | ANOMALIE : ${String(inertness.divergentAtOrBeforeBound)} course(s) divergent à 40 s ou avant`
+          : ''),
+    );
+  }
+  lines.push('');
+  lines.push(
+    'Lecture : le baseline ×1,00 est la course de production ; les autres ne changent que l’amplitude ' +
+      'du bruit après 40 s. Aucune constante du jeu n’a été modifiée, et aucun mécanisme ne lit le rang.',
+  );
+  return lines.join('\n');
+}
+
+/** Rapport structuré du sweep, à clés ASCII. */
+export function buildNoiseSweepJson(report: NoiseSweepReport): unknown {
+  return {
+    tool: 'chaos-race-drift-noise-sweep',
+    scope: { players: SUSPENSE_PLAYERS, note: 'N=6 uniquement, mode expérimental' },
+    lever: {
+      kind: 'drift-noise-amplitude-after-bound',
+      fromS: report.fromS,
+      firstAmplifiedStep: report.fromStep + 1,
+      symmetric: true,
+      zeroMean: true,
+      rankIndependent: true,
+      extraRngDraws: 0,
+      productionConstantsChanged: false,
+    },
+    corpus: { seeds: report.seeds, prefix: DEFAULT_AUDIT_CORPUS, dtS: RACE_CONFIG.DT_S },
+    timing: { elapsedMs: Number(report.elapsedMs.toFixed(1)) },
+    factors: [...report.factors],
+    points: report.points.map((point) => ({
+      factor: point.factor,
+      metrics: {
+        ...point.metrics,
+        winnerSharesPercent: [...point.metrics.winnerSharesPercent],
+        gapAtFinishMedianM: Number(point.metrics.gapAtFinishMedianM.toFixed(4)),
+      },
+      inertness: { ...point.inertness },
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Ligne de commande
 // ---------------------------------------------------------------------------------------------
 
@@ -2428,6 +2742,9 @@ export interface SuspenseAuditCliOptions {
   readonly jsonPath: string;
   readonly textPath: string;
   readonly replayCheck: boolean;
+  /** Mode expérimental : sweep du bruit de dérive après 40 s au lieu de l'audit. */
+  readonly sweep: boolean;
+  readonly sweepFactors: readonly number[];
 }
 
 const AUDIT_HELP: readonly string[] = Object.freeze([
@@ -2442,6 +2759,8 @@ const AUDIT_HELP: readonly string[] = Object.freeze([
   `  --json=<chemin>              rapport structuré (défaut : ${DEFAULT_SUSPENSE_JSON})`,
   `  --text=<chemin>              rapport texte (défaut : ${DEFAULT_SUSPENSE_TEXT})`,
   '  --no-replay-check            saute le contrôle de reproductibilité bit à bit',
+  '  --sweep                      mode expérimental : sweep du bruit de dérive après 40 s',
+  `  --sweep-factors=<liste>      facteurs du sweep (défaut : ${DRIFT_NOISE_SWEEP_FACTORS.map((factor) => decimal(factor)).join(', ')})`,
   '  --help                       affiche cette aide',
   '',
 ]);
@@ -2454,6 +2773,8 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
   let jsonPath = DEFAULT_SUSPENSE_JSON;
   let textPath = DEFAULT_SUSPENSE_TEXT;
   let replayCheck = true;
+  let sweep = false;
+  let sweepFactors: readonly number[] = DRIFT_NOISE_SWEEP_FACTORS;
 
   const integer = (value: string, label: string): number => {
     const parsed = Number.parseInt(value, 10);
@@ -2461,6 +2782,16 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
       throw new RangeError(`${label} attend un entier ≥ 1 (reçu : ${value}).`);
     }
     return parsed;
+  };
+
+  const factors = (value: string): readonly number[] => {
+    const parsed = value.split(',').map((item) => Number(item.trim()));
+    if (parsed.length === 0 || parsed.some((factor) => !Number.isFinite(factor) || factor <= 0)) {
+      throw new RangeError(
+        `--sweep-factors attend une liste de facteurs > 0 séparés par des virgules (reçu : ${value}).`,
+      );
+    }
+    return Object.freeze(parsed);
   };
 
   for (const argument of argv) {
@@ -2491,13 +2822,31 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
       replayCheck = false;
       continue;
     }
+    if (argument === '--sweep') {
+      sweep = true;
+      continue;
+    }
+    if (argument.startsWith('--sweep-factors=')) {
+      sweepFactors = factors(argument.slice('--sweep-factors='.length));
+      sweep = true;
+      continue;
+    }
     if (argument === '--help' || argument === '-h') {
       return 'help';
     }
     throw new RangeError(`Argument inconnu : ${argument}.`);
   }
 
-  return Object.freeze({ seeds, reproducibilitySeeds, corpusPrefix, jsonPath, textPath, replayCheck });
+  return Object.freeze({
+    seeds,
+    reproducibilitySeeds,
+    corpusPrefix,
+    jsonPath,
+    textPath,
+    replayCheck,
+    sweep,
+    sweepFactors,
+  });
 }
 
 /** Résultat d'un lancement en ligne de commande. */
@@ -2534,6 +2883,32 @@ export function runSuspenseAuditWithReport(argv: readonly string[]): SuspenseAud
     `corpus « ${options.corpusPrefix} » : ${String(options.seeds)} seeds | ` +
       `première ${seeds[0] ?? '—'} | dernière ${seeds[seeds.length - 1] ?? '—'}`,
   );
+
+  if (options.sweep) {
+    // Mode expérimental : aucune constante de jeu n'est touchée, le facteur ne vit que dans les
+    // instances de mesure du sweep.
+    console.log(
+      `sweep du bruit de dérive après ${decimal(DRIFT_NOISE_SWEEP_FROM_S, 0)} s : ` +
+        options.sweepFactors.map((factor) => `×${decimal(factor)}`).join(' / '),
+    );
+    const sweep = runNoiseSweep(seeds, {
+      factors: options.sweepFactors,
+      onPoint: (index, total) => {
+        console.log(`  … variante ${String(index)}/${String(total)}`);
+      },
+    });
+    const text = renderNoiseSweepText(sweep);
+    console.log('');
+    console.log(text);
+    const anomaly = sweep.points.some((point) => point.inertness.divergentAtOrBeforeBound > 0);
+    return {
+      exitCode: anomaly ? 1 : 0,
+      text,
+      report: buildNoiseSweepJson(sweep),
+      jsonPath: options.jsonPath,
+      textPath: options.textPath,
+    };
+  }
 
   const startedAt = performance.now();
   const races = runSuspenseAudit(seeds, {

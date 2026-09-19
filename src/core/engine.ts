@@ -121,6 +121,14 @@ export class RaceEngine {
   private state: RaceState;
 
   /**
+   * Facteur d'amplitude du bruit de dérive, **pour la mesure uniquement** (voir le constructeur).
+   *
+   * `undefined` en production. Il ne reçoit que le numéro du pas : aucune règle ne peut donc dépendre
+   * du rang, de la distance ou de l'écart, et l'écrire ne consomme aucun tirage.
+   */
+  private readonly driftNoiseScale: ((stepNumber: number) => number) | undefined;
+
+  /**
    * Un flux de dérive par personnage, créé **une seule fois** par course.
    *
    * C'est le point le plus facile à casser de tout le moteur : reconstruire ces flux à chaque pas
@@ -208,15 +216,32 @@ export class RaceEngine {
    * `options.players` fixe l'**effectif** (3 à 6, `6` par défaut). Une valeur illisible retombe sur
    * `DEFAULT_PARTICIPANTS` plutôt que de lever : c'est un paramètre d'entrée, pas une constante de
    * jeu, et un effectif invalide ne doit jamais empêcher une course de démarrer.
+   *
+   * `options.driftNoiseScale` n'existe lui aussi que pour la **mesure** : il multiplie l'amplitude du
+   * bruit de dérive **déjà tiré**, sans consommer un seul tirage supplémentaire. Il reçoit le numéro
+   * du pas courant (base 1, comme `RaceState.steps` une fois le pas terminé) et rend un facteur.
+   * Absent — le cas de la production — le facteur vaut `1` et **aucune multiplication n'a lieu** :
+   * le noyau reste bit à bit celui de production. Un facteur `1` rendu par la fonction est traité de
+   * la même façon, pour que la mesure puisse le vérifier.
+   *
+   * Ce levier est symétrique (il s'applique à tous les partants de la même manière), de moyenne nulle
+   * (il ne fait que dilater un bruit centré) et **indépendant du rang** : la fonction ne reçoit que le
+   * numéro du pas, jamais une position, une distance ni un classement. Ce n'est donc ni un
+   * rubber-band ni un boost du dernier.
    */
   constructor(
     seed: string,
     config: GameConfig = GAME_CONFIG,
-    options: { readonly catalog?: readonly EventDefinition[]; readonly players?: number } = {},
+    options: {
+      readonly catalog?: readonly EventDefinition[];
+      readonly players?: number;
+      readonly driftNoiseScale?: (stepNumber: number) => number;
+    } = {},
   ) {
     validateConfig(config);
 
     this.config = config;
+    this.driftNoiseScale = options.driftNoiseScale;
     this.driftParams = Object.freeze({
       dt: config.RACE.DT_S,
       theta: config.DRIFT.THETA,
@@ -298,7 +323,14 @@ export class RaceEngine {
       character.surge = stepSurge(surgeState, surgeStream, this.surgeConfig, stepNumber);
 
       const gaussian = gaussianFrom(stream);
-      character.drift = stepOrnsteinUhlenbeck(character.drift, gaussian, this.driftParams);
+      // Le bruit est dilaté **après** le tirage : aucun flux n'est consommé en plus, et un facteur de
+      // 1 (ou l'absence de facteur) laisse le pas strictement identique à celui de production.
+      const noiseScale = this.driftNoiseScale === undefined ? 1 : this.driftNoiseScale(stepNumber);
+      character.drift = stepOrnsteinUhlenbeck(
+        character.drift,
+        noiseScale === 1 ? gaussian : gaussian * noiseScale,
+        this.driftParams,
+      );
 
       const targetV = computeTargetSpeed(character, this.config);
       character.v = integrateSpeed(character.v, targetV, this.config, DT_S);

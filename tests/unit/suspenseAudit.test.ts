@@ -19,7 +19,10 @@
  * 6. la **synthèse** refuse un corpus qui ne serait pas à six, et les pourcentages sont exacts sur un
  *    corpus construit ;
  * 7. la **conclusion** ne signale une anomalie que sur une anomalie structurelle réelle, et une
- *    comparaison aux références n'est concluante que sur le corpus de 10 000 seeds.
+ *    comparaison aux références n'est concluante que sur le corpus de 10 000 seeds ;
+ * 8. les métriques « **visibles** » de la passe exploratoire — un changement de tête qui tient une
+ *    seconde, un dernier rang tenu deux secondes — sont justes sur des historiques construits à la
+ *    main, et leur compte brut **concorde** avec le compteur pas-à-pas d'une course réelle.
  *
  * Aucune assertion ne porte sur une part mesurée à petit N : ces valeurs-là appartiennent au rapport
  * du corpus complet, pas à un test qui deviendrait instable (`AGENTS.md` §2).
@@ -35,14 +38,17 @@ import {
   COMEBACK_RANKS,
   DEFAULT_AUDIT_CORPUS,
   DEFAULT_SUSPENSE_SEEDS,
+  DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS,
   FINAL_MARKS_S,
   FINAL_WINDOW_S,
   GAP_THRESHOLDS_M,
   LAST_CHANGE_WINDOWS_S,
+  LAST_STREAK_S,
   LEADER_BOUNDS_S,
   LEADER_BOUND_LABELS,
   SUSPENSE_PLAYERS,
   SUSPENSE_REFERENCES,
+  VISIBLE_LEADER_CHANGE_S,
   auditSuspenseRace,
   buildSuspenseAuditJson,
   characterTrajectory,
@@ -55,10 +61,15 @@ import {
   rankVector,
   referenceChecks,
   renderSuspenseAuditText,
+  stepsForSeconds,
   summarizeSuspenseAudit,
+  visibleSuspense,
+  visibleSuspenseThresholdsFor,
   type CharacterTrajectory,
   type LeaderPersistence,
   type SuspenseRaceAudit,
+  type VisibleLeaderChangeMetrics,
+  type VisibleSuspense,
 } from '../../tools/suspenseAudit';
 
 // ---------------------------------------------------------------------------------------------
@@ -420,6 +431,354 @@ describe('course auditée', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// Métriques « visibles » (passe exploratoire)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Historique **explicite** : une permutation complète par pas, donnée slot par slot.
+ *
+ * `historyForSlot` ne pilote qu'un personnage à la fois ; les métriques « visibles » doivent
+ * contrôler simultanément qui mène (rang 1) et qui est dernier (rang 6), d'où ce constructeur — qui
+ * vérifie au passage que chaque pas est bien une permutation des six rangs.
+ */
+function historyFromRanks(ranksByStep: readonly (readonly number[])[]): number[] {
+  const characters = CHARACTER_IDS.length;
+  const expected = Array.from({ length: characters }, (_unused, index) => index + 1);
+  const history: number[] = [];
+  for (const ranks of ranksByStep) {
+    expect([...ranks].sort((left, right) => left - right)).toEqual(expected);
+    history.push(...ranks);
+  }
+  return history;
+}
+
+/** Permutation de référence : c0 mène, c5 est dernier. */
+const IDENTITY_RANKS: readonly number[] = [1, 2, 3, 4, 5, 6];
+/** c1 prend la tête, c0 recule d'un rang. */
+const SECOND_LEADS_RANKS: readonly number[] = [2, 1, 3, 4, 5, 6];
+
+describe('métriques « visibles » : seuils', () => {
+  it('convertit les durées en pas sans division flottante', () => {
+    expect(stepsForSeconds(1)).toBe(60);
+    expect(stepsForSeconds(2)).toBe(120);
+    expect(stepsForSeconds(60)).toBe(RACE_CONFIG.TOTAL_STEPS);
+  });
+
+  it('dérive ses seuils du jeu : 1 s de tête, 2 s au dernier rang, relevés à 40 s et 50 s', () => {
+    expect(VISIBLE_LEADER_CHANGE_S).toBe(1);
+    expect(LAST_STREAK_S).toBe(2);
+    expect(DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS.visibleLeaderChangeSteps).toBe(60);
+    expect(DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS.lastStreakSteps).toBe(120);
+    // L'index 0-based du premier pas à 40 s (tSim = (index + 1) × DT) vaut 2400 − 1.
+    expect(DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS.boundStep).toBe(stepsForSeconds(40) - 1);
+    expect(DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS.finalWindowStartStep).toBe(
+      stepsForSeconds(RACE_CONFIG.TOTAL_SIM_S - FINAL_WINDOW_S) - 1,
+    );
+  });
+
+  it('refuse un historique incohérent ou un relevé hors course', () => {
+    const history = historyFromRanks([IDENTITY_RANKS, IDENTITY_RANKS]);
+    const thresholds = visibleSuspenseThresholdsFor(2);
+    expect(() => visibleSuspense(history, 0, 6, thresholds)).toThrow(RangeError);
+    expect(() => visibleSuspense(history, 2, 1, thresholds)).toThrow(RangeError);
+    expect(() =>
+      visibleSuspense(history, 2, 6, { ...thresholds, boundStep: 2 }),
+    ).toThrow(RangeError);
+    expect(() =>
+      visibleSuspense(history, 2, 6, { ...thresholds, finalWindowStartStep: -1 }),
+    ).toThrow(RangeError);
+    // Aucun rang 1 au premier pas : l'historique ne décrit pas une course.
+    const headless = new Array<number>(2 * CHARACTER_IDS.length).fill(0);
+    expect(() => visibleSuspense(headless, 2, 6, thresholds)).toThrow(RangeError);
+  });
+});
+
+describe('métriques « visibles » : changements de leader', () => {
+  const thresholds = {
+    visibleLeaderChangeSteps: 3,
+    lastStreakSteps: 4,
+    boundStep: 4,
+    finalWindowStartStep: 8,
+  };
+
+  it('ne compte aucun changement quand la tête ne bouge pas', () => {
+    const history = historyFromRanks(Array.from({ length: 12 }, () => IDENTITY_RANKS));
+    const visible = visibleSuspense(history, 12, 6, thresholds);
+
+    expect(visible.changes.rawChanges).toBe(0);
+    expect(visible.changes.visibleChanges).toBe(0);
+    expect(visible.changes.microChanges).toBe(0);
+    expect(visible.changes.lastVisibleChangeStep).toBe(-1);
+    expect(visible.changes.visibleInFinalWindow).toBe(false);
+  });
+
+  it('retient un changement dont le nouveau leader tient 1 s pleine', () => {
+    // La tête change au pas 3 et ne bouge plus : le règne fait 9 pas, donc ≥ 3.
+    const history = historyFromRanks([
+      IDENTITY_RANKS,
+      IDENTITY_RANKS,
+      IDENTITY_RANKS,
+      ...Array.from({ length: 9 }, () => SECOND_LEADS_RANKS),
+    ]);
+    const visible = visibleSuspense(history, 12, 6, thresholds);
+
+    expect(visible.changes.rawChanges).toBe(1);
+    expect(visible.changes.visibleChanges).toBe(1);
+    expect(visible.changes.microChanges).toBe(0);
+    expect(visible.changes.lastVisibleChangeStep).toBe(3);
+    expect(visible.changes.visibleInFinalWindow).toBe(false);
+  });
+
+  it('classe en micro-changement un aller-retour plus court que la seconde', () => {
+    // La course s'arrête deux pas après la reprise de tête : le nouveau leader n'a pas été vu 1 s.
+    const history = historyFromRanks([
+      IDENTITY_RANKS,
+      IDENTITY_RANKS,
+      IDENTITY_RANKS,
+      SECOND_LEADS_RANKS,
+      SECOND_LEADS_RANKS,
+    ]);
+    const visible = visibleSuspense(history, 5, 6, {
+      ...thresholds,
+      boundStep: 2,
+      finalWindowStartStep: 3,
+    });
+
+    expect(visible.changes.rawChanges).toBe(1);
+    expect(visible.changes.visibleChanges).toBe(0);
+    expect(visible.changes.microChanges).toBe(1);
+    expect(visible.changes.visibleInFinalWindow).toBe(false);
+  });
+
+  it('compte le premier pas par rapport au leader initial, pas par rapport au vide', () => {
+    // À t = 0 les six coureurs sont à la même distance : l'égalité de départ est départagée par
+    // l'index, donc c0 est leader. c1 passe devant au premier pas, puis c0 reprend la tête : ce sont
+    // bien deux changements, même si l'historique seul ne montre qu'un aller-retour entre deux pas.
+    const history = historyFromRanks([
+      SECOND_LEADS_RANKS,
+      ...Array.from({ length: 11 }, () => IDENTITY_RANKS),
+    ]);
+    const withoutInitial = visibleSuspense(history, 12, 6, thresholds);
+    expect(withoutInitial.changes.rawChanges).toBe(1);
+
+    const withInitial = visibleSuspense(history, 12, 6, thresholds, 0);
+    expect(withInitial.changes.rawChanges).toBe(2);
+    // Le règne initial ne dure qu'une observation : il n'est pas un changement, et le suivant ne
+    // tient qu'un pas — seul le règne final dépasse le seuil de trois pas.
+    expect(withInitial.changes.visibleChanges).toBe(1);
+    expect(withInitial.changes.microChanges).toBe(1);
+  });
+
+  it('repère un changement visible dans la fenêtre finale seulement', () => {
+    const history = historyFromRanks([
+      ...Array.from({ length: 9 }, () => IDENTITY_RANKS),
+      ...Array.from({ length: 3 }, () => SECOND_LEADS_RANKS),
+    ]);
+    const visible = visibleSuspense(history, 12, 6, thresholds);
+
+    // Le règne fait exactement 3 pas : il compte, et il commence dans la fenêtre finale.
+    expect(visible.changes.visibleChanges).toBe(1);
+    expect(visible.changes.lastVisibleChangeStep).toBe(9);
+    expect(visible.changes.visibleInFinalWindow).toBe(true);
+  });
+});
+
+describe('métriques « visibles » : remontées qualifiées', () => {
+  const thresholds = {
+    visibleLeaderChangeSteps: 3,
+    lastStreakSteps: 4,
+    boundStep: 4,
+    finalWindowStartStep: 8,
+  };
+  /** c5 dernier aux pas 0..4, puis 2e — sans gagner. */
+  const comebackRanks: readonly number[] = [1, 6, 3, 4, 5, 2];
+  /** c5 dernier aux pas 0..4, puis vainqueur. */
+  const comebackWinRanks: readonly number[] = [2, 6, 3, 4, 5, 1];
+  /** c5 dernier aux pas 0..4, puis seulement 5e. */
+  const shallowComebackRanks: readonly number[] = [1, 6, 3, 4, 2, 5];
+
+  const withComeback = (tail: readonly number[]): number[] =>
+    historyFromRanks([
+      ...Array.from({ length: 5 }, () => IDENTITY_RANKS),
+      ...Array.from({ length: 7 }, () => tail),
+    ]);
+
+  it('compte une remontée « dernier ≥ 2 s puis top 3 sans gagner »', () => {
+    const visible = visibleSuspense(withComeback(comebackRanks), 12, 6, thresholds);
+
+    expect(visible.longestLastStreakSteps).toBeGreaterThanOrEqual(5);
+    expect(visible.heldLastTwoSeconds).toBe(true);
+    expect(visible.lastStreakToTop3WithoutWin).toBe(true);
+  });
+
+  it('ne compte pas la remontée de celui qui gagne', () => {
+    const visible = visibleSuspense(withComeback(comebackWinRanks), 12, 6, thresholds);
+
+    expect(visible.heldLastTwoSeconds).toBe(true);
+    expect(visible.lastStreakToTop3WithoutWin).toBe(false);
+  });
+
+  it('ne compte pas une remontée qui s’arrête au-delà du top 3', () => {
+    const visible = visibleSuspense(withComeback(shallowComebackRanks), 12, 6, thresholds);
+
+    expect(visible.heldLastTwoSeconds).toBe(true);
+    expect(visible.lastStreakToTop3WithoutWin).toBe(false);
+  });
+
+  it('exige une série de dernier rang assez longue', () => {
+    // c5 n'est dernier que trois pas (seuil : quatre), puis revient 2e — et personne d'autre ne
+    // reste dernier plus longtemps, la course s'arrêtant trois pas après.
+    const history = historyFromRanks([
+      IDENTITY_RANKS,
+      IDENTITY_RANKS,
+      IDENTITY_RANKS,
+      comebackRanks,
+      comebackRanks,
+      comebackRanks,
+    ]);
+    const visible = visibleSuspense(history, 6, 6, {
+      ...thresholds,
+      boundStep: 2,
+      finalWindowStartStep: 4,
+    });
+
+    expect(visible.longestLastStreakSteps).toBe(3);
+    expect(visible.heldLastTwoSeconds).toBe(false);
+    expect(visible.lastStreakToTop3WithoutWin).toBe(false);
+  });
+
+  it('mesure la plus longue série au dernier rang, tous personnages confondus', () => {
+    // c5 est dernier pendant tout le début, c0 prend sa place au pas 6.
+    const history = historyFromRanks([
+      ...Array.from({ length: 6 }, () => IDENTITY_RANKS),
+      ...Array.from({ length: 6 }, () => [6, 2, 3, 4, 5, 1]),
+    ]);
+    const visible = visibleSuspense(history, 12, 6, thresholds);
+
+    expect(visible.longestLastStreakSteps).toBe(6);
+  });
+});
+
+describe('métriques « visibles » : relevés à 40 s et après 50 s', () => {
+  const thresholds = {
+    visibleLeaderChangeSteps: 3,
+    lastStreakSteps: 4,
+    boundStep: 4,
+    finalWindowStartStep: 8,
+  };
+
+  const withRanksAtBound = (tail: readonly number[]): number[] =>
+    historyFromRanks([
+      ...Array.from({ length: 5 }, () => IDENTITY_RANKS),
+      ...Array.from({ length: 7 }, () => tail),
+    ]);
+
+  it('compte un 5e ou 6e à 40 s qui termine dans le top 3, puis qui gagne', () => {
+    const toTop3 = visibleSuspense(withRanksAtBound([1, 6, 3, 4, 5, 2]), 12, 6, thresholds);
+    expect(toTop3.at40FifthOrSixthToTop3).toBe(true);
+    expect(toTop3.at40FifthOrSixthToWin).toBe(false);
+
+    const toWin = visibleSuspense(withRanksAtBound([2, 6, 3, 4, 5, 1]), 12, 6, thresholds);
+    expect(toWin.at40FifthOrSixthToTop3).toBe(true);
+    expect(toWin.at40FifthOrSixthToWin).toBe(true);
+  });
+
+  it('ignore un 4e à 40 s et un 6e à 40 s qui reste derrière', () => {
+    const fourth = visibleSuspense(
+      historyFromRanks([
+        ...Array.from({ length: 5 }, () => [1, 2, 3, 6, 4, 5]),
+        ...Array.from({ length: 7 }, () => [1, 2, 3, 6, 4, 5]),
+      ]),
+      12,
+      6,
+      thresholds,
+    );
+    expect(fourth.at40FifthOrSixthToTop3).toBe(false);
+
+    const staysBehind = visibleSuspense(
+      historyFromRanks(Array.from({ length: 12 }, () => IDENTITY_RANKS)),
+      12,
+      6,
+      thresholds,
+    );
+    expect(staysBehind.at40FifthOrSixthToTop3).toBe(false);
+    expect(staysBehind.at40FifthOrSixthToWin).toBe(false);
+  });
+
+  it('repère le leader de 40 s qui perd la tête après 50 s', () => {
+    // c0 mène jusqu'au pas 8 inclus (donc encore en tête à 50 s), puis c1 prend la tête.
+    const late = visibleSuspense(
+      historyFromRanks([
+        ...Array.from({ length: 9 }, () => IDENTITY_RANKS),
+        ...Array.from({ length: 3 }, () => SECOND_LEADS_RANKS),
+      ]),
+      12,
+      6,
+      thresholds,
+    );
+    expect(late.leader40StillLeadsAt50).toBe(true);
+    expect(late.leader40LosesLeadAfter50).toBe(true);
+
+    // c0 perd la tête au pas 5, avant la fenêtre finale : ce n'est pas une perte « après 50 s ».
+    const early = visibleSuspense(
+      historyFromRanks([
+        ...Array.from({ length: 5 }, () => IDENTITY_RANKS),
+        ...Array.from({ length: 7 }, () => SECOND_LEADS_RANKS),
+      ]),
+      12,
+      6,
+      thresholds,
+    );
+    expect(early.leader40StillLeadsAt50).toBe(false);
+    expect(early.leader40LosesLeadAfter50).toBe(false);
+
+    // c0 ne lâche jamais la tête.
+    const solid = visibleSuspense(
+      historyFromRanks(Array.from({ length: 12 }, () => IDENTITY_RANKS)),
+      12,
+      6,
+      thresholds,
+    );
+    expect(solid.leader40StillLeadsAt50).toBe(true);
+    expect(solid.leader40LosesLeadAfter50).toBe(false);
+  });
+});
+
+describe('métriques « visibles » : cohérence avec une course réelle', () => {
+  it('relit dans l’historique le même nombre de changements que le suivi pas-à-pas', () => {
+    const race = auditSuspenseRace('KR7Z8NAR');
+
+    expect(race.leaderChangesConsistent).toBe(true);
+    expect(race.visible.changes.rawChanges).toBe(race.leaderChanges);
+    expect(race.visible.changes.visibleChanges).toBeLessThanOrEqual(race.leaderChanges);
+    expect(race.visible.changes.visibleChanges + race.visible.changes.microChanges).toBe(
+      race.leaderChanges,
+    );
+    expect(race.visible.changes.lastVisibleChangeStep).toBeLessThan(RACE_CONFIG.TOTAL_STEPS);
+    // « perd la tête après 50 s » implique d'être encore en tête à l'entrée de la fenêtre finale.
+    if (race.visible.leader40LosesLeadAfter50) {
+      expect(race.visible.leader40StillLeadsAt50).toBe(true);
+    }
+    // Gagner après avoir été 5e ou 6e à 40 s implique d'être revenu dans le top 3.
+    if (race.visible.at40FifthOrSixthToWin) {
+      expect(race.visible.at40FifthOrSixthToTop3).toBe(true);
+    }
+  });
+
+  it('qualifie les remontées de la course réelle par une durée', () => {
+    const races = corpusSeeds(6).map((seed) => auditSuspenseRace(seed));
+
+    for (const race of races) {
+      expect(race.visible.changes.visibleChanges).toBeLessThanOrEqual(race.leaderChanges);
+      expect(race.visible.longestLastStreakSteps).toBeGreaterThan(0);
+      expect(race.visible.heldLastTwoSeconds).toBe(
+        race.visible.longestLastStreakSteps >= DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS.lastStreakSteps,
+      );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Synthèse
 // ---------------------------------------------------------------------------------------------
 
@@ -440,6 +799,39 @@ function syntheticTrajectory(options: {
     wasLast: options.wasLast ?? false,
     bestRankAfterLastPlace: options.bestAfterLast ?? null,
     won: options.won ?? false,
+  };
+}
+
+/**
+ * Métriques « visibles » synthétiques : par défaut, aucun changement et personne ne bouge.
+ *
+ * Chaque champ peut être remplacé ; `changes.rawChanges` doit rester égal au `leaderChanges` de la
+ * course synthétique, sinon la cohérence interne est fausse et la synthèse signalerait une anomalie.
+ */
+function syntheticVisible(
+  overrides: Omit<Partial<VisibleSuspense>, 'changes'> & {
+    readonly changes?: Partial<VisibleLeaderChangeMetrics>;
+  } = {},
+): VisibleSuspense {
+  const { changes: changesOverride, ...rest } = overrides;
+  const changes: VisibleLeaderChangeMetrics = {
+    rawChanges: 0,
+    visibleChanges: 0,
+    microChanges: 0,
+    lastVisibleChangeStep: -1,
+    visibleInFinalWindow: false,
+    ...(changesOverride ?? {}),
+  };
+  return {
+    longestLastStreakSteps: 0,
+    heldLastTwoSeconds: false,
+    lastStreakToTop3WithoutWin: false,
+    at40FifthOrSixthToTop3: false,
+    at40FifthOrSixthToWin: false,
+    leader40LosesLeadAfter50: false,
+    leader40StillLeadsAt50: true,
+    ...rest,
+    changes,
   };
 }
 
@@ -480,6 +872,8 @@ function syntheticRace(overrides: Partial<SuspenseRaceAudit> = {}): SuspenseRace
     maxLeadWhileLeadingM: gap,
     comeback: raceComebackFlags(trajectories),
     trajectories,
+    visible: syntheticVisible(),
+    leaderChangesConsistent: true,
     rankVerified: true,
     fieldSizeOk: true,
     exactSteps: true,
@@ -687,7 +1081,74 @@ describe('synthèse d’un corpus', () => {
       finishedAtTotalSimS: true,
       rankVerifiedEverywhere: true,
       fieldSizeEverywhere: true,
+      leaderChangesConsistentEverywhere: true,
     });
+  });
+
+  it('agrège les changements visibles et les micro-changements', () => {
+    const races = [
+      syntheticRace({
+        seed: 'visible',
+        leaderChanges: 4,
+        visible: syntheticVisible({
+          changes: { rawChanges: 4, visibleChanges: 3, microChanges: 1 },
+        }),
+      }),
+      syntheticRace({
+        seed: 'micro',
+        leaderChanges: 2,
+        visible: syntheticVisible({
+          changes: { rawChanges: 2, visibleChanges: 0, microChanges: 2 },
+        }),
+      }),
+    ];
+    const summary = summarizeSuspenseAudit(races);
+
+    expect(summary.visibleChanges.rawMean).toBeCloseTo(3, 6);
+    expect(summary.visibleChanges.visibleMean).toBeCloseTo(1.5, 6);
+    expect(summary.visibleChanges.microMean).toBeCloseTo(1.5, 6);
+    // 3 changements visibles sur 6 changements bruts.
+    expect(summary.visibleChanges.visibleSharePercent).toBeCloseTo(50, 6);
+    expect(summary.visibleChanges.racesWithVisibleChangePercent).toBeCloseTo(50, 6);
+    expect(summary.visibleChanges.racesWithoutVisibleChangePercent).toBeCloseTo(50, 6);
+    expect(summary.visibleChanges.visibleInFinalWindowPercent).toBe(0);
+  });
+
+  it('agrège les remontées qualifiées par une durée', () => {
+    const races = [
+      syntheticRace({
+        seed: 'qualifiee',
+        visible: syntheticVisible({
+          longestLastStreakSteps: 300,
+          heldLastTwoSeconds: true,
+          lastStreakToTop3WithoutWin: true,
+          at40FifthOrSixthToTop3: true,
+          leader40LosesLeadAfter50: true,
+        }),
+      }),
+      syntheticRace({ seed: 'plate' }),
+    ];
+    const summary = summarizeSuspenseAudit(races);
+
+    expect(summary.qualifiedComebacks.heldLastTwoSecondsPercent).toBeCloseTo(50, 6);
+    expect(summary.qualifiedComebacks.longestLastStreakStepsMean).toBeCloseTo(150, 6);
+    expect(summary.qualifiedComebacks.longestLastStreakStepsMedian).toBeCloseTo(150, 6);
+    expect(summary.qualifiedComebacks.lastStreakToTop3WithoutWinPercent).toBeCloseTo(50, 6);
+    expect(summary.qualifiedComebacks.at40FifthOrSixthToTop3Percent).toBeCloseTo(50, 6);
+    expect(summary.qualifiedComebacks.at40FifthOrSixthToWinPercent).toBe(0);
+    expect(summary.qualifiedComebacks.leader40LosesLeadAfter50Percent).toBeCloseTo(50, 6);
+    // La course synthétique par défaut voit son leader de 40 s encore en tête à 50 s.
+    expect(summary.qualifiedComebacks.leader40StillLeadsAt50Percent).toBeCloseTo(100, 6);
+  });
+
+  it('signale un historique dont le compte brut diverge du compteur pas-à-pas', () => {
+    const summary = summarizeSuspenseAudit([
+      syntheticRace({ leaderChangesConsistent: false }),
+    ]);
+
+    expect(summary.corpus.leaderChangesConsistentEverywhere).toBe(false);
+    const lines = conclusionLines(summary);
+    expect(lines.join('\n')).toContain("relu dans l'historique diverge");
   });
 });
 
@@ -702,6 +1163,7 @@ describe('références de l’audit précédent', () => {
     // 8,193 est la moyenne du corpus de 10 000 seeds ; 8,308 (§13) est celle du sous-corpus de 1000.
     expect(SUSPENSE_REFERENCES.leaderChangesMean).toBeCloseTo(8.193, 6);
     expect(SUSPENSE_REFERENCES.leaderChangesMean).not.toBeCloseTo(8.308, 3);
+    expect(SUSPENSE_REFERENCES.leaderChangesMeanAt1000Seeds).toBeCloseTo(8.308, 6);
     // Les trois catégories de persistance couvrent tout le corpus.
     expect(
       SUSPENSE_REFERENCES.sameLeaderAllBoundsPercent +
@@ -726,10 +1188,30 @@ describe('références de l’audit précédent', () => {
       leader20EqualsWinnerPercent: 41.53,
     };
     const full = referenceChecks(persistence, SUSPENSE_REFERENCES.leaderChangesMean, SUSPENSE_REFERENCES.seeds);
-    expect(full.every((check) => check.comparable && check.reproduced)).toBe(true);
+    expect(full).toHaveLength(8);
+    // Chaque référence n'est comparable qu'à la taille de corpus où elle a été publiée.
+    const atTenThousand = full.filter((check) => check.comparable);
+    expect(atTenThousand).toHaveLength(7);
+    expect(atTenThousand.every((check) => check.reproduced)).toBe(true);
+    expect(full.find((check) => check.id === 'leader-changes-mean-1000')?.comparable).toBe(false);
     expect(full.map((check) => check.measured)).toContain('34,04 %');
     expect(full.map((check) => check.measured)).toContain('8,193');
-    expect(full).toHaveLength(7);
+
+    // Sur un corpus de 1 000 seeds, c'est la référence de 1 000 seeds qui devient comparable.
+    const atOneThousand = referenceChecks(
+      persistence,
+      SUSPENSE_REFERENCES.leaderChangesMeanAt1000Seeds,
+      1_000,
+    );
+    expect(atOneThousand.filter((check) => check.comparable).map((check) => check.id)).toEqual([
+      'leader-changes-mean-1000',
+    ]);
+    expect(
+      atOneThousand.find((check) => check.id === 'leader-changes-mean-1000')?.reproduced,
+    ).toBe(true);
+    expect(atOneThousand.find((check) => check.id === 'same-leader-all-bounds')?.comparable).toBe(
+      false,
+    );
 
     const partial = referenceChecks(persistence, SUSPENSE_REFERENCES.leaderChangesMean, 500);
     expect(partial.every((check) => !check.comparable && !check.reproduced)).toBe(true);
@@ -757,6 +1239,12 @@ describe('rapports', () => {
     expect(text).toContain('Renversements');
     expect(text).toContain('Suspense final');
     expect(text).toContain('cinq métriques');
+    expect(text).toContain('Brut contre visible');
+    expect(text).toContain('changements VISIBLES');
+    expect(text).toContain('micro-changements');
+    expect(text).toContain("dernier ≥ 2 s d'affilée puis top 3 SANS gagner");
+    expect(text).toContain('5e ou 6e au relevé de 40 s');
+    expect(text).toContain('perd la tête après 50 s');
     for (const label of LEADER_BOUND_LABELS) {
       expect(text).toContain(label);
     }
@@ -772,7 +1260,18 @@ describe('rapports', () => {
     expect(report).toContain('"players":6');
     expect(report).toContain('spotlight');
     expect(report).toContain(DEFAULT_AUDIT_CORPUS);
+    expect(report).toContain('visibleChanges');
+    expect(report).toContain('qualifiedComebacks');
+    expect(report).toContain('leaderChangesConsistentEverywhere');
     expect(report).not.toContain('undefined');
+  });
+
+  it('n’annonce des références reproduites que si une référence est comparable ici', () => {
+    // Sur un corpus d'une course, aucune référence n'est comparable : la conclusion ne doit pas
+    // prétendre les avoir reproduites.
+    const summary = summarizeSuspenseAudit([syntheticRace()]);
+    expect(summary.references.some((check) => check.comparable)).toBe(false);
+    expect(conclusionLines(summary)[0] ?? '').not.toContain('références reproduites');
   });
 
   it('ne signale une anomalie que sur une anomalie structurelle', () => {

@@ -146,6 +146,59 @@ export const LAST_CHANGE_WINDOWS_S: readonly number[] = Object.freeze([20, 10, 5
 export const COMEBACK_RANKS: readonly number[] = Object.freeze([3, 2, 1]);
 
 /**
+ * Durée minimale pendant laquelle un **nouveau** leader doit rester 1er pour que son changement de
+ * tête soit compté comme **visible**.
+ *
+ * C'est la réponse au « micro-changement » : un coureur qui reprend la tête pendant deux ou trois pas
+ * puis la reperd n'a produit aucun rebondissement perceptible — il a seulement franchi une égalité
+ * de hasard dans un peloton groupé. Un changement n'est retenu que si le nouveau leader tient le rang
+ * 1 pendant au moins une seconde **continue**.
+ */
+export const VISIBLE_LEADER_CHANGE_S = 1;
+
+/**
+ * Durée minimale passée au **dernier** rang pour qualifier une remontée « subie ».
+ *
+ * Un coureur qui n'est dernier que le temps d'un pas n'a rien vécu : pour parler de remontée, il faut
+ * qu'il ait été réellement distancé (deux secondes pleines), puis qu'il soit revenu.
+ */
+export const LAST_STREAK_S = 2;
+
+/**
+ * Convertit une durée simulée en nombre de pas, par arithmétique entière.
+ *
+ * `1 / RACE_CONFIG.DT_S` donnerait `60,00000000000001` : la division flottante est évitée ici, comme
+ * partout où le noyau convertit du temps.
+ */
+export function stepsForSeconds(seconds: number): number {
+  return Math.round((seconds * RACE_CONFIG.STEPS_PER_SEGMENT) / RACE_CONFIG.SEGMENT_DURATION_S);
+}
+
+/**
+ * Seuils des métriques « visibles », exprimés en **pas** pour être testables sur de petits
+ * historiques.
+ *
+ * Les index de pas sont ceux de l'historique des rangs, donc **0-based** : le pas d'index `k`
+ * correspond à `tSim = (k + 1) × DT_S`. Le premier pas à `40 s` est donc `steps−1` de `40 s`.
+ */
+export interface VisibleSuspenseThresholds {
+  readonly visibleLeaderChangeSteps: number;
+  readonly lastStreakSteps: number;
+  /** Index du pas relevé pour « à 40 s ». */
+  readonly boundStep: number;
+  /** Index du premier pas de la fenêtre finale (`50 s`). */
+  readonly finalWindowStartStep: number;
+}
+
+/** Seuils réels du jeu : 1 s de tête, 2 s au dernier rang, relevés à 40 s et 50 s. */
+export const DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS: VisibleSuspenseThresholds = Object.freeze({
+  visibleLeaderChangeSteps: stepsForSeconds(VISIBLE_LEADER_CHANGE_S),
+  lastStreakSteps: stepsForSeconds(LAST_STREAK_S),
+  boundStep: stepsForSeconds(LEADER_BOUNDS_S[1] ?? RACE_CONFIG.TOTAL_SIM_S) - 1,
+  finalWindowStartStep: stepsForSeconds(RACE_CONFIG.TOTAL_SIM_S - FINAL_WINDOW_S) - 1,
+});
+
+/**
  * Seuils d'écart P1–P2, en mètres, **pris dans le jeu** (voir l'en-tête) et du plus serré au plus
  * large. Ils servent deux fois : « les deux premiers sont encore proches » et « le leader avait une
  * avance significative ».
@@ -168,11 +221,11 @@ export const GAP_THRESHOLD_LABELS: readonly string[] = Object.freeze(
  * Ce sont des références de contrôle, pas des règles : l'outil vérifie qu'il rejoue le même monde.
  *
  * Les six premières sont les parts de persistance et de victoire relevées par `npm run balance:leaders`
- * sur les 10 000 seeds. La septième est la moyenne de changements de leader du **même** corpus
- * (`8,193`, dans le rapport de l'audit des leaders) — et non le `8,308` de `GAME_DESIGN.md` §13, qui
- * est la mesure du **sous-corpus de 1000 seeds** : confondre les deux ferait signaler une anomalie
- * inexistante. `8,193 × 10 000 = 81 930` changements : c'est un entier de courses, donc la moyenne se
- * compare au millième.
+ * sur les 10 000 seeds. Les deux dernières sont des moyennes de changements de leader, sur **deux**
+ * corpus de tailles différentes : `8,193` sur les 10 000 seeds (rapport de l'audit des leaders) et
+ * `8,308` sur le sous-corpus de 1 000 seeds (`GAME_DESIGN.md` §13). Une passe à 1 000 seeds doit donc
+ * reproduire la seconde, pas la première : chaque référence porte la taille de corpus où elle est
+ * valable, et une référence d'une autre taille est **indicative**, jamais une anomalie.
  */
 export interface SuspenseReferences {
   readonly seeds: number;
@@ -183,6 +236,8 @@ export interface SuspenseReferences {
   readonly leader40EqualsWinnerPercent: number;
   readonly leader20EqualsWinnerPercent: number;
   readonly leaderChangesMean: number;
+  /** Moyenne publiée sur le **sous-corpus de 1 000 seeds** (`GAME_DESIGN.md` §13) : `8,308`. */
+  readonly leaderChangesMeanAt1000Seeds: number;
 }
 
 export const SUSPENSE_REFERENCES: SuspenseReferences = Object.freeze({
@@ -194,6 +249,7 @@ export const SUSPENSE_REFERENCES: SuspenseReferences = Object.freeze({
   leader40EqualsWinnerPercent: 62.23,
   leader20EqualsWinnerPercent: 41.53,
   leaderChangesMean: 8.193,
+  leaderChangesMeanAt1000Seeds: 8.308,
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -381,6 +437,288 @@ export function raceComebackFlags(
   });
 }
 
+/**
+ * Métriques « visibles » d'un changement de leader.
+ *
+ * `rawChanges` est le compte brut (chaque transition du rang 1), `visibleChanges` ne retient que les
+ * changements dont le nouveau leader tient le rang 1 au moins `visibleLeaderChangeSteps` pas, et
+ * `microChanges` est la différence : les allers-retours que personne ne peut percevoir.
+ */
+export interface VisibleLeaderChangeMetrics {
+  readonly rawChanges: number;
+  readonly visibleChanges: number;
+  readonly microChanges: number;
+  /** Index du pas où le dernier changement **visible** a eu lieu ; `-1` si aucun. */
+  readonly lastVisibleChangeStep: number;
+  /** Un changement visible a-t-il eu lieu dans la fenêtre finale ? */
+  readonly visibleInFinalWindow: boolean;
+}
+
+/**
+ * Les cinq métriques de cette passe exploratoire, toutes lues sur l'**historique des rangs**.
+ *
+ * Elles sont volontairement calculées hors de la boucle de course, dans une fonction pure : c'est ce
+ * qui permet de les tester sur des historiques construits à la main, et donc de vérifier une
+ * définition (« visible », « reste 6e », « perd la tête après 50 s ») plutôt qu'un ordre de grandeur.
+ */
+export interface VisibleSuspense {
+  readonly changes: VisibleLeaderChangeMetrics;
+  /** Plus longue série continue au dernier rang, en pas (toutes places de dernier confondues). */
+  readonly longestLastStreakSteps: number;
+  /** Un personnage est-il resté dernier au moins `lastStreakSteps` pas d'affilée ? */
+  readonly heldLastTwoSeconds: boolean;
+  /** Ce personnage est-il ensuite remonté dans le top 3 **sans** gagner la course ? */
+  readonly lastStreakToTop3WithoutWin: boolean;
+  /** Un personnage 5e ou 6e au relevé de 40 s termine-t-il dans le top 3 ? */
+  readonly at40FifthOrSixthToTop3: boolean;
+  /** …et gagne-t-il ? */
+  readonly at40FifthOrSixthToWin: boolean;
+  /** Le leader de 40 s a-t-il perdu la tête **après** l'entrée dans la fenêtre finale ? */
+  readonly leader40LosesLeadAfter50: boolean;
+  /** Le leader de 40 s est-il encore en tête à l'entrée de la fenêtre finale ? */
+  readonly leader40StillLeadsAt50: boolean;
+}
+
+/** Index du pas où se trouve le porteur du rang 1, ou `-1` si l'historique n'en contient aucun. */
+function leaderSlotAt(history: RankHistory, step: number, characters: number): number {
+  for (let slot = 0; slot < characters; slot += 1) {
+    if (rankAt(history, step, slot, characters) === 1) {
+      return slot;
+    }
+  }
+  return -1;
+}
+
+/** Premier pas (index 0-based) dont le `tSim` atteint `seconds`, pour un historique donné. */
+function stepAtSeconds(seconds: number, steps: number): number {
+  const stepsPerSecond = steps / RACE_CONFIG.TOTAL_SIM_S;
+  return Math.max(0, Math.min(steps - 1, Math.ceil(seconds * stepsPerSecond) - 1));
+}
+
+/** Construit les seuils d'un historique de `steps` pas : utile aux tests sur de petits historiques. */
+export function visibleSuspenseThresholdsFor(
+  steps: number,
+  options: {
+    readonly visibleLeaderChangeS?: number;
+    readonly lastStreakS?: number;
+    readonly boundS?: number;
+    readonly finalWindowS?: number;
+  } = {},
+): VisibleSuspenseThresholds {
+  return Object.freeze({
+    visibleLeaderChangeSteps: Math.round(
+      (options.visibleLeaderChangeS ?? VISIBLE_LEADER_CHANGE_S) * (steps / RACE_CONFIG.TOTAL_SIM_S),
+    ),
+    lastStreakSteps: Math.round(
+      (options.lastStreakS ?? LAST_STREAK_S) * (steps / RACE_CONFIG.TOTAL_SIM_S),
+    ),
+    boundStep: stepAtSeconds(options.boundS ?? (LEADER_BOUNDS_S[1] ?? RACE_CONFIG.TOTAL_SIM_S), steps),
+    finalWindowStartStep: stepAtSeconds(
+      options.finalWindowS ?? RACE_CONFIG.TOTAL_SIM_S - FINAL_WINDOW_S,
+      steps,
+    ),
+  });
+}
+
+/**
+ * Calcule les cinq métriques « visibles » à partir de l'historique des rangs d'une course.
+ *
+ * Un **changement visible** est une transition du rang 1 suivie d'un règne d'au moins
+ * `visibleLeaderChangeSteps` pas. Un règne interrompu par l'arrivée ne compte que s'il atteint la
+ * durée : un coureur qui prend la tête à `59,5 s` n'a pas été vu devant une seconde entière.
+ *
+ * `initialLeaderSlot` est le leader à `t = 0`, avant le premier pas. Le fournir fait entrer cette
+ * observation dans le premier règne : le compte brut devient alors **exactement** celui du suivi
+ * pas-à-pas, qui part lui aussi du leader initial. Sans lui, seules les transitions internes à
+ * l'historique sont comptées.
+ *
+ * Une **remontée subie** est une série d'au moins `lastStreakSteps` pas au dernier rang, suivie d'un
+ * retour dans le top 3 (strictement après la série) sans victoire. Un coureur qui gagne après avoir
+ * été dernier ne compte pas : la question porte sur celui qui revient sans gagner.
+ *
+ * « 5e ou 6e à 40 s » se lit au pas `boundStep`, et « perd la tête après 50 s » se lit sur la
+ * **première** perte de tête consécutive à ce relevé : elle doit avoir lieu à un pas ≥
+ * `finalWindowStartStep`.
+ */
+export function visibleSuspense(
+  history: RankHistory,
+  steps: number,
+  characters: number,
+  thresholds: VisibleSuspenseThresholds = DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS,
+  initialLeaderSlot = -1,
+): VisibleSuspense {
+  if (steps < 1) {
+    throw new RangeError(`visibleSuspense : historique vide (steps = ${String(steps)}).`);
+  }
+  if (!Number.isInteger(characters) || characters < 2) {
+    throw new RangeError(`visibleSuspense : effectif invalide (${String(characters)}).`);
+  }
+  if (thresholds.boundStep < 0 || thresholds.boundStep >= steps) {
+    throw new RangeError(
+      `visibleSuspense : pas de relevé hors de l'historique (${String(thresholds.boundStep)} pour ${String(steps)} pas).`,
+    );
+  }
+  if (thresholds.finalWindowStartStep < 0 || thresholds.finalWindowStartStep >= steps) {
+    throw new RangeError(
+      `visibleSuspense : fenêtre finale hors de l'historique (${String(thresholds.finalWindowStartStep)} pour ${String(steps)} pas).`,
+    );
+  }
+  if (leaderSlotAt(history, 0, characters) < 0) {
+    throw new RangeError('visibleSuspense : aucun rang 1 au premier pas.');
+  }
+  if (initialLeaderSlot >= characters) {
+    throw new RangeError(
+      `visibleSuspense : leader initial hors effectif (${String(initialLeaderSlot)} pour ${String(characters)} personnages).`,
+    );
+  }
+
+  const lastRunStart = new Array<number>(characters).fill(-1);
+  const firstQualifiedEnd = new Array<number>(characters).fill(-1);
+
+  let rawChanges = 0;
+  let visibleChanges = 0;
+  let lastVisibleChangeStep = -1;
+  let visibleInFinalWindow = false;
+  let longestLastStreakSteps = 0;
+
+  // Le leader initial (`t = 0`) est une observation à part entière : quand il est fourni, le premier
+  // règne commence à l'index virtuel −1 et la durée d'un règne vaut toujours `longueur × DT`. C'est
+  // ce qui fait concorder exactement ce calcul avec le compteur de changements pas-à-pas.
+  let leader = initialLeaderSlot >= 0 ? initialLeaderSlot : leaderSlotAt(history, 0, characters);
+  let leaderRunStart = initialLeaderSlot >= 0 ? -1 : 0;
+  let leaderRunIndex = 0;
+
+  /** Clôt la série au dernier rang d'un personnage, si elle en était une. */
+  const closeLastRun = (slot: number, endStep: number): void => {
+    const start = lastRunStart[slot] ?? -1;
+    if (start < 0) {
+      return;
+    }
+    const length = endStep - start;
+    if (length > longestLastStreakSteps) {
+      longestLastStreakSteps = length;
+    }
+    // Seule la **première** série qualifiée compte : la question est « a-t-il été distancé, puis
+    // revenu ? », pas « a-t-il fini dernier ? ».
+    if (length >= thresholds.lastStreakSteps && (firstQualifiedEnd[slot] ?? -1) < 0) {
+      firstQualifiedEnd[slot] = endStep - 1;
+    }
+    lastRunStart[slot] = -1;
+  };
+
+  /** Clôt un règne de leader ; seuls les règnes nés d'un changement peuvent être « visibles ». */
+  const closeLeaderRun = (endStep: number): void => {
+    const length = endStep - leaderRunStart;
+    if (
+      leaderRunIndex >= 1 &&
+      length >= thresholds.visibleLeaderChangeSteps &&
+      leaderRunStart >= 0
+    ) {
+      visibleChanges += 1;
+      lastVisibleChangeStep = leaderRunStart;
+      if (leaderRunStart >= thresholds.finalWindowStartStep) {
+        visibleInFinalWindow = true;
+      }
+    }
+  };
+
+  for (let step = 0; step < steps; step += 1) {
+    for (let slot = 0; slot < characters; slot += 1) {
+      if (rankAt(history, step, slot, characters) === characters) {
+        if ((lastRunStart[slot] ?? -1) < 0) {
+          lastRunStart[slot] = step;
+        }
+      } else {
+        closeLastRun(slot, step);
+      }
+    }
+
+    if (step === 0 && initialLeaderSlot < 0) {
+      // Sans leader initial fourni, l'historique commence au premier pas : rien à comparer avant.
+      continue;
+    }
+    const current = leaderSlotAt(history, step, characters);
+    if (current !== leader) {
+      closeLeaderRun(step);
+      leader = current;
+      leaderRunStart = step;
+      leaderRunIndex += 1;
+      rawChanges += 1;
+    }
+  }
+
+  for (let slot = 0; slot < characters; slot += 1) {
+    closeLastRun(slot, steps);
+  }
+  closeLeaderRun(steps);
+
+  // « …puis remonte top 3 sans gagner » : meilleur rang STRICTEMENT après la série qualifiée.
+  let lastStreakToTop3WithoutWin = false;
+  for (let slot = 0; slot < characters; slot += 1) {
+    const end = firstQualifiedEnd[slot] ?? -1;
+    if (end < 0) {
+      continue;
+    }
+    let bestAfter = characters;
+    for (let step = end + 1; step < steps; step += 1) {
+      const rank = rankAt(history, step, slot, characters);
+      if (rank < bestAfter) {
+        bestAfter = rank;
+      }
+    }
+    if (bestAfter <= 3 && rankAt(history, steps - 1, slot, characters) !== 1) {
+      lastStreakToTop3WithoutWin = true;
+    }
+  }
+
+  let at40FifthOrSixthToTop3 = false;
+  let at40FifthOrSixthToWin = false;
+  for (let slot = 0; slot < characters; slot += 1) {
+    const at40 = rankAt(history, thresholds.boundStep, slot, characters);
+    if (at40 < 5) {
+      continue;
+    }
+    const finalRank = rankAt(history, steps - 1, slot, characters);
+    if (finalRank <= 3) {
+      at40FifthOrSixthToTop3 = true;
+    }
+    if (finalRank === 1) {
+      at40FifthOrSixthToWin = true;
+    }
+  }
+
+  const leaderAt40 = leaderSlotAt(history, thresholds.boundStep, characters);
+  const leader40StillLeadsAt50 =
+    leaderAt40 === leaderSlotAt(history, thresholds.finalWindowStartStep, characters);
+  // « perd la tête **après** 50 s » se lit sur la **première** perte de tête consécutive au relevé :
+  // un leader qui lâche la tête à 45 s ne l'a pas perdue « après 50 s », même s'il ne la reprend
+  // jamais. La décomposition avec `leader40StillLeadsAt50` est alors directe.
+  let leader40LosesLeadAfter50 = false;
+  for (let step = thresholds.boundStep + 1; step < steps; step += 1) {
+    if (leaderSlotAt(history, step, characters) !== leaderAt40) {
+      leader40LosesLeadAfter50 = step >= thresholds.finalWindowStartStep;
+      break;
+    }
+  }
+
+  return Object.freeze({
+    changes: Object.freeze({
+      rawChanges,
+      visibleChanges,
+      microChanges: rawChanges - visibleChanges,
+      lastVisibleChangeStep,
+      visibleInFinalWindow,
+    }),
+    longestLastStreakSteps,
+    heldLastTwoSeconds: longestLastStreakSteps >= thresholds.lastStreakSteps,
+    lastStreakToTop3WithoutWin,
+    at40FifthOrSixthToTop3,
+    at40FifthOrSixthToWin,
+    leader40LosesLeadAfter50,
+    leader40StillLeadsAt50,
+  });
+}
+
 /** Quantile d'une série, par interpolation linéaire — méthode identique au harnais d'équilibrage. */
 export function quantile(values: readonly number[], q: number): number {
   if (values.length === 0) {
@@ -480,6 +818,15 @@ export interface SuspenseRaceAudit {
   readonly maxLeadWhileLeadingM: number;
   readonly comeback: RaceComebackFlags;
   readonly trajectories: readonly CharacterTrajectory[];
+  /**
+   * Métriques « visibles » de cette passe exploratoire, calculées depuis l'historique des rangs.
+   *
+   * Elles ne remplacent pas les mesures brutes : elles les **qualifient** en exigeant une durée
+   * minimale (1 s de tête, 2 s au dernier rang).
+   */
+  readonly visible: VisibleSuspense;
+  /** Le compte brut relu dans l'historique concorde-t-il avec le compteur pas-à-pas ? */
+  readonly leaderChangesConsistent: boolean;
   /** Le rang 1 du suivi rapide concorde-t-il avec `computeRanks` aux trois bornes ? */
   readonly rankVerified: boolean;
   /** Le plateau fait-il bien six partants, et sont-ils le roster entier ? */
@@ -552,7 +899,8 @@ export function auditSuspenseRace(seed: string): SuspenseRaceAudit {
 
   let state = engine.getState();
   const initialDistances = state.characters.map((character) => character.x);
-  let previousLeaderSlot = leaderSlotOf(rankVector(initialDistances, ids));
+  const initialLeaderSlot = leaderSlotOf(rankVector(initialDistances, ids));
+  let previousLeaderSlot = initialLeaderSlot;
 
   while (state.phase.kind !== 'finished') {
     engine.step();
@@ -677,6 +1025,17 @@ export function auditSuspenseRace(seed: string): SuspenseRaceAudit {
     participants.every((id, index) => id === CHARACTER_IDS[index]) &&
     state.characters.length === SUSPENSE_PLAYERS;
 
+  // Les métriques « visibles » se relisent sur l'historique complet : le compte brut qu'elles
+  // produisent doit être **exactement** celui du suivi pas-à-pas, sinon l'historique est faux.
+  const visible = visibleSuspense(
+    history,
+    state.steps,
+    characters,
+    DEFAULT_VISIBLE_SUSPENSE_THRESHOLDS,
+    initialLeaderSlot,
+  );
+  const leaderChangesConsistent = visible.changes.rawChanges === leaderChanges;
+
   return Object.freeze({
     seed,
     players: participants.length,
@@ -697,6 +1056,8 @@ export function auditSuspenseRace(seed: string): SuspenseRaceAudit {
     maxLeadWhileLeadingM,
     comeback,
     trajectories: Object.freeze(trajectories),
+    visible,
+    leaderChangesConsistent,
     rankVerified,
     fieldSizeOk,
     exactSteps: state.steps === RACE_CONFIG.TOTAL_STEPS,
@@ -933,6 +1294,41 @@ export interface SuspenseCorpusCheck {
   readonly finishedAtTotalSimS: boolean;
   readonly rankVerifiedEverywhere: boolean;
   readonly fieldSizeEverywhere: boolean;
+  /** Le compte brut relu dans l'historique concorde-t-il avec le compteur pas-à-pas, partout ? */
+  readonly leaderChangesConsistentEverywhere: boolean;
+}
+
+/**
+ * Changements de leader **bruts** contre **visibles** — la comparaison qui dit si le chiffre brut
+ * mesure des rebondissements ou du bruit de peloton.
+ */
+export interface VisibleLeaderChangeStats {
+  readonly rawMean: number;
+  readonly visibleMean: number;
+  readonly microMean: number;
+  /** Part des changements bruts qui sont visibles (règne ≥ 1 s). */
+  readonly visibleSharePercent: number;
+  readonly racesWithVisibleChangePercent: number;
+  readonly racesWithoutVisibleChangePercent: number;
+  /** Part des courses avec au moins un changement visible dans les 10 dernières secondes. */
+  readonly visibleInFinalWindowPercent: number;
+}
+
+/** Remontées **qualifiées** par une durée, par opposition aux remontées brutes d'un seul pas. */
+export interface QualifiedComebackStats {
+  /** Au moins un personnage est resté dernier ≥ 2 s d'affilée. */
+  readonly heldLastTwoSecondsPercent: number;
+  readonly longestLastStreakStepsMean: number;
+  readonly longestLastStreakStepsMedian: number;
+  readonly longestLastStreakStepsP90: number;
+  /** Dernier ≥ 2 s d'affilée, puis top 3 **sans** gagner. */
+  readonly lastStreakToTop3WithoutWinPercent: number;
+  /** 5e ou 6e au relevé de 40 s, puis top 3 à l'arrivée. */
+  readonly at40FifthOrSixthToTop3Percent: number;
+  /** 5e ou 6e à 40 s, puis vainqueur. */
+  readonly at40FifthOrSixthToWinPercent: number;
+  readonly leader40LosesLeadAfter50Percent: number;
+  readonly leader40StillLeadsAt50Percent: number;
 }
 
 /** Une comparaison à une mesure publiée de l'audit précédent. */
@@ -981,6 +1377,10 @@ export interface SuspenseAuditSummary {
   readonly comebacks: ComebackStats;
   readonly upsets: UpsetStats;
   readonly finalSuspense: FinalSuspenseStats;
+  /** Brut contre visible : la mesure qui dit si le suspense brut est perceptible. */
+  readonly visibleChanges: VisibleLeaderChangeStats;
+  /** Remontées qualifiées par une durée minimale au dernier rang. */
+  readonly qualifiedComebacks: QualifiedComebackStats;
   readonly corpus: SuspenseCorpusCheck;
   readonly references: readonly SuspenseReferenceCheck[];
   readonly reproducibility: { readonly seeds: number; readonly identical: number };
@@ -1071,6 +1471,21 @@ export function summarizeSuspenseAudit(
   let fieldSizeEverywhere = true;
   let exactStepsEverywhere = true;
   let finishedAtTotalSimS = true;
+  let leaderChangesConsistentEverywhere = true;
+  const visibleChangeValues: number[] = [];
+  const microChangeValues: number[] = [];
+  const longestStreakValues: number[] = [];
+  let racesWithVisibleChange = 0;
+  let racesWithoutVisibleChange = 0;
+  let visibleInFinalWindow = 0;
+  let heldLastTwoSeconds = 0;
+  let lastStreakToTop3WithoutWin = 0;
+  let at40FifthOrSixthToTop3 = 0;
+  let at40FifthOrSixthToWin = 0;
+  let leader40LosesLeadAfter50 = 0;
+  let leader40StillLeadsAt50 = 0;
+  let rawChangesTotal = 0;
+  let visibleChangesTotal = 0;
   const seedSet = new Set<string>();
 
   for (const race of races) {
@@ -1197,10 +1612,45 @@ export function summarizeSuspenseAudit(
       }
     }
 
+    // Métriques « visibles » : brut contre qualifié par une durée.
+    rawChangesTotal += race.visible.changes.rawChanges;
+    visibleChangesTotal += race.visible.changes.visibleChanges;
+    visibleChangeValues.push(race.visible.changes.visibleChanges);
+    microChangeValues.push(race.visible.changes.microChanges);
+    longestStreakValues.push(race.visible.longestLastStreakSteps);
+    if (race.visible.changes.visibleChanges > 0) {
+      racesWithVisibleChange += 1;
+    } else {
+      racesWithoutVisibleChange += 1;
+    }
+    if (race.visible.changes.visibleInFinalWindow) {
+      visibleInFinalWindow += 1;
+    }
+    if (race.visible.heldLastTwoSeconds) {
+      heldLastTwoSeconds += 1;
+    }
+    if (race.visible.lastStreakToTop3WithoutWin) {
+      lastStreakToTop3WithoutWin += 1;
+    }
+    if (race.visible.at40FifthOrSixthToTop3) {
+      at40FifthOrSixthToTop3 += 1;
+    }
+    if (race.visible.at40FifthOrSixthToWin) {
+      at40FifthOrSixthToWin += 1;
+    }
+    if (race.visible.leader40LosesLeadAfter50) {
+      leader40LosesLeadAfter50 += 1;
+    }
+    if (race.visible.leader40StillLeadsAt50) {
+      leader40StillLeadsAt50 += 1;
+    }
+
     rankVerifiedEverywhere = rankVerifiedEverywhere && race.rankVerified;
     fieldSizeEverywhere = fieldSizeEverywhere && race.fieldSizeOk;
     exactStepsEverywhere = exactStepsEverywhere && race.exactSteps;
     finishedAtTotalSimS = finishedAtTotalSimS && race.tSim === RACE_CONFIG.TOTAL_SIM_S;
+    leaderChangesConsistentEverywhere =
+      leaderChangesConsistentEverywhere && race.leaderChangesConsistent;
   }
 
   const persistence: LeaderPersistence = Object.freeze({
@@ -1308,6 +1758,27 @@ export function summarizeSuspenseAudit(
       photoAtFinishPercent: Object.freeze(photoCounts.map((count) => percentOf(count, total))),
       leaderChangeInWindowPercent: percentOf(leaderChangeInWindow, total),
     }),
+    visibleChanges: Object.freeze({
+      rawMean: total === 0 ? 0 : rawChangesTotal / total,
+      visibleMean: meanOf(visibleChangeValues),
+      microMean: meanOf(microChangeValues),
+      visibleSharePercent:
+        rawChangesTotal === 0 ? 0 : percentOf(visibleChangesTotal, rawChangesTotal),
+      racesWithVisibleChangePercent: percentOf(racesWithVisibleChange, total),
+      racesWithoutVisibleChangePercent: percentOf(racesWithoutVisibleChange, total),
+      visibleInFinalWindowPercent: percentOf(visibleInFinalWindow, total),
+    }),
+    qualifiedComebacks: Object.freeze({
+      heldLastTwoSecondsPercent: percentOf(heldLastTwoSeconds, total),
+      longestLastStreakStepsMean: meanOf(longestStreakValues),
+      longestLastStreakStepsMedian: quantile(longestStreakValues, 0.5),
+      longestLastStreakStepsP90: quantile(longestStreakValues, 0.9),
+      lastStreakToTop3WithoutWinPercent: percentOf(lastStreakToTop3WithoutWin, total),
+      at40FifthOrSixthToTop3Percent: percentOf(at40FifthOrSixthToTop3, total),
+      at40FifthOrSixthToWinPercent: percentOf(at40FifthOrSixthToWin, total),
+      leader40LosesLeadAfter50Percent: percentOf(leader40LosesLeadAfter50, total),
+      leader40StillLeadsAt50Percent: percentOf(leader40StillLeadsAt50, total),
+    }),
     corpus: Object.freeze({
       seeds: total,
       distinctSeeds: seedSet.size,
@@ -1316,6 +1787,7 @@ export function summarizeSuspenseAudit(
       finishedAtTotalSimS,
       rankVerifiedEverywhere,
       fieldSizeEverywhere,
+      leaderChangesConsistentEverywhere,
     }),
     references: referenceComparisons,
     reproducibility: Object.freeze({ ...reproducibility }),
@@ -1342,6 +1814,9 @@ export function referenceChecks(
     readonly reference: number;
     readonly measured: number;
     readonly digits: number;
+    /** Taille du corpus sur lequel la valeur publiée a été mesurée. */
+    readonly referenceSeeds: number;
+    readonly percent: boolean;
   }[] = [
     {
       id: 'same-leader-all-bounds',
@@ -1349,6 +1824,8 @@ export function referenceChecks(
       reference: SUSPENSE_REFERENCES.sameLeaderAllBoundsPercent,
       measured: persistence.sameLeaderAllBoundsPercent,
       digits: 2,
+      referenceSeeds: SUSPENSE_REFERENCES.seeds,
+      percent: true,
     },
     {
       id: 'exactly-two-leaders',
@@ -1356,6 +1833,8 @@ export function referenceChecks(
       reference: SUSPENSE_REFERENCES.exactlyTwoLeadersPercent,
       measured: persistence.exactlyTwoLeadersPercent,
       digits: 2,
+      referenceSeeds: SUSPENSE_REFERENCES.seeds,
+      percent: true,
     },
     {
       id: 'three-leaders',
@@ -1363,6 +1842,8 @@ export function referenceChecks(
       reference: SUSPENSE_REFERENCES.threeDistinctLeadersPercent,
       measured: persistence.threeDistinctLeadersPercent,
       digits: 2,
+      referenceSeeds: SUSPENSE_REFERENCES.seeds,
+      percent: true,
     },
     {
       id: 'leader-20-eq-40',
@@ -1370,6 +1851,8 @@ export function referenceChecks(
       reference: SUSPENSE_REFERENCES.leader20EqualsLeader40Percent,
       measured: persistence.leader20EqualsLeader40Percent,
       digits: 2,
+      referenceSeeds: SUSPENSE_REFERENCES.seeds,
+      percent: true,
     },
     {
       id: 'leader-40-wins',
@@ -1377,6 +1860,8 @@ export function referenceChecks(
       reference: SUSPENSE_REFERENCES.leader40EqualsWinnerPercent,
       measured: persistence.leader40EqualsWinnerPercent,
       digits: 2,
+      referenceSeeds: SUSPENSE_REFERENCES.seeds,
+      percent: true,
     },
     {
       id: 'leader-20-wins',
@@ -1384,26 +1869,40 @@ export function referenceChecks(
       reference: SUSPENSE_REFERENCES.leader20EqualsWinnerPercent,
       measured: persistence.leader20EqualsWinnerPercent,
       digits: 2,
+      referenceSeeds: SUSPENSE_REFERENCES.seeds,
+      percent: true,
     },
     {
       id: 'leader-changes-mean',
-      label: 'Changements de leader (moyenne)',
+      label: `Changements de leader (moyenne, ${String(SUSPENSE_REFERENCES.seeds)} seeds)`,
       reference: SUSPENSE_REFERENCES.leaderChangesMean,
       measured: leaderChangesMean,
       digits: 3,
+      referenceSeeds: SUSPENSE_REFERENCES.seeds,
+      percent: false,
+    },
+    {
+      id: 'leader-changes-mean-1000',
+      label: 'Changements de leader (moyenne, 1 000 seeds)',
+      reference: SUSPENSE_REFERENCES.leaderChangesMeanAt1000Seeds,
+      measured: leaderChangesMean,
+      digits: 3,
+      referenceSeeds: 1_000,
+      percent: false,
     },
   ];
 
-  const comparable = seeds === SUSPENSE_REFERENCES.seeds;
   return Object.freeze(
     checks.map((check) => {
       // Les valeurs publiées sont arrondies : la comparaison se fait au dernier chiffre publié.
       const epsilon = check.digits === 2 ? 0.01 : 0.001;
+      const comparable = seeds === check.referenceSeeds;
+      const suffix = check.percent ? ' %' : '';
       return Object.freeze({
         id: check.id,
         label: check.label,
-        reference: `${decimal(check.reference, check.digits)}${check.digits === 2 ? ' %' : ''}`,
-        measured: `${decimal(check.measured, check.digits)}${check.digits === 2 ? ' %' : ''}`,
+        reference: `${decimal(check.reference, check.digits)}${suffix}`,
+        measured: `${decimal(check.measured, check.digits)}${suffix}`,
         comparable,
         reproduced: comparable && Math.abs(check.measured - check.reference) < epsilon,
       });
@@ -1564,6 +2063,17 @@ export function renderSuspenseAuditText(summary: SuspenseAuditSummary, elapsedMs
           `${String(windowS)} s : ${percent(summary.lastChange.withinWindowPercent[index] ?? 0)}`,
       ).join(' | '),
   );
+  const visibleChanges = summary.visibleChanges;
+  lines.push(
+    `changements VISIBLES (nouveau leader ≥ ${decimal(VISIBLE_LEADER_CHANGE_S, 0)} s) : moyenne ${decimal(visibleChanges.visibleMean, 3)} | ` +
+      `micro-changements (< ${decimal(VISIBLE_LEADER_CHANGE_S, 0)} s) : moyenne ${decimal(visibleChanges.microMean, 3)} | ` +
+      `part visible : ${percent(visibleChanges.visibleSharePercent)}`,
+  );
+  lines.push(
+    `courses avec au moins un changement visible : ${percent(visibleChanges.racesWithVisibleChangePercent)} | ` +
+      `sans aucun changement visible : ${percent(visibleChanges.racesWithoutVisibleChangePercent)} | ` +
+      `changement visible dans les ${String(FINAL_WINDOW_S)} dernières secondes : ${percent(visibleChanges.visibleInFinalWindowPercent)}`,
+  );
 
   lines.push('');
   lines.push('=== 3. Remontées ===');
@@ -1576,6 +2086,15 @@ export function renderSuspenseAuditText(summary: SuspenseAuditSummary, elapsedMs
     `remontée maximale d'une course : moyenne ${decimal(summary.comebacks.maxGainPlacesMean)} places | ` +
       `médiane ${decimal(summary.comebacks.maxGainPlacesMedian)} | p10 ${decimal(summary.comebacks.maxGainPlacesP10)} | ` +
       `p90 ${decimal(summary.comebacks.maxGainPlacesP90)} | moyenne par personnage ${decimal(summary.comebacks.maxGainPlacesPerCharacterMean)}`,
+  );
+  const qualified = summary.qualifiedComebacks;
+  lines.push(
+    `au moins un personnage dernier ≥ ${decimal(LAST_STREAK_S, 0)} s d'affilée : ${percent(qualified.heldLastTwoSecondsPercent)} | ` +
+      `plus longue série au dernier rang : moyenne ${decimal(qualified.longestLastStreakStepsMean, 1)} pas, ` +
+      `médiane ${decimal(qualified.longestLastStreakStepsMedian, 1)}, p90 ${decimal(qualified.longestLastStreakStepsP90, 1)}`,
+  );
+  lines.push(
+    `dernier ≥ ${decimal(LAST_STREAK_S, 0)} s d'affilée puis top 3 SANS gagner : ${percent(qualified.lastStreakToTop3WithoutWinPercent)}`,
   );
   lines.push(
     `${'personnage'.padEnd(11)}${'meilleur'.padStart(10)}${'pire'.padStart(8)}${'mené'.padStart(9)}${'dernier'.padStart(9)}` +
@@ -1610,6 +2129,14 @@ export function renderSuspenseAuditText(summary: SuspenseAuditSummary, elapsedMs
     `vainqueur ayant été 4e ou pire : ${percent(summary.upsets.winnerOutsideTop3Percent)} | ` +
       `5e ou pire : ${percent(summary.upsets.winnerOutsideTop4Percent)} | ` +
       `dernier : ${percent(summary.upsets.winnerLastPercent)}`,
+  );
+  lines.push(
+    `5e ou 6e au relevé de ${String(summary.boundsS[1] ?? 40)} s : termine top 3 ${percent(qualified.at40FifthOrSixthToTop3Percent)} | ` +
+      `gagne ${percent(qualified.at40FifthOrSixthToWinPercent)}`,
+  );
+  lines.push(
+    `leader de ${String(summary.boundsS[1] ?? 40)} s : encore en tête à ${String(summary.marksS[0] ?? 50)} s ${percent(qualified.leader40StillLeadsAt50Percent)} | ` +
+      `perd la tête après ${String(summary.marksS[0] ?? 50)} s ${percent(qualified.leader40LosesLeadAfter50Percent)}`,
   );
 
   lines.push('');
@@ -1647,7 +2174,28 @@ export function renderSuspenseAuditText(summary: SuspenseAuditSummary, elapsedMs
   );
 
   lines.push('');
-  lines.push('=== 6. Contrôles ===');
+  lines.push('=== 6. Brut contre visible (cœur de la passe exploratoire) ===');
+  lines.push(
+    `changements de leader : bruts ${decimal(summary.leaderChanges.mean, 3)}/course → visibles ` +
+      `${decimal(summary.visibleChanges.visibleMean, 3)}/course (${percent(summary.visibleChanges.visibleSharePercent)} des bruts) | ` +
+      `micro-changements (< ${decimal(VISIBLE_LEADER_CHANGE_S, 0)} s de tête) ${decimal(summary.visibleChanges.microMean, 3)}/course`,
+  );
+  lines.push(
+    `remontées : brutes (dernier → top 3) ${percent(summary.comebacks.toTop3Percent)} → qualifiées ` +
+      `(dernier ≥ ${decimal(LAST_STREAK_S, 0)} s d'affilée, puis top 3 sans gagner) ${percent(summary.qualifiedComebacks.lastStreakToTop3WithoutWinPercent)}`,
+  );
+  lines.push(
+    `tête à 40 s : vainqueur ${percent(summary.persistence.leader40EqualsWinnerPercent)} | encore en tête à ` +
+      `${String(summary.marksS[0] ?? 50)} s ${percent(summary.qualifiedComebacks.leader40StillLeadsAt50Percent)} | ` +
+      `perd la tête après ${String(summary.marksS[0] ?? 50)} s ${percent(summary.qualifiedComebacks.leader40LosesLeadAfter50Percent)}`,
+  );
+  lines.push(
+    `Lecture : ces lignes ne remplacent pas les mesures brutes, elles les qualifient par une durée. ` +
+      `Un changement ou une remontée qui ne dure pas n'est pas un rebondissement pour un spectateur.`,
+  );
+
+  lines.push('');
+  lines.push('=== 7. Contrôles ===');
   const corpus = summary.corpus;
   lines.push(
     `seeds ${String(corpus.seeds)} | distinctes ${String(corpus.distinctSeeds)} | effectif ${String(corpus.players)} partout : ` +
@@ -1656,24 +2204,36 @@ export function renderSuspenseAuditText(summary: SuspenseAuditSummary, elapsedMs
   );
   lines.push(
     `rangs vérifiés contre computeRanks aux bornes : ${corpus.rankVerifiedEverywhere ? 'oui' : 'NON'} | ` +
+      `changements bruts relus dans l'historique identiques au compteur pas-à-pas : ` +
+      `${corpus.leaderChangesConsistentEverywhere ? 'oui' : 'NON'} | ` +
       `reproductibilité bit à bit : ${String(summary.reproducibility.identical)}/${String(summary.reproducibility.seeds)}`,
   );
   if (summary.references.length > 0) {
+    // Chaque référence n'est comparable qu'à la taille de corpus où elle a été publiée : une passe à
+    // 1 000 seeds reproduit la référence de 1 000 seeds, pas celle de 10 000.
+    const comparable = summary.references.filter((check) => check.comparable);
     lines.push(
-      `reproduction de l'audit des leaders (corpus identique, 10 000 seeds) : ` +
-        (summary.references[0]?.comparable === true
-          ? summary.references
+      `reproduction des mesures publiées (corpus de ${String(summary.seeds)} seeds) : ` +
+        (comparable.length > 0
+          ? comparable
               .map(
                 (check) =>
                   `${check.label} ${check.measured}${check.reproduced ? ' = ' : ' ≠ '}${check.reference}`,
               )
               .join(' | ')
-          : 'non comparable sur ce sous-corpus (références mesurées sur 10 000 seeds)'),
+          : 'aucune référence publiée sur ce corpus'),
     );
+    const skipped = summary.references.length - comparable.length;
+    if (skipped > 0) {
+      lines.push(
+        `références non comparables ici : ${String(skipped)} mesure(s) publiée(s) sur un autre corpus ` +
+          `(indicatives, jamais des anomalies)`,
+      );
+    }
   }
 
   lines.push('');
-  lines.push('=== 7. Les cinq métriques les plus révélatrices ===');
+  lines.push('=== 8. Les cinq métriques les plus révélatrices ===');
   for (const metric of summary.spotlight) {
     lines.push(
       `${metric.label} : ${metric.value}   (audit précédent : ${metric.previousAudit}) — ${metric.note}`,
@@ -1773,6 +2333,14 @@ export function buildSuspenseAuditJson(summary: SuspenseAuditSummary, elapsedMs:
       ),
       finalWindowS: FINAL_WINDOW_S,
     },
+    visibleChanges: {
+      ...summary.visibleChanges,
+      visibleLeaderChangeS: VISIBLE_LEADER_CHANGE_S,
+    },
+    qualifiedComebacks: {
+      ...summary.qualifiedComebacks,
+      lastStreakS: LAST_STREAK_S,
+    },
     corpusChecks: { ...summary.corpus },
     references: summary.references.map((check) => ({ ...check })),
     reproducibility: { ...summary.reproducibility },
@@ -1803,6 +2371,11 @@ export function conclusionLines(summary: SuspenseAuditSummary): readonly string[
   if (!summary.corpus.rankVerifiedEverywhere) {
     anomalies.push('le suivi rapide des rangs diverge de computeRanks sur au moins une course');
   }
+  if (!summary.corpus.leaderChangesConsistentEverywhere) {
+    anomalies.push(
+      "le compte brut de changements de leader relu dans l'historique diverge du compteur pas-à-pas",
+    );
+  }
   if (summary.corpus.distinctSeeds !== summary.corpus.seeds) {
     anomalies.push('le corpus contient des seeds dupliquées');
   }
@@ -1825,9 +2398,9 @@ export function conclusionLines(summary: SuspenseAuditSummary): readonly string[
   if (anomalies.length === 0) {
     lines.push(
       'Aucune anomalie structurelle détectée : effectif six partout, pas et arrivée exacts, rangs vérifiés ' +
-        'contre le classement officiel, corpus distinct' +
+        'contre le classement officiel, compte brut de changements relu à l’identique, corpus distinct' +
         (summary.reproducibility.seeds > 0 ? ', reproductibilité intacte' : ', reproductibilité non vérifiée sur ce lancement') +
-        (summary.references[0]?.comparable === true ? ', références reproduites' : '') +
+        (summary.references.some((check) => check.comparable) ? ', références reproduites' : '') +
         '.',
     );
   } else {

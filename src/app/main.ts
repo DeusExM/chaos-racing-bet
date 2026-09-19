@@ -100,6 +100,26 @@ function querySelector(selector: string): HTMLElement | null {
 }
 
 /**
+ * Active ou désactive un contrôle par son **attribut HTML** `disabled`.
+ *
+ * Une apparence grisée ne suffit pas : un bouton qui « a l'air » inactif mais reste cliquable laisse
+ * passer un second départ. L'attribut, lui, retire réellement le contrôle de la tabulation et du
+ * clic, sans le retirer du flux — donc sans déplacer la mise en page.
+ */
+function setDisabled(element: HTMLElement | null, disabled: boolean): void {
+  if (element instanceof HTMLButtonElement && element.disabled !== disabled) {
+    element.disabled = disabled;
+  }
+}
+
+/** Écrit un libellé dans un élément, seulement s'il change : le DOM n'est pas réécrit à chaque frame. */
+function setTextIfChanged(element: HTMLElement | null, label: string): void {
+  if (element !== null && element.textContent !== label) {
+    element.textContent = label;
+  }
+}
+
+/**
  * Lit `localStorage` sans jamais lever.
  *
  * Certains navigateurs refusent l'accès à `localStorage` lui-même (iframe restreinte, réglage de
@@ -191,15 +211,15 @@ function bootstrap(): void {
 
   const startButton = elementById('start-button');
   const pauseButton = elementById('pause-button');
-  const replayButton = elementById('replay-button');
+  const resetButton = elementById('reset-button');
   if (startButton !== null) {
     startButton.textContent = UI_TEXT_FR.startButton;
   }
   if (pauseButton !== null) {
     pauseButton.textContent = UI_TEXT_FR.pauseButton;
   }
-  if (replayButton !== null) {
-    replayButton.textContent = UI_TEXT_FR.replayButton;
+  if (resetButton !== null) {
+    resetButton.textContent = UI_TEXT_FR.resetButton;
   }
 
   // Le panneau de réglages est créé par `app/`, qui possède déjà le DOM et la persistance : le rendu
@@ -254,7 +274,9 @@ function bootstrap(): void {
     ] as const) {
       const option = document.createElement('option');
       option.value = String(value);
-      option.textContent = label;
+      // Le mot accompagne le chiffre : en petit paysage le libellé général est masqué, et le
+      // contrôle doit rester compréhensible sans lui.
+      option.textContent = `${label} ${UI_TEXT_FR.playersOptionSuffix}`;
       playersSelect.append(option);
     }
     playersSelect.value = String(pendingPlayers);
@@ -267,10 +289,10 @@ function bootstrap(): void {
    * Applique un nouveau nombre de coureurs.
    *
    * **Avant** toute course (`idle`), le choix prend effet immédiatement : « Lancer » aligne donc bien
-   * l'effectif demandé, et l'URL décrit déjà la course à venir. **Pendant** une course, il est
-   * seulement mémorisé : une course lancée ne change jamais d'effectif, et le choix s'appliquera à la
-   * prochaine (« Rejouer », « Nouvelle course »). Après l'arrivée, le classement affiché est conservé
-   * tel quel — l'écran d'arrivée n'est pas escamoté par un changement de réglage.
+   * l'effectif demandé, et l'URL décrit déjà la course à venir. **Pendant** une course, le contrôle est
+   * désactivé (voir `syncPlayersControl`) : l'effectif ne peut donc pas être changé sous une course en
+   * cours, et il n'existe plus de cas ambigu où le sélecteur afficherait 4 alors que le moteur aligne
+   * encore 6 partants.
    */
   function changePlayers(raw: string): void {
     const next = normalizeParticipants(raw);
@@ -286,21 +308,74 @@ function bootstrap(): void {
   }
 
   /**
-   * Aligne le contrôle sur la phase réelle : l'effectif n'est modifiable qu'avant une course.
+   * Aligne le contrôle sur la phase réelle : l'effectif n'est modifiable qu'en `idle`.
    *
-   * Pendant une course, la liste est **désactivée** — un réglage qui n'aurait aucun effet immédiat
-   * serait trompeur. Le choix reste mémorisé, et redevient modifiable à l'arrivée.
+   * C'est **exactement** la règle de « Lancer » : dès que la course est engagée (compte à rebours,
+   * course, pause, pause de checkpoint) ou terminée, le choix est figé. Aucun cas particulier pour
+   * `finished` : une course terminée reste la course qui vient d'être jouée, et changer l'effectif
+   * pendant que son classement est affiché ferait diverger le sélecteur du moteur — précisément le
+   * bug corrigé ici. Il faut donc passer par « Réinitialiser ».
    */
   function syncPlayersControl(): void {
     if (!(playersSelect instanceof HTMLSelectElement)) {
       return;
     }
-    const phase = simulation.phase;
-    const locked = phase !== 'idle' && phase !== 'finished';
-    playersSelect.disabled = locked;
-    if (!locked) {
+    const unlocked = simulation.phase === 'idle';
+    playersSelect.disabled = !unlocked;
+    if (unlocked) {
       playersSelect.value = String(pendingPlayers);
     }
+  }
+
+  /**
+   * Garantit que le moteur aligne bien l'effectif **affiché** avant tout départ.
+   *
+   * C'est la correction structurelle du bug « 4 sélectionné → 6 lancés » : un démarrage ne peut plus
+   * se contenter de supposer que le moteur est déjà à jour. Si les deux divergent, la course `idle`
+   * est reconstruite avec le bon nombre — même seed, donc même identité de course — avant que
+   * `start()` ne soit appelé. Le choix affiché et l'effectif réellement lancé ne peuvent donc plus
+   * différer, quel que soit l'enchaînement de clics.
+   */
+  function ensurePendingPlayers(): void {
+    if (simulation.players === pendingPlayers) {
+      return;
+    }
+    simulation.restart(simulation.seed, pendingPlayers);
+    writeRaceToUrl(simulation.seed, pendingPlayers);
+    commentary.reset(simulation.view.seedValue);
+  }
+
+  /**
+   * Aligne les trois commandes sur la phase réelle de la course.
+   *
+   * | phase | Lancer | Pause/Reprendre | Réinitialiser |
+   * |---|---|---|---|
+   * | `idle` | actif | inactif | actif |
+   * | `countdown`, `running`, `userPaused` | inactif | actif | actif |
+   * | `checkpointPause`, `finished` | inactif | inactif | actif |
+   *
+   * « Réinitialiser » reste disponible en **permanence** : c'est la sortie rapide d'une course, et le
+   * joueur ne doit jamais avoir à attendre l'arrivée. Les deux autres suivent exactement ce que
+   * `RaceSimulation` sait faire : `start()` ne démarre que depuis `idle`, `toggleUserPause()` n'a
+   * aucun effet hors `countdown`/`running`/`userPaused`.
+   *
+   * L'état est porté par le **véritable attribut HTML `disabled`**, jamais par une apparence seule :
+   * le bouton reste à sa place (aucun déplacement de mise en page), mais il est réellement
+   * inatteignable au clic, au doigt comme au clavier. La mise en forme correspondante vit dans
+   * `styles.css` (grisé, opacité réduite, curseur non interactif).
+   */
+  function syncControls(): void {
+    const phase = simulation.phase;
+    const paused = phase === 'userPaused';
+    // Une pause de checkpoint est une pause du **noyau** : le MJ ne peut pas la reprendre à la main,
+    // donc « Pause » n'a rien à y faire.
+    const pauseAvailable = phase === 'countdown' || phase === 'running' || paused;
+
+    setDisabled(startButton, phase !== 'idle');
+    setDisabled(pauseButton, !pauseAvailable);
+    setDisabled(resetButton, false);
+
+    setTextIfChanged(pauseButton, paused ? UI_TEXT_FR.resumeButton : UI_TEXT_FR.pauseButton);
   }
 
   // Écran de rotation (correction iPhone ciblée) : son texte appartient à `app/`, comme tous les
@@ -348,6 +423,7 @@ function bootstrap(): void {
     allowsGameplay: () => gameplayAllowed,
     onPhase: () => {
       syncPlayersControl();
+      syncControls();
     },
     finishActions: {
       replaySameSeed: () => {
@@ -396,19 +472,45 @@ function bootstrap(): void {
   }
 
   // « Lancer » démarre la course : `RaceSimulation` gère elle-même le compte à rebours réel.
+  //
+  // Avant de démarrer, l'effectif **affiché** est appliqué au moteur s'il en divergeait (voir
+  // `ensurePendingPlayers`) : il est donc structurellement impossible d'afficher 4 dans le sélecteur
+  // et de lancer 6 coureurs. `start()` ne fait plus rien depuis une autre phase que `idle`, donc un
+  // clic sur un bouton encore actif ne peut jamais relancer une course par surprise.
   startButton?.addEventListener('click', () => {
+    ensurePendingPlayers();
     simulation.start();
   });
 
-  // « Rejouer » tire une **nouvelle** seed et relance immédiatement une course (passe de finition 2D).
-  //
-  // C'est le bouton principal de la barre de commandes : un clic doit donner une course différente, et
-  // non rejouer la précédente. Il emprunte exactement le même chemin que le bouton « Nouvelle course »
-  // de l'écran d'arrivée — un seul tirage de seed dans tout le projet, une seule séquence de remise à
-  // zéro — donc rien n'est dupliqué. Le bouton explicite « Rejouer la même seed » de l'écran d'arrivée,
-  // lui, garde son sens et continue d'appeler `startSameSeedRace()`.
-  replayButton?.addEventListener('click', () => {
-    startNewRace();
+  /**
+   * « Réinitialiser » : sortie rapide d'une course, à **toutes** les phases.
+   *
+   * Le joueur ne doit jamais avoir à attendre l'arrivée pour repartir sur une nouvelle course. Un
+   * clic interrompt donc immédiatement la course en cours — quelle qu'elle soit : compte à rebours,
+   * course, pause, pause de checkpoint, arrivée — et ramène la simulation en `idle` avec une
+   * **nouvelle** seed.
+   *
+   * Tout ce qui appartenait à la course précédente est remis à zéro par les mécanismes existants :
+   * le moteur et l'historique de relecture par `simulation.restart()`, la file du speaker et la voix
+   * par `commentary.reset()`, l'écran d'arrivée par le rendu (il n'est qu'un reflet de la phase
+   * `finished`, et disparaît donc dès que la phase quitte `finished`), et l'URL par `writeRaceToUrl`.
+   *
+   * `simulation.start()` n'est **jamais** appelé ici : réinitialiser ne démarre rien. Le joueur
+   * choisit ensuite 3, 4, 5 ou 6 coureurs, puis clique sur « Lancer ».
+   */
+  function resetRace(): void {
+    const nextSeed = createRandomSeedText();
+    simulation.restart(nextSeed, pendingPlayers);
+    commentary.reset(simulation.view.seedValue);
+    writeRaceToUrl(simulation.seed, simulation.players);
+    // L'interface revient en `idle` **immédiatement**, sans attendre une frame de rendu : le joueur
+    // peut enchaîner « choisir un effectif » puis « Lancer » sans aucun délai perçu.
+    syncPlayersControl();
+    syncControls();
+  }
+
+  resetButton?.addEventListener('click', () => {
+    resetRace();
   });
 
   // « Pause / Reprendre » : même commande que la touche Espace, et rien d'autre.
@@ -434,8 +536,14 @@ function bootstrap(): void {
   });
 
   if (params.get(AUTOSTART_PARAM) === '1') {
+    ensurePendingPlayers();
     simulation.start();
   }
+
+  // État initial de la barre principale : la course peut déjà être en `countdown` (autostart), et
+  // « Lancer » doit alors être inactif **dès la première frame**, sans attendre un changement de phase.
+  syncPlayersControl();
+  syncControls();
 }
 
 bootstrap();

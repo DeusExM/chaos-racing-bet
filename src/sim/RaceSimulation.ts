@@ -178,12 +178,21 @@ export class RaceSimulation {
    * Démarre la course : compte à rebours réel, puis course.
    *
    * Avec `countdownRealS = 0` (mode test), le départ est immédiat : `start()` passe directement en
-   * `running`. Appeler `start()` sur une course terminée la rejoue depuis le début, même seed.
+   * `running`.
+   *
+   * ## `start()` ne démarre que depuis `idle`
+   *
+   * Depuis la passe corrective P013-cor4, `start()` **ne réinitialise plus rien** : appelé depuis une
+   * autre phase (`countdown`, `running`, `userPaused`, `checkpointPause`, `finished`), il ne fait
+   * strictement rien. Une course terminée n'est donc plus rejouée implicitement par un second
+   * `start()` — ce raccourci masquait la vraie question (« veut-on relancer ? ») et rendait une
+   * course repartie sans que l'appelant l'ait demandé.
+   *
+   * Toute remise à zéro est **explicite** : `restart()`, puis `start()`. C'est exactement ce que
+   * font les actions spéciales (« Rejouer la même seed », « Nouvelle course ») et le bouton
+   * « Lancer », qui réaligne l'effectif avant de démarrer.
    */
   start(): void {
-    if (this.simPhase === 'finished') {
-      this.restart();
-    }
     if (this.simPhase !== 'idle') {
       return;
     }

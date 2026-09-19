@@ -94,7 +94,14 @@
       <div class="controls">
         <button id="start-button" type="button" data-testid="start-button"></button>
         <button id="pause-button" type="button" data-testid="pause-button"></button>
-        <button id="replay-button" type="button" data-testid="replay-button"></button>
+        <!--
+          Barre principale (passe corrective P013-cor4) : `Lancer` · `Pause/Reprendre` · `Réinitialiser`.
+          « Réinitialiser » remplace l'ancien « Rejouer » : il **interrompt** la course en cours et
+          revient en `idle` avec une nouvelle seed, sans jamais démarrer. C'est la sortie rapide d'une
+          course, disponible à toutes les phases ; rejouer une course reste le rôle de l'écran
+          d'arrivée, qui seul sait quelle course le joueur veut revoir.
+        -->
+        <button id="reset-button" type="button" data-testid="reset-button"></button>
         <!--
           Barre de relecture (passe corrective 2) : elle est remplie par le rendu et reste masquée
           hors pause manuelle. Elle vit sous l'arène, avec les commandes, pour ne jamais recouvrir la

@@ -63,8 +63,14 @@ distinctes et le restent partout dans le code : `CHARACTERS`/`CHARACTER_IDS` dé
 complet, et l'**effectif** d'une course est la liste des **partants**.
 
 * L'effectif se choisit **avant** une course, avec le sélecteur `Coureurs : 3 / 4 / 5 / 6` (valeur par
-  défaut : 6). Une course lancée ne change **jamais** d'effectif : le moteur et l'historique de
-  relecture sont reconstruits au redémarrage, jamais redimensionnés en cours de route.
+  défaut : 6). Le contrôle n'est **actif qu'en `idle`**, exactement comme `Lancer` : une course
+  lancée ne change **jamais** d'effectif (le moteur et l'historique de relecture sont reconstruits au
+  redémarrage, jamais redimensionnés en cours de route), et une course **terminée** non plus — il
+  faut passer par `Réinitialiser`, sinon le sélecteur pourrait afficher 4 pendant que le moteur
+  aligne encore les 6 partants de la course qui vient d'être jouée. En petit paysage, la valeur
+  affichée porte le mot (`4 coureurs`) et le contrôle a la taille d'un vrai bouton tactile
+  (`2.2rem` ≈ 35 px de haut, police `0.72rem`) : c'est un `<select>` **natif**, donc le sélecteur
+  système d'iOS, utilisable au doigt.
 * Les partants sont choisis **automatiquement et déterministiquement** à partir de la seed et de
   l'effectif : `selectParticipants(seedValue, count)` (`src/core/participants.ts`) renvoie un
   sous-ensemble du roster, dans l'**ordre canonique** `c0…c5`, par un flux RNG dédié `participants`
@@ -284,7 +290,7 @@ libellés peu clairs et une voix trop lente.
 **Lecture de l'écran — la piste d'abord.** Le HUD n'occupe que des zones **périphériques et basses**
 de l'arène ; la piste doit rester largement visible. Il contient :
 
-* les commandes (Lancer / Pause / Rejouer), le chrono et l'indicateur de segment (`1/3`, `2/3`, `3/3`,
+* les commandes (Lancer / Pause / Réinitialiser), le chrono et l'indicateur de segment (`1/3`, `2/3`, `3/3`,
   et **`Terminé`** une fois la course finie : le noyau n'a que trois segments, il n'existe donc aucun
   « segment 0/3 ») ;
 * les réglages, réduits à deux pastilles compactes (voir plus bas) ;
@@ -320,8 +326,9 @@ La disposition compacte est donc devenue, pour la même course :
 * **une seule zone réservée**, la colonne de droite (`--hud-mobile-column`, 32 % de la largeur), qui
   porte de haut en bas : la **ligne d'état** (état · segment · chrono · son · commentateur, sur une
   seule ligne), le badge de checkpoint, le **classement**, l'écran d'arrivée, le **speaker**, la seed
-  (avec un bouton **`Persos`** à sa droite), puis les **commandes** (`Lancer` · `Pause` · `Rejouer`
-  sur **une seule rangée**, ~35 px de haut chacune) ;
+  (avec un bouton **`Persos`** à sa droite), le **sélecteur `Coureurs`** sur sa propre rangée, puis
+  les **commandes** (`Lancer` · `Pause` · `Réinitialiser` sur **une seule rangée**, ~35 px de haut
+  chacune) ;
 * **la piste n'a plus aucun HUD textuel superposé** : les badges d'événement restent la seule
   surimpression, et ils sont attachés aux personnages ;
 * **les personnages grandissent** : la hauteur récupérée revient aux voies, qui s'étendent
@@ -364,7 +371,7 @@ plus** de `env(safe-area-inset-bottom)` — le curseur se retrouve donc à ≈ 2
 de la zone où Safari capte les gestes du bas — et sa **zone tactile fait 32 px de haut** alors que la
 piste visible reste fine (4 px). Le curseur occupe en outre **toute la largeur de la colonne**
 (≈ 250 px à 844×390, ≈ 270 px à 926×428) sur sa propre ligne : c'est ce qui le rend posable au doigt.
-L'ordre de la bande est celui demandé — la rangée `Lancer` · `Pause` · `Rejouer`, **puis** la timeline,
+L'ordre de la bande est celui demandé — la rangée `Lancer` · `Pause` · `Réinitialiser`, **puis** la timeline,
 **puis** la marge basse — et les commandes fines (`−2 s` · `+2 s`) passent sur la seconde ligne de la
 barre, sous le curseur. Le dessin du curseur est redéfini pour WebKit et pour Gecko, uniquement dans la
 requête média compacte. Hors pause, la bande n'est pas réservée : la hauteur des commandes est
@@ -497,10 +504,21 @@ de l'**historique de résultats déjà calculés**.
   classement existant reste l'**unique source de vérité** : aucun second moteur de classement n'a été
   créé, l'enregistreur ne fait que lire `leaderboardOf(state)` et mémoriser un identifiant, un nom et un
   instant. Un rejeu, un redémarrage ou un changement de seed repart d'un historique vide.
-* **`Rejouer` (bouton principal) tire une nouvelle seed.** Un clic **tire immédiatement une nouvelle
-  seed**, met l'URL à jour, remet la simulation et le commentaire à zéro, et **relance la course** — par
-  le mécanisme existant, sans second générateur de seed. Le bouton explicite de l'écran d'arrivée
-  (`Rejouer la même seed`) garde son sens : même seed, donc même course, bit à bit.
+* **`Réinitialiser` (bouton principal) interrompt la course et prépare la suivante.** Un clic **tire
+  immédiatement une nouvelle seed**, met l'URL à jour, remet la simulation, la relecture et le
+  commentaire à zéro, masque l'écran d'arrivée s'il était affiché, et revient en **`idle`** — sans
+  jamais démarrer la course. Le joueur choisit ensuite l'effectif, puis clique sur `Lancer`. Le
+  bouton est disponible **à toutes les phases** (compte à rebours, course, pause, pause de
+  checkpoint, arrivée) : c'est la sortie rapide d'une course, et le joueur ne doit jamais avoir à
+  attendre l'arrivée. Le bouton explicite de l'écran d'arrivée (`Rejouer la même seed`) garde son
+  sens : même seed, donc même course, bit à bit.
+* **Les trois commandes suivent la phase, par le véritable attribut `disabled`.** `Lancer` n'est
+  actif qu'en `idle` ; `Pause`/`Reprendre` l'est pendant le compte à rebours, la course et une pause
+  manuelle ; `Réinitialiser` l'est toujours. Un bouton indisponible reste **à sa place** (grisé,
+  opacité réduite, curseur non interactif) : la rangée ne bouge donc jamais. `RaceSimulation.start()`
+  ne démarre que depuis `idle` — il ne réinitialise plus rien implicitement — et le sélecteur
+  `Coureurs` n'est modifiable qu'en `idle`, exactement comme `Lancer` : le choix affiché et
+  l'effectif réellement lancé ne peuvent donc plus diverger.
 * **Effets visuels d'événement, purement visuels.** Un **bonus** ajoute un léger halo derrière le
   personnage (et une pulsation discrète) ; un **malus** le teinte légèrement (sombre/rougeâtre) et
   laisse une petite traînée sombre vers l'arrière. Ces effets se contentent de **lire** `activeEvent` et

@@ -492,13 +492,13 @@ body {
 
 .hud-players-select {
   pointer-events: auto;
-  padding: 0.05rem 0.2rem;
+  padding: 0.15rem 0.35rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #16203c;
   color: var(--text);
   font: inherit;
-  font-size: 0.85em;
+  font-size: 0.9em;
   cursor: pointer;
 }
 
@@ -1002,8 +1002,21 @@ body {
   cursor: pointer;
 }
 
-.controls button:hover {
+.controls button:hover:not(:disabled) {
   border-color: var(--accent);
+}
+
+/*
+ * Une commande indisponible reste **à sa place** : elle est grisée, à opacité réduite, et son curseur
+ * n'invite plus au clic. Le bouton n'est jamais retiré du flux, donc la rangée ne bouge pas quand la
+ * course démarre ou se termine — seul son état change. La règle s'appuie sur le véritable attribut
+ * HTML `disabled`, posé par `app/` : aucune apparence ne peut donc mentir sur ce qui est cliquable.
+ */
+.controls button:disabled {
+  opacity: 0.42;
+  border-color: #ffffff1a;
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 .controls button:focus-visible {
@@ -1399,7 +1412,14 @@ body {
   /* 3) La grille du HUD : colonne 1 = la piste (vide), colonne 2 = la colonne du HUD. */
   .hud {
     grid-template-columns: minmax(0, 1fr) var(--hud-mobile-column);
-    grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr);
+    /*
+     * Huit rangées : ligne d'état, badge de checkpoint, classement, écran d'arrivée, speaker, seed
+     * (avec le bouton « persos »), sélecteur du nombre de coureurs, puis la rangée souple qui absorbe
+     * le reste. Le sélecteur a **sa propre rangée** depuis la passe corrective P013-cor4 : agrandi pour
+     * être réellement tactile, il ne pouvait plus partager celle de la seed sans risquer de la
+     * chevaucher dans une colonne de 32 %. Aucun autre bloc n'a été réduit pour lui faire de place.
+     */
+    grid-template-rows: auto auto auto auto auto auto auto minmax(0, 1fr);
     column-gap: 0;
     row-gap: 0.15rem;
     align-items: start;
@@ -1627,19 +1647,26 @@ body {
   }
 
   /*
-   * Le sélecteur du nombre de coureurs occupe la même rangée, au **centre** : seed à gauche, effectif
-   * au milieu, bouton « persos » à droite. Le libellé disparaît (la valeur « 3 » à « 6 » suffit et se
-   * lit d'un coup d'œil), ce qui laisse la place aux trois éléments dans la colonne du HUD.
+   * Le sélecteur du nombre de coureurs occupe **sa propre rangée**, sous la seed, aligné à droite.
+   *
+   * Il partageait auparavant la rangée de la seed et du bouton « persos », ce qui ne laissait la
+   * place qu'à un contrôle minuscule (`min-height: 1.4rem`, `font-size: 0.55rem`) — illisible et
+   * difficile à viser au doigt sur un vrai téléphone. Depuis la passe corrective P013-cor4 il a la
+   * présence d'un vrai bouton tactile (`2.2rem` ≈ 35 px de haut, `0.72rem` de police), et il ne peut
+   * donc plus cohabiter avec deux autres blocs dans la même cellule : il a la sienne.
+   *
+   * Le libellé général (`Coureurs`) reste masqué en compact : c'est la valeur affichée qui porte le
+   * sens (`4 coureurs`), ce qui garde le contrôle lisible sans mot extérieur.
    */
   .hud-players {
     grid-column: 2;
-    grid-row: 6;
-    justify-self: center;
-    align-self: end;
+    grid-row: 7;
+    justify-self: end;
+    align-self: start;
     gap: 0.15rem;
-    padding: 0.05rem 0.25rem;
+    padding: 0;
     background: transparent;
-    font-size: 0.55rem;
+    font-size: 0.72rem;
   }
 
   .hud-players-label {
@@ -1647,8 +1674,9 @@ body {
   }
 
   .hud-players-select {
-    min-height: 1.4rem;
-    font-size: 0.55rem;
+    min-height: 2.2rem;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.72rem;
   }
 
   /*

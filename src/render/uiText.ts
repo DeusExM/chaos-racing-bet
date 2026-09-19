@@ -64,8 +64,13 @@ export interface UiText {
   readonly checkpointLeaderSplit: string;
   /** Libellé du bouton qui lance la course. */
   readonly startButton: string;
-  /** Libellé du bouton qui rejoue la même course. */
-  readonly replayButton: string;
+  /**
+   * Libellé du bouton qui remet la course à zéro, sans jamais la démarrer.
+   *
+   * Il remplace l'ancien « Rejouer » de la barre principale : réinitialiser est une **sortie** de
+   * course (disponible à toute phase), pas un départ déguisé.
+   */
+  readonly resetButton: string;
   /** Titre de la barre de relecture, affichée uniquement pendant une pause manuelle. */
   readonly replayTitle: string;
   /** Bouton qui recule de 2 secondes dans la course déjà jouée. */
@@ -151,6 +156,13 @@ export interface UiText {
   readonly rotationGateHint: string;
   /** Libellé visible du sélecteur du nombre de coureurs (masqué en petit paysage). */
   readonly playersLabel: string;
+  /**
+   * Mot qui suit l'effectif dans la liste : `4 coureurs`.
+   *
+   * En petit paysage, le libellé général est masqué ; c'est donc la valeur affichée elle-même qui
+   * porte le sens du contrôle, plutôt qu'un chiffre seul.
+   */
+  readonly playersOptionSuffix: string;
   /** Libellés des quatre effectifs proposés : `3`, `4`, `5`, `6`. */
   readonly playersOption3: string;
   readonly playersOption4: string;

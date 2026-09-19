@@ -65,6 +65,13 @@ interface CompactLayout {
   /** Nombre de blocs qui affichent la seed : il doit valoir 1 (aucun doublon). */
   readonly seedDisplays: number;
   readonly galleryButton: Box;
+  /** Contrôle `Coureurs` : sa boîte, sa police et la valeur réellement affichée. */
+  readonly players: {
+    readonly box: Box;
+    readonly fontSize: number;
+    readonly text: string;
+    readonly fits: boolean;
+  };
   readonly controls: Box;
   readonly buttons: readonly { readonly id: string; readonly box: Box }[];
   readonly logicalArenaWidth: number;
@@ -174,8 +181,23 @@ async function measure(page: Page): Promise<CompactLayout> {
       /** Nombre de blocs qui affichent la seed : il doit valoir 1 (aucun doublon). */
       seedDisplays: document.querySelectorAll('.seed, [data-testid="hud-seed"]').length,
       galleryButton: required('[data-testid="gallery-button"]'),
+      players: (() => {
+        const element = document.querySelector('[data-testid="players-select"]');
+        if (element === null) {
+          throw new Error('sélecteur du nombre de coureurs absent');
+        }
+        return {
+          box: required('[data-testid="players-select"]'),
+          fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
+          text:
+            element instanceof HTMLSelectElement
+              ? (element.selectedOptions[0]?.textContent ?? '')
+              : '',
+          fits: element instanceof HTMLElement ? element.scrollWidth <= element.clientWidth + 1 : false,
+        };
+      })(),
       controls: required('.controls'),
-      buttons: ['start-button', 'pause-button', 'replay-button'].map((id) => ({
+      buttons: ['start-button', 'pause-button', 'reset-button'].map((id) => ({
         id,
         box: required(`[data-testid="${id}"]`),
       })),
@@ -266,6 +288,7 @@ for (const viewport of VIEWPORTS) {
       ['classement', layout.leaderboard],
       ['seed', layout.seed],
       ['bouton persos', layout.galleryButton],
+      ['sélecteur Coureurs', layout.players.box],
     ] as const) {
       expect(element.left, `${name} ne recouvre pas la piste`).toBeGreaterThanOrEqual(
         layout.canvas.right - 1,
@@ -291,6 +314,35 @@ for (const viewport of VIEWPORTS) {
       Math.abs(layout.galleryButton.top - layout.seed.top),
       'le bouton persos est sur la rangée de la seed',
     ).toBeLessThanOrEqual(6);
+
+    /*
+     * 5 ter) Le sélecteur `Coureurs` est un **vrai contrôle tactile** (passe corrective P013-cor4).
+     *
+     * Il mesurait `1.4rem` de haut pour `0.55rem` de police : illisible et difficile à viser au
+     * doigt. Il a maintenant la présence d'un bouton (`2.2rem` ≈ 35 px, `0.72rem`), il occupe sa
+     * **propre rangée** sous la seed — donc il ne peut plus la chevaucher ni chevaucher `Persos` — et
+     * la valeur affichée porte le mot (`6 coureurs`), puisqu'en compact le libellé général est masqué.
+     */
+    expect(layout.players.box.height, 'le sélecteur est tactile').toBeGreaterThanOrEqual(30);
+    expect(layout.players.fontSize, 'la valeur est lisible').toBeGreaterThanOrEqual(11);
+    expect(layout.players.text, 'la valeur porte le mot').toBe('6 coureurs');
+    expect(layout.players.fits, 'la valeur n’est pas tronquée').toBe(true);
+    expect(
+      overlaps(layout.players.box, layout.seed),
+      'le sélecteur ne recouvre pas la seed',
+    ).toBe(false);
+    expect(
+      overlaps(layout.players.box, layout.galleryButton),
+      'le sélecteur ne recouvre pas le bouton persos',
+    ).toBe(false);
+    expect(
+      overlaps(layout.players.box, layout.leaderboard),
+      'le sélecteur ne recouvre pas le classement',
+    ).toBe(false);
+    expect(
+      overlaps(layout.players.box, layout.controls),
+      'le sélecteur ne recouvre pas les commandes',
+    ).toBe(false);
     if (layout.subtitle !== null) {
       expect(layout.subtitle.left, 'le speaker ne recouvre pas la piste').toBeGreaterThanOrEqual(
         layout.canvas.right - 1,
@@ -317,8 +369,9 @@ for (const viewport of VIEWPORTS) {
       layout.viewport.height - 2,
     );
 
-    // 7) Commandes tactiles, dans la colonne, sur **une seule rangée** (Lancer · Pause · Rejouer), et
-    // la bande réservée sous elles ne garde pas la place d'une barre de relecture absente.
+    // 7) Commandes tactiles, dans la colonne, sur **une seule rangée** (Lancer · Pause ·
+    //    Réinitialiser), et la bande réservée sous elles ne garde pas la place d'une barre de
+    //    relecture absente.
     for (const button of layout.buttons) {
       expect(button.box.height, `${button.id} est tactile`).toBeGreaterThanOrEqual(34);
       expect(button.box.height, `${button.id} reste compact`).toBeLessThanOrEqual(40);
@@ -330,17 +383,19 @@ for (const viewport of VIEWPORTS) {
         layout.viewport.width + 1,
       );
     }
-    const [start, pause, replay] = layout.buttons;
+    const [start, pause, reset] = layout.buttons;
     expect(start?.box.top ?? 0, '« Lancer » et « Pause » sont sur la même rangée').toBeCloseTo(
       pause?.box.top ?? 0,
       0,
     );
-    expect(replay?.box.top ?? 0, '« Rejouer » est sur la même rangée').toBeCloseTo(
+    expect(reset?.box.top ?? 0, '« Réinitialiser » est sur la même rangée').toBeCloseTo(
       start?.box.top ?? 0,
       0,
     );
     expect(start?.box.left ?? 0, '« Lancer » est à gauche').toBeLessThan(pause?.box.left ?? 0);
-    expect(pause?.box.left ?? 0, '« Rejouer » est à droite').toBeLessThan(replay?.box.left ?? 0);
+    expect(pause?.box.left ?? 0, '« Réinitialiser » est à droite').toBeLessThan(
+      reset?.box.left ?? 0,
+    );
     expect(
       layout.controls.height,
       'la bande des commandes se limite aux boutons quand la relecture est masquée',
@@ -479,7 +534,7 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
         forward: box('[data-testid="replay-forward"]'),
         seed: required('[data-testid="hud-seed"]'),
         speaker: required('[data-testid="subtitle"]'),
-        buttons: ['start-button', 'pause-button', 'replay-button'].map((id) =>
+        buttons: ['start-button', 'pause-button', 'reset-button'].map((id) =>
           required(`[data-testid="${id}"]`),
         ),
         reserved: getComputedStyle(document.documentElement).getPropertyValue(
@@ -606,8 +661,8 @@ test('la barre de relecture prend sa place dans la colonne en 844×390', async (
     `le curseur ne touche plus la bande système du bas (marge ${rangeBottomMargin.toFixed(1)} px)`,
   ).toBeGreaterThanOrEqual(20);
 
-  // Ordre demandé : rangée `Lancer / Reprendre / Rejouer`, **puis** la timeline, puis les commandes
-  // fines de relecture — jamais l'inverse, et jamais sur la même ligne que les trois boutons.
+  // Ordre demandé : rangée `Lancer / Reprendre / Réinitialiser`, **puis** la timeline, puis les
+  // commandes fines de relecture — jamais l'inverse, et jamais sur la même ligne que les trois boutons.
   const back = paused.back;
   const forward = paused.forward;
   expect(back, 'le bouton de recul existe pendant la pause').not.toBeNull();

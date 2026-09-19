@@ -241,6 +241,108 @@ describe('RaceSimulation — redémarrage', () => {
   });
 });
 
+/**
+ * Passe corrective P013 : `start()` ne démarre que depuis `idle`.
+ *
+ * Le raccourci « une course terminée est rejouée par un second `start()` » a été retiré : il faisait
+ * repartir une course sans que l'appelant l'ait demandé, et il masquait la seule question qui
+ * compte — veut-on réinitialiser ? La remise à zéro est désormais explicite (`restart()`), et le
+ * bouton « Lancer » de l'interface est désactivé hors `idle`.
+ */
+describe('RaceSimulation — start() ne démarre que depuis idle', () => {
+  it('ne fait rien depuis countdown, running, userPaused, checkpointPause et finished', () => {
+    // Plafond de pas volontairement large : les scénarios amènent la course à une phase précise d'une
+    // seule frame, ce qui n'est pas le sujet de ce test (le garde-fou anti « spiral of death » a le
+    // sien, dans `RaceSimulation — temps réel`).
+    const bulk = { ...SIM_CONFIG, maxStepsPerFrame: 100_000 };
+
+    const cases: readonly { readonly phase: string; readonly reach: (s: RaceSimulation) => void }[] =
+      [
+        { phase: 'countdown', reach: (s) => s.start() },
+        {
+          phase: 'running',
+          reach: (s) => {
+            s.start();
+            s.update(SIM_CONFIG.countdownRealS * 1000);
+          },
+        },
+        {
+          phase: 'userPaused',
+          reach: (s) => {
+            s.start();
+            s.update(SIM_CONFIG.countdownRealS * 1000);
+            s.toggleUserPause();
+          },
+        },
+        {
+          phase: 'checkpointPause',
+          reach: (s) => {
+            s.start();
+            s.update(SIM_CONFIG.countdownRealS * 1000);
+            s.update((RACE_CONFIG.SEGMENT_DURATION_S + 1) * 1000);
+          },
+        },
+        {
+          phase: 'finished',
+          reach: (s) => {
+            s.runToCompletion();
+          },
+        },
+      ];
+
+    for (const scenario of cases) {
+      const simulation = new RaceSimulation(SEED, bulk);
+      scenario.reach(simulation);
+      expect(simulation.phase, `phase attendue : ${scenario.phase}`).toBe(scenario.phase);
+
+      const before = simulation.view;
+      simulation.start();
+
+      expect(simulation.phase, `start() ne change pas la phase ${scenario.phase}`).toBe(
+        scenario.phase,
+      );
+      expect(simulation.view.steps, `aucun pas rejoué depuis ${scenario.phase}`).toBe(before.steps);
+      expect(simulation.view.tSim).toBe(before.tSim);
+      expect(simulation.view.seed).toBe(before.seed);
+      expectSameDoubles(
+        simulation.view.characters.map((character) => character.x),
+        before.characters.map((character) => character.x),
+      );
+    }
+  });
+
+  it('ne réinitialise pas une course terminée : seule une remise à zéro explicite la rejoue', () => {
+    const simulation = new RaceSimulation(SEED);
+    const result = simulation.runToCompletion();
+    expect(simulation.phase).toBe('finished');
+
+    // Le second `start()` ne remet rien à zéro : les 3 600 pas et le classement restent en place.
+    simulation.start();
+    expect(simulation.phase).toBe('finished');
+    expect(simulation.view.steps).toBe(RACE_CONFIG.TOTAL_STEPS);
+    expect(leaderboardOf(simulation.view).map((row) => row.id)).toEqual(result.ranking);
+
+    // La remise à zéro est explicite, puis le départ l'est aussi — et la course rejouée est identique.
+    simulation.restart();
+    expect(simulation.phase).toBe('idle');
+    expect(simulation.view.steps).toBe(0);
+    simulation.start();
+    expect(simulation.phase).toBe('countdown');
+
+    simulation.update(SIM_CONFIG.countdownRealS * 1000);
+    let guard = 0;
+    while (simulation.phase !== 'finished' && guard < 200_000) {
+      simulation.update(NOMINAL_FRAME_MS);
+      guard += 1;
+    }
+    expect(simulation.phase).toBe('finished');
+    expectSameDoubles(
+      simulation.view.characters.map((character) => character.x),
+      result.distances,
+    );
+  });
+});
+
 describe('classement affichable', () => {
   it('ordonne les 6 personnages par distance décroissante, rangs et écarts cohérents', () => {
     const result = new RaceSimulation(SEED).runToCompletion();

@@ -101,12 +101,14 @@ test('sans paramètre d’URL, la course aligne six coureurs et le sélecteur l�
   expect(measured.stateCharacters).toEqual([...CHARACTER_IDS]);
   expect(measured.lanes).toHaveLength(MAX_PARTICIPANTS);
 
-  // Le contrôle propose exactement les quatre effectifs, et affiche celui de la course.
+  // Le contrôle propose exactement les quatre effectifs, et affiche celui de la course. La valeur
+  // porte le mot (`4 coureurs`) : en petit paysage le libellé général est masqué, et le contrôle doit
+  // rester compréhensible sans lui.
   const select = page.getByTestId('players-select');
   await expect(select).toHaveValue(String(MAX_PARTICIPANTS));
   await expect(select).toBeEnabled();
   const options = await select.locator('option').allTextContents();
-  expect(options).toEqual(['3', '4', '5', '6']);
+  expect(options).toEqual(['3 coureurs', '4 coureurs', '5 coureurs', '6 coureurs']);
 
   // L'URL décrit l'identité complète de la course : seed **et** effectif.
   const url = new URL(page.url());

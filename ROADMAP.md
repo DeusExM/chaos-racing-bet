@@ -301,6 +301,8 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | P013 | Arrivée et podium `[x]` | P012 | course complète jouable |
 | **P013-cor** | **Passe corrective après le premier test joueur manuel `[x]`** | P013 | course de 60 s, HUD dégagé, retours d'événement, son et commentateur explicites |
 | **P013-cor2** | **Seconde passe corrective après le second test joueur manuel `[x]`** | P013-cor | commentaire véridique sur la position, relecture pendant la pause, classement hors piste, segment d'arrivée |
+| **P013-cor3** | **Courses de 3 à 6 coureurs `[x]`** | P013-cor2 | effectif réglable, personnages plus grands à effectif réduit, fermeture de l'arrivée |
+| **P013-cor4** | **UX `Lancer` / `Réinitialiser` et correctif d'effectif `[x]`** | P013-cor3 | trois boutons pilotés par la phase, reset à toute phase, `start()` sans remise à zéro implicite, sélecteur tactile |
 | **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
 | P014 | Identité visuelle et animations des 6 personnages | P013.5 | personnages distincts et drôles |
 | P015 | Polish, accessibilité, audio optionnel | P014 | finition |
@@ -1412,6 +1414,81 @@ fichiers, dont 46 nouveaux) ; `vite build` OK ; **117 tests E2E** OK, dont **14 
 erreur console. Le corpus de seeds dorées (`tests/unit/goldenSeeds.test.ts`, distances et classement
 comparés **bit à bit**) passe **sans aucune mise à jour** : les courses à six coureurs sont exactement
 celles d'avant. Voir `GAME_DESIGN.md` §3.1, §5.2, §9.2 et §10.
+
+---
+
+### P013-cor4 — UX `Lancer` / `Réinitialiser` et correctif d'effectif `[x]`
+
+**Nature.** Comme `P013-cor`, `P013-cor2` et `P013-cor3`, ce n'est **pas** une étape de la
+numérotation : c'est une **passe corrective courte et ciblée**, demandée après un test sur appareil
+réel, **avant** P013.5. Elle ne touche **aucune** constante de simulation (`SPEED.*`, `DRIFT.*`,
+`SURGE.*`, `EVENT.*`, `OVERTAKE.*`, `RACE_CONFIG`, `SIM_CONFIG` sont intacts), ni l'équilibrage, ni le
+RNG, ni les tailles de personnages, ni la sélection des partants, ni le speaker, ni la timeline, ni la
+galerie `Persos`, ni la rotation portrait/paysage.
+
+**1. Trois boutons, trois règles.** La barre principale devient `Lancer` · `Pause/Reprendre` ·
+`Réinitialiser` (l'ancien `Rejouer` devient `Réinitialiser`, `#reset-button`). L'état est porté par le
+**véritable attribut HTML `disabled`**, jamais par une apparence seule :
+
+| Phase | Lancer | Pause/Reprendre | Réinitialiser | Coureurs |
+| --- | --- | --- | --- | --- |
+| `idle` | actif | inactif | actif | actif |
+| `countdown`, `running`, `userPaused` | inactif | actif | actif | inactif |
+| `checkpointPause`, `finished` | inactif | inactif | actif | inactif |
+
+Un bouton indisponible reste **à sa place** (grisé, `opacity: 0.42`, `cursor: not-allowed`) : la
+rangée ne bouge donc jamais, et `:hover` ne s'applique plus à une commande inatteignable.
+
+**2. `RaceSimulation.start()` ne réinitialise plus rien.** Le raccourci
+`if (simPhase === 'finished') restart()` est **retiré** : `start()` ne démarre que depuis `idle` et ne
+fait **rien** depuis toute autre phase. Une remise à zéro est désormais **explicite** (`restart()`),
+ce que font les actions spéciales de l'écran d'arrivée (`Rejouer la même seed`, `Nouvelle course`) et
+le bouton `Lancer`. Un second `start()` ne peut donc plus relancer une course par surprise ni
+redémarrer un compte à rebours en cours.
+
+**3. `Réinitialiser` fonctionne à toutes les phases.** Un clic interrompt immédiatement la course —
+compte à rebours, course, pause, pause de checkpoint, arrivée — puis : nouvelle seed tirée par le
+mécanisme existant de `app/`, `simulation.restart(newSeed, pendingPlayers)`, retour en `idle`,
+historique de relecture et file du speaker remis à zéro (`commentary.reset()`, qui coupe aussi la voix
+en cours), URL réécrite, écran d'arrivée masqué (il n'est qu'un reflet de la phase `finished`),
+commandes resynchronisées **dans le même clic**. `simulation.start()` n'est **jamais** appelé :
+réinitialiser ne démarre rien.
+
+**4. Le bug « 4 sélectionné → 6 lancés » est fermé structurellement.** Deux verrous : le sélecteur
+n'est actif qu'en `idle` (plus de cas ambigu à l'arrivée), et le chemin de `Lancer` **vérifie
+l'effectif avant de démarrer** (`ensurePendingPlayers()`) — si `simulation.players !== pendingPlayers`,
+la course `idle` est reconstruite avec le bon nombre avant `start()`. Afficher 4 et lancer 6 est donc
+impossible par construction, pas par convention.
+
+**5. Sélecteur agrandi sur iPhone.** En petit paysage, le contrôle passe de `1.4rem`/`0.55rem` à
+`min-height: 2.2rem` (≈ 35 px, au-dessus de la cible tactile de 34 px) et `font-size: 0.72rem`, avec
+un rembourrage confortable. Il occupe désormais **sa propre rangée** de la colonne du HUD (la grille
+compacte passe de 7 à 8 rangées) : agrandi, il ne pouvait plus partager celle de la seed et du bouton
+`Persos` sans risquer de les chevaucher. Rien n'a été réduit pour lui faire de place — ni la seed, ni
+`Persos`, ni les personnages. Le libellé général reste masqué en compact, mais la **valeur** porte le
+mot (`4 coureurs`), donc le contrôle reste compréhensible sans lui.
+
+**Tests (DoD).** Unitaires : `tests/unit/simulation.test.ts` gagne **2 tests** — `start()` ne fait rien
+depuis `countdown`, `running`, `userPaused`, `checkpointPause` et `finished` (phase, pas, `tSim`,
+seed et distances strictement inchangés), et une course terminée n'est rejouée que par un
+`restart()` explicite (les 3 600 pas et le classement restent en place après un second `start()` ; le
+rejeu explicite redonne les mêmes distances). E2E : nouveau `tests/e2e/reset.spec.ts` (**7 tests** —
+cas A : `idle` à 6 → choisir 4 → `Lancer` ⇒ exactement 4 `state.characters`, 4 sprites et 4 lignes de
+classement, URL `players=4`, arrivée à 4 lignes ; cas B : course à 6 → `running` → `Réinitialiser` ⇒
+`idle` immédiat, aucun pas, `tSim = 0`, distances nulles, nouvelle seed, puis 3 partants lancés et
+URL `players=3` ; cas C : course à 4 en pause → `Réinitialiser` ⇒ `idle` immédiat, barre de relecture
+masquée ; cas D : à l'arrivée `Lancer` et `Coureurs` sont `disabled`, `Réinitialiser` ne l'est pas,
+et après un clic les deux redeviennent actifs et l'écran d'arrivée est masqué ; `Lancer` `disabled` dès
+le countdown et non relançable par un second clic ; `Rejouer la même seed` reste reproductible après
+un `Réinitialiser` ; à `844×390` et `926×428`, le sélecteur mesure ≥ 30 px de haut, ≥ 11 px de police,
+affiche `6 coureurs` sans troncature et ne chevauche ni la seed, ni `Persos`, ni le classement, ni le
+speaker, ni les commandes). `tests/e2e/ui.spec.ts` et `tests/e2e/compactLayout.spec.ts` suivent le
+bouton renommé (`reset-button`).
+
+**Résultats réels.** `npm run verify` **vert** — `typecheck` 0 erreur ; **766 tests unitaires** (51
+fichiers) ; `vite build` OK ; **124 tests E2E** OK, dont **7 nouveaux**, sans aucune erreur console. Le
+corpus de seeds dorées et les tests d'équilibrage passent **sans aucune mise à jour** : aucune
+constante, aucun RNG, aucune taille de personnage n'a été touché. Voir `GAME_DESIGN.md` §3.1 et §9.2.
 
 ---
 

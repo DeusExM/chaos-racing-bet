@@ -21,7 +21,9 @@ import {
  * compte ici est le comportement de l'interface, pas le résultat de la course.
  */
 
-test('Lancer démarre la course, Rejouer tire une nouvelle seed et la relance', async ({ page }) => {
+test('Lancer démarre la course, Réinitialiser interrompt et repart sur une nouvelle seed', async ({
+  page,
+}) => {
   const watch = watchConsole(page);
   await page.goto(raceUrl({ seed: OVERTAKE_SEED }));
 
@@ -38,26 +40,33 @@ test('Lancer démarre la course, Rejouer tire une nouvelle seed et la relance', 
 
   // On attend d'avoir assez de pas pour que la remise à zéro soit sans ambiguïté.
   await expect.poll(() => currentSteps(page), { timeout: 15_000 }).toBeGreaterThan(300);
-  const beforeReplay = await currentSteps(page);
+  const beforeReset = await currentSteps(page);
 
-  await page.getByTestId('replay-button').click();
+  await page.getByTestId('reset-button').click();
 
-  // 1) La course repart **réellement** de zéro : le compteur de pas retombe.
-  await expect.poll(() => currentSteps(page), { timeout: 10_000 }).toBeLessThan(beforeReplay);
-  await expect(page.getByTestId('race-status')).toHaveText('Départ imminent');
+  // 1) La course repart **réellement** de zéro : le compteur de pas retombe à zéro.
+  await expect.poll(() => currentSteps(page), { timeout: 10_000 }).toBe(0);
+  expect(beforeReset).toBeGreaterThan(0);
 
-  // 2) Une **nouvelle** seed a été tirée : elle diffère de la précédente, et elle est valide.
+  // 2) Réinitialiser ne démarre **jamais** la course : l'état revient en attente, et rien n'avance.
+  await expect(page.getByTestId('race-status')).toHaveText('En attente du départ');
+  await page.waitForTimeout(600);
+  expect(await currentSteps(page), 'aucun pas ne doit être joué après un reset').toBe(0);
+
+  // 3) Une **nouvelle** seed a été tirée : elle diffère de la précédente, et elle est valide.
   const seedAfter = await page.getByTestId('seed-value').textContent();
   expect(seedAfter, 'la seed affichée a changé').not.toBe(OVERTAKE_SEED);
   expect(seedAfter, 'la nouvelle seed respecte le contrat P003').toMatch(/^[0-9A-HJKMNP-TV-Z]{8}$/);
 
-  // 3) L'URL est synchronisée avec la seed réellement jouée : recopier l'adresse reproduit la course.
+  // 4) L'URL est synchronisée avec la seed réellement configurée : recopier l'adresse reproduit la course.
   const url = new URL(page.url());
   expect(url.searchParams.get('seed'), 'l’URL porte la nouvelle seed').toBe(seedAfter);
 
-  // 4) Le noyau joue bien cette nouvelle seed, et la course repart.
+  // 5) Le noyau joue bien cette nouvelle seed, et la course repart quand on le lui demande.
   const coreSeed = await page.evaluate(() => window.__CHAOS_RACE__?.seed() ?? '');
   expect(coreSeed).toBe(seedAfter);
+  await expect(page.getByTestId('start-button')).toBeEnabled();
+  await page.getByTestId('start-button').click();
   await expect.poll(() => currentSteps(page), { timeout: 15_000 }).toBeGreaterThan(0);
 
   expectNoErrors(watch);

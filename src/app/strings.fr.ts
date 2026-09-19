@@ -65,7 +65,10 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   // 2D), parce qu'un trait plus épais au milieu du décor se lisait comme une ligne d'arrivée.
 
   startButton: 'Lancer',
-  replayButton: 'Rejouer',
+  // Le bouton de la barre principale n'est plus « Rejouer » : il **réinitialise** la course, sans
+  // jamais la démarrer. Rejouer une course (même seed ou nouvelle seed) reste le rôle de l'écran
+  // d'arrivée, qui seul sait quelle course le joueur veut revoir.
+  resetButton: 'Réinitialiser',
   // Barre de relecture (passe corrective 2) : elle n'apparaît que pendant une pause manuelle.
   replayTitle: 'Revoir',
   replayBack: '−2 s',
@@ -119,9 +122,11 @@ export const UI_TEXT_FR: UiText = Object.freeze({
   // Fermeture de l'écran d'arrivée : le bouton n'affiche qu'un `×`, ce libellé est son nom accessible.
   finishCloseLabel: "Fermer l'écran d'arrivée",
 
-  // Sélecteur du nombre de coureurs (courses de 3 à 6). Le libellé est masqué en petit paysage, où
-  // seule la valeur reste : « 3 », « 4 », « 5 » ou « 6 » dans une liste native, utilisable au doigt.
+  // Sélecteur du nombre de coureurs (courses de 3 à 6). En petit paysage, le libellé général est
+  // masqué : la valeur porte alors le mot (`4 coureurs`), ce qui la rend lisible et touchable au
+  // doigt sans dépendre d'un mot extérieur au contrôle.
   playersLabel: 'Coureurs',
+  playersOptionSuffix: 'coureurs',
   playersOption3: '3',
   playersOption4: '4',
   playersOption5: '5',

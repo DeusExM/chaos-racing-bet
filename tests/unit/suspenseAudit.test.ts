@@ -1689,7 +1689,7 @@ describe('forme de fin de course persistante ±8 %', () => {
     expect(text).toContain('Formes tirées sur le corpus');
     expect(text).toContain('espérance théorique : 0,000 %');
     expect(text).toContain('identité bit à bit jusqu’à 40 s');
-    expect(text).toContain('48–55 %');
+    expect(text).toContain('50–55 %');
 
     const json = JSON.stringify(buildLateFormComparisonJson(report));
     expect(json).toContain('chaos-race-late-form-comparison');
@@ -1699,6 +1699,50 @@ describe('forme de fin de course persistante ±8 %', () => {
     expect(json).toContain('"extraRngDraws":0');
     expect(json).toContain('"zeroMean":true');
     expect(json).not.toContain('undefined');
+  });
+
+  it('accepte une rampe plus longue et une amplitude plus forte, sans rien changer avant 40 s', () => {
+    // Candidat « plus fort mais plus tardif » : ±16 %, 0 % à 40 s, 50 % à 45 s, 100 % à 50 s.
+    const amplitude = 0.16;
+    const fullS = 50;
+    const fullAtStep = stepsForSeconds(fullS);
+
+    expect(lateFormFactor(amplitude, fromStep, fromStep, fullAtStep)).toBe(1);
+    expect(lateFormFactor(amplitude, stepsForSeconds(45), fromStep, fullAtStep)).toBeCloseTo(1.08, 12);
+    expect(lateFormFactor(amplitude, fullAtStep, fromStep, fullAtStep)).toBeCloseTo(1.16, 12);
+    expect(lateFormFactor(-amplitude, fullAtStep, fromStep, fullAtStep)).toBeCloseTo(0.84, 12);
+
+    const seed = 'KR7Z8NAR';
+    const values = lateFormValues(seed, amplitude);
+    const half = lateFormValues(seed, LATE_FORM_AMPLITUDE);
+    expect(values).toHaveLength(SUSPENSE_PLAYERS);
+    values.forEach((value, slot) => {
+      expect(Math.abs(value)).toBeLessThanOrEqual(amplitude);
+      // Une amplitude doublée double exactement chaque forme : le tirage lui-même ne change pas.
+      expect(value).toBeCloseTo((half[slot] ?? 0) * 2, 12);
+    });
+
+    const candidate = { lateForm: { fromStep, fullAtStep, values } };
+    const baseline = auditSuspenseRace(seed);
+    const variant = auditSuspenseRace(seed, candidate);
+    expect(variant.leadersAtBounds[1]).toBe(baseline.leadersAtBounds[1]);
+    expect(variant.gapAtBoundsM[1]).toBe(baseline.gapAtBoundsM[1]);
+    // Le contrôle ne dépend pas de la rampe : premier pas divergent = 2401, soit après 40 s.
+    expect(firstDivergentStep(seed, candidate)).toBe(fromStep + 1);
+
+    const report = runLateFormComparison(corpusSeeds(2), { amplitude, fullS });
+    expect(report.amplitude).toBe(amplitude);
+    expect(report.fullS).toBe(fullS);
+    expect(report.fullAtStep).toBe(fullAtStep);
+    expect(report.comparison.points[1]?.label).toContain('±16 %');
+    expect(report.comparison.points[1]?.label).toContain('50 s');
+    expect(report.comparison.points[1]?.inertness.firstDivergentStepMin).toBe(fromStep + 1);
+    expect(report.comparison.points[1]?.inertness.divergentAtOrBeforeBound).toBe(0);
+    expect(renderLateFormComparisonText(report)).toContain('±16 %');
+    // Une rampe qui ne monte pas est refusée.
+    expect(() => runLateFormComparison(corpusSeeds(1), { amplitude, fullS: LATE_FORM_FROM_S })).toThrow(
+      RangeError,
+    );
   });
 });
 
@@ -1811,6 +1855,23 @@ describe('ligne de commande', () => {
 
     expect(() => parseSuspenseAuditArgs(['--late-form-amplitude=0'])).toThrow(RangeError);
     expect(() => parseSuspenseAuditArgs(['--late-form-amplitude=abc'])).toThrow(RangeError);
+
+    // Rampe « plus tardive » : 100 % à 50 s.
+    const ramp = parseSuspenseAuditArgs(['--late-form-full-s=50']);
+    expect(ramp).not.toBe('help');
+    if (ramp === 'help') {
+      throw new Error('aide inattendue');
+    }
+    expect(ramp.lateForm).toBe(true);
+    expect(ramp.lateFormFullS).toBe(50);
+    const defaultsRamp = parseSuspenseAuditArgs(['--late-form']);
+    expect(defaultsRamp).not.toBe('help');
+    if (defaultsRamp === 'help') {
+      throw new Error('aide inattendue');
+    }
+    expect(defaultsRamp.lateFormFullS).toBe(LATE_FORM_FULL_S);
+    expect(() => parseSuspenseAuditArgs(['--late-form-full-s=40'])).toThrow(RangeError);
+    expect(() => parseSuspenseAuditArgs(['--late-form-full-s=abc'])).toThrow(RangeError);
   });
 
   it('refuse une entrée invalide et répond à --help', () => {

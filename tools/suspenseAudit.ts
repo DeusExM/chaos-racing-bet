@@ -231,8 +231,21 @@ export const SURGE_INTERVAL_TARGETS: readonly string[] = Object.freeze([
 /** Seconde où la forme de fin de course commence à s'appliquer (0 % de l'effet à cette borne). */
 export const LATE_FORM_FROM_S = LEADER_BOUNDS_S[1] ?? 40;
 
-/** Seconde où l'effet de la forme de fin de course est complet (100 %). */
+/** Seconde où l'effet de la forme de fin de course est complet (100 %), par défaut. */
 export const LATE_FORM_FULL_S = LATE_FORM_FROM_S + 2;
+
+/**
+ * Cibles du test « forme de fin de course ».
+ *
+ * Distinctes de celles du sweep et du candidat surges : ici, la bande visée pour le leader de 40 s est
+ * plus étroite (50–55 %), parce que le mécanisme a déjà montré qu'il pouvait la faire reculer.
+ */
+export const LATE_FORM_TARGETS: readonly string[] = Object.freeze([
+  'leader à 40 s gagnant : 50–55 %',
+  'changement visible dans les 10 dernières secondes : ≥ 35 %',
+  'plus de remontées tardives, vainqueurs toujours équilibrés',
+  'écarts finaux et arrivées serrées à surveiller',
+]);
 
 /** Demi-amplitude de la forme de fin de course : `±8 %`. */
 export const LATE_FORM_AMPLITUDE = 0.08;
@@ -330,18 +343,26 @@ export function runLateFormComparison(
   seeds: readonly string[],
   options: {
     readonly amplitude?: number;
+    /** Seconde où l'effet est complet ; la montée part toujours de `LATE_FORM_FROM_S` à 0 %. */
+    readonly fullS?: number;
     readonly onVariant?: (index: number, total: number) => void;
   } = {},
 ): LateFormComparisonReport {
   const amplitude = options.amplitude ?? LATE_FORM_AMPLITUDE;
+  const fullS = options.fullS ?? LATE_FORM_FULL_S;
+  if (!(fullS > LATE_FORM_FROM_S)) {
+    throw new RangeError(
+      `runLateFormComparison : la rampe doit se terminer après ${decimal(LATE_FORM_FROM_S, 0)} s (reçu : ${decimal(fullS, 0)} s).`,
+    );
+  }
   const fromStep = stepsForSeconds(LATE_FORM_FROM_S);
-  const fullAtStep = stepsForSeconds(LATE_FORM_FULL_S);
+  const fullAtStep = stepsForSeconds(fullS);
   const comparison = compareSuspenseVariants(
     seeds,
     [
       { label: 'production', options: {} },
       {
-        label: `lateForm ±${decimal(amplitude * 100, 0)} % (${decimal(LATE_FORM_FROM_S, 0)} → ${decimal(LATE_FORM_FULL_S, 0)} s)`,
+        label: `lateForm ±${decimal(amplitude * 100, 0)} % (${decimal(LATE_FORM_FROM_S, 0)} → ${decimal(fullS, 0)} s)`,
         options: (seed: string) => ({
           lateForm: { fromStep, fullAtStep, values: lateFormValues(seed, amplitude) },
         }),
@@ -355,7 +376,7 @@ export function runLateFormComparison(
     comparison,
     amplitude,
     fromS: LATE_FORM_FROM_S,
-    fullS: LATE_FORM_FULL_S,
+    fullS,
     fromStep,
     fullAtStep,
     statsByCharacter: stats.byCharacter,
@@ -402,7 +423,7 @@ export function renderLateFormComparisonText(report: LateFormComparisonReport): 
   lines.push(...inertnessLines(points, report.fromS));
   lines.push('');
   lines.push('Cible annoncée :');
-  for (const target of SURGE_INTERVAL_TARGETS) {
+  for (const target of LATE_FORM_TARGETS) {
     lines.push(`  - ${target}`);
   }
   lines.push('');
@@ -3212,6 +3233,8 @@ export interface SuspenseAuditCliOptions {
   /** Mode expérimental : comparaison « forme de fin de course persistante ». */
   readonly lateForm: boolean;
   readonly lateFormAmplitude: number;
+  /** Seconde où la rampe atteint 100 % (défaut : 42 s). */
+  readonly lateFormFullS: number;
 }
 
 const AUDIT_HELP: readonly string[] = Object.freeze([
@@ -3232,6 +3255,7 @@ const AUDIT_HELP: readonly string[] = Object.freeze([
   `  --surge-interval-mean=<s>    intervalle moyen du candidat (défaut : ${decimal(SURGE_INTERVAL_CANDIDATE_MEAN_S, 0)} s)`,
   `  --late-form                  mode expérimental : forme de fin de course ±${decimal(LATE_FORM_AMPLITUDE * 100, 0)} % après ${decimal(LATE_FORM_FROM_S, 0)} s`,
   `  --late-form-amplitude=<x>    demi-amplitude du candidat (défaut : ${decimal(LATE_FORM_AMPLITUDE * 100, 0)} %)`,
+  `  --late-form-full-s=<s>       seconde où la rampe atteint 100 % (défaut : ${decimal(LATE_FORM_FULL_S, 0)} s)`,
   '  --help                       affiche cette aide',
   '',
 ]);
@@ -3250,6 +3274,7 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
   let surgeIntervalMeanS = SURGE_INTERVAL_CANDIDATE_MEAN_S;
   let lateForm = false;
   let lateFormAmplitude = LATE_FORM_AMPLITUDE;
+  let lateFormFullS = LATE_FORM_FULL_S;
 
   const integer = (value: string, label: string): number => {
     const parsed = Number.parseInt(value, 10);
@@ -3335,6 +3360,18 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
       lateForm = true;
       continue;
     }
+    if (argument.startsWith('--late-form-full-s=')) {
+      const raw = argument.slice('--late-form-full-s='.length);
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed <= LATE_FORM_FROM_S) {
+        throw new RangeError(
+          `--late-form-full-s attend une durée > ${decimal(LATE_FORM_FROM_S, 0)} s (reçu : ${raw}).`,
+        );
+      }
+      lateFormFullS = parsed;
+      lateForm = true;
+      continue;
+    }
     if (argument === '--help' || argument === '-h') {
       return 'help';
     }
@@ -3354,6 +3391,7 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
     surgeIntervalMeanS,
     lateForm,
     lateFormAmplitude,
+    lateFormFullS,
   });
 }
 
@@ -3395,10 +3433,11 @@ export function runSuspenseAuditWithReport(argv: readonly string[]): SuspenseAud
   if (options.lateForm) {
     console.log(
       `forme de fin de course ±${decimal(options.lateFormAmplitude * 100, 0)} % : montée de ` +
-        `${decimal(LATE_FORM_FROM_S, 0)} s à ${decimal(LATE_FORM_FULL_S, 0)} s`,
+        `${decimal(LATE_FORM_FROM_S, 0)} s à ${decimal(options.lateFormFullS, 0)} s`,
     );
     const report = runLateFormComparison(seeds, {
       amplitude: options.lateFormAmplitude,
+      fullS: options.lateFormFullS,
       onVariant: (index, total) => {
         console.log(`  … variante ${String(index)}/${String(total)}`);
       },

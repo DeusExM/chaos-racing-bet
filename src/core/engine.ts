@@ -11,6 +11,7 @@ import type { RngStream } from './rng';
 import { forkStream } from './rng';
 import { normalizeSeed } from './seed';
 import { computeTargetSpeed, integratePosition, integrateSpeed, lateFormFactor } from './speedModel';
+import type { LateFormEnvelope } from './speedModel';
 import type { SurgeParams, SurgeState, SurgeStepRange } from './surges';
 import { createSurgeState, intervalStepRangeForMean, stepSurge, surgeParams } from './surges';
 import { segmentElapsedS, segmentIndexAt } from './track';
@@ -144,12 +145,11 @@ export class RaceEngine {
    * `undefined` en production. Les valeurs sont **fournies** par l'appelant : le noyau ne tire rien
    * lui-même, donc cette option ne consomme aucun tirage et ne peut décaler ni les dérives, ni les
    * surges, ni les événements. Chaque forme multiplie la vitesse **cible** du personnage
-   * correspondant, progressivement entre `fromStep` et `fullAtStep` (voir `lateFormFactor`).
+   * correspondant, pondérée par l'enveloppe temporelle (voir `lateFormFactor`).
    */
   private readonly lateForm:
     | {
-        readonly fromStep: number;
-        readonly fullAtStep: number;
+        readonly envelope: LateFormEnvelope;
         readonly values: readonly number[];
       }
     | undefined;
@@ -264,11 +264,12 @@ export class RaceEngine {
    * retouché : le levier ne peut donc rien changer avant `fromStep`.
    *
    * `options.lateForm` n'existe lui aussi que pour la **mesure** : une forme relative par personnage
-   * (moyenne nulle sur le roster, une valeur par partant, dans l'ordre des partants), montée
-   * linéairement de `0 %` à `fromStep` jusqu'à `100 %` à `fullAtStep`, puis maintenue. Elle multiplie
-   * la vitesse **cible**, donc l'effet passe par les rampes existantes. Le noyau ne tire aucune
-   * valeur : c'est l'appelant qui fournit le tableau, ce qui garantit qu'aucun flux du moteur n'est
-   * décalé.
+   * (moyenne nulle sur le roster, une valeur par partant, dans l'ordre des partants), pondérée par
+   * une enveloppe temporelle — `0 %` jusqu'à `fromStep` inclus, montée jusqu'à `fullAtStep`, plateau
+   * éventuel, puis retombée optionnelle jusqu'à `endStep` où l'effet redevient **exactement** nul.
+   * Elle multiplie la vitesse **cible**, donc l'effet passe par les rampes existantes. Le noyau ne
+   * tire aucune valeur : c'est l'appelant qui fournit le tableau, ce qui garantit qu'aucun flux du
+   * moteur n'est décalé.
    */
   constructor(
     seed: string,
@@ -281,6 +282,8 @@ export class RaceEngine {
       readonly lateForm?: {
         readonly fromStep: number;
         readonly fullAtStep: number;
+        readonly fallFromStep?: number;
+        readonly endStep?: number;
         readonly values: readonly number[];
       };
     } = {},
@@ -300,8 +303,14 @@ export class RaceEngine {
       options.lateForm === undefined
         ? undefined
         : Object.freeze({
-            fromStep: options.lateForm.fromStep,
-            fullAtStep: options.lateForm.fullAtStep,
+            envelope: Object.freeze({
+              fromStep: options.lateForm.fromStep,
+              fullAtStep: options.lateForm.fullAtStep,
+              ...(options.lateForm.fallFromStep === undefined
+                ? {}
+                : { fallFromStep: options.lateForm.fallFromStep }),
+              ...(options.lateForm.endStep === undefined ? {} : { endStep: options.lateForm.endStep }),
+            }),
             values: Object.freeze([...options.lateForm.values]),
           });
     this.driftParams = Object.freeze({
@@ -416,7 +425,7 @@ export class RaceEngine {
       const formFactor =
         this.lateForm === undefined || form === 0
           ? 1
-          : lateFormFactor(form, stepNumber, this.lateForm.fromStep, this.lateForm.fullAtStep);
+          : lateFormFactor(form, stepNumber, this.lateForm.envelope);
 
       const targetV = computeTargetSpeed(character, this.config);
       const modulatedV = formFactor === 1 ? targetV : targetV * formFactor;

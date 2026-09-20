@@ -27,36 +27,54 @@ export function computeTargetSpeed(character: CharacterState, config: GameConfig
 }
 
 /**
- * Facteur multiplicatif d'une **forme de fin de course**, monté progressivement (mesure uniquement).
+ * Enveloppe temporelle d'une **forme de fin de course**, en numéros de pas.
  *
- * `form` est un écart relatif constant propre à un personnage (`+0,08` = « 8 % plus vite que sa
- * propre cible »). Le facteur vaut exactement `1` jusqu'à `fromStep` **inclus** — le pas qui atteint
- * la borne ne subit donc rien — puis croît linéairement jusqu'à `1 + form` à `fullAtStep`, et reste
- * à cette valeur ensuite. Exemple : `form = +0,08`, `fromStep` = 40 s, `fullAtStep` = 42 s donnent
- * `+0 %` à 40 s, `+4 %` à 41 s, `+8 %` à 42 s et au-delà.
+ * Elle décrit la part de l'effet appliquée à chaque pas : `0` jusqu'à `fromStep` inclus, montée
+ * linéaire jusqu'à `fullAtStep`, plateau à `1` jusqu'à `fallFromStep`, puis descente linéaire
+ * jusqu'à `endStep` où l'effet revient **exactement** à `0`.
+ *
+ * `fallFromStep` et `endStep` sont absents quand l'effet doit rester complet jusqu'à l'arrivée : la
+ * forme précédente du levier reste donc exprimable sans cas particulier dans le noyau.
+ */
+export interface LateFormEnvelope {
+  readonly fromStep: number;
+  readonly fullAtStep: number;
+  readonly fallFromStep?: number;
+  readonly endStep?: number;
+}
+
+/**
+ * Facteur multiplicatif d'une **forme de fin de course** à un pas donné (mesure uniquement).
+ *
+ * `form` est un écart relatif constant propre à un personnage (`+0,16` = « 16 % plus vite que sa
+ * propre cible »), pondéré par l'enveloppe : `+0 %` à 40 s, `+8 %` à 45 s, `+16 %` à 50 s, `+16 %` à
+ * 55 s, `+8 %` à 57,5 s, `+0 %` à 60 s pour une enveloppe `40 → 50 → 55 → 60`.
  *
  * Le facteur ne reçoit que le numéro du pas et la forme du personnage : il ne peut donc lire ni le
- * rang, ni la distance, ni l'écart, et il n'est pas un rubber-band (toutes les formes sont de moyenne
- * nulle et tirées indépendamment, aucune règle ne réagit à la position). Il multiplie la **vitesse
- * cible** et non la position : l'effet passe donc toujours par la rampe d'accélération et de
- * décélération de `integrateSpeed`, et par l'écrêtage `SPEED.MIN`/`SPEED.MAX`.
+ * rang, ni la distance, ni l'écart, et il n'est pas un rubber-band (formes de moyenne nulle, tirées
+ * indépendamment, aucune règle ne réagit à la position). Il multiplie la **vitesse cible** et non la
+ * position : l'effet passe donc toujours par la rampe d'accélération et de décélération de
+ * `integrateSpeed`, et par l'écrêtage `SPEED.MIN`/`SPEED.MAX`.
  *
- * Aucune fonction transcendante : une soustraction, une division et une multiplication, dont
- * l'arrondi est exactement spécifié par ECMAScript.
+ * Aucune fonction transcendante : soustractions, divisions, multiplications et `Math.min`/`Math.max`,
+ * dont l'arrondi est exactement spécifié par ECMAScript.
  */
-export function lateFormFactor(
-  form: number,
-  stepNumber: number,
-  fromStep: number,
-  fullAtStep: number,
-): number {
-  if (form === 0 || stepNumber <= fromStep) {
+export function lateFormFactor(form: number, stepNumber: number, envelope: LateFormEnvelope): number {
+  if (form === 0 || stepNumber <= envelope.fromStep) {
     return 1;
   }
-  if (fullAtStep <= fromStep) {
-    return 1 + form;
+
+  const riseSpan = envelope.fullAtStep - envelope.fromStep;
+  let progress = riseSpan <= 0 ? 1 : Math.min(1, (stepNumber - envelope.fromStep) / riseSpan);
+
+  const fallFromStep = envelope.fallFromStep;
+  const endStep = envelope.endStep;
+  if (fallFromStep !== undefined && endStep !== undefined && stepNumber > fallFromStep) {
+    const fallSpan = endStep - fallFromStep;
+    const remaining = fallSpan <= 0 ? 0 : (endStep - stepNumber) / fallSpan;
+    progress = Math.min(progress, Math.max(0, remaining));
   }
-  const progress = Math.min(1, (stepNumber - fromStep) / (fullAtStep - fromStep));
+
   return 1 + form * progress;
 }
 

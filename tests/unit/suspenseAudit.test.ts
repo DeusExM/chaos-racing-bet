@@ -59,6 +59,7 @@ import {
   SURGE_INTERVAL_BASELINE_MEAN_S,
   SURGE_INTERVAL_CANDIDATE_MEAN_S,
   SURGE_INTERVAL_FROM_S,
+  TIGHT_FINISH_GAP_M,
   LATE_FORM_AMPLITUDE,
   LATE_FORM_FROM_S,
   LATE_FORM_FULL_S,
@@ -1553,6 +1554,8 @@ describe('surges plus fréquents après 40 s', () => {
 describe('forme de fin de course persistante ±8 %', () => {
   const fromStep = stepsForSeconds(LATE_FORM_FROM_S);
   const fullAtStep = stepsForSeconds(LATE_FORM_FULL_S);
+  /** Enveloppe du candidat ±8 % : montée 40 → 42 s, puis effet complet jusqu'à l'arrivée. */
+  const envelope = { fromStep, fullAtStep };
 
   it('monte progressivement de 0 % à 40 s jusqu’à 100 % à 42 s', () => {
     expect(LATE_FORM_FROM_S).toBe(LEADER_BOUNDS_S[1]);
@@ -1560,17 +1563,17 @@ describe('forme de fin de course persistante ±8 %', () => {
     expect(LATE_FORM_AMPLITUDE).toBe(0.08);
 
     // Le pas qui atteint 40 s ne subit rien : l'identité jusqu'à 40 s incluse est exacte.
-    expect(lateFormFactor(0.08, fromStep, fromStep, fullAtStep)).toBe(1);
-    expect(lateFormFactor(0.08, fromStep - 1, fromStep, fullAtStep)).toBe(1);
+    expect(lateFormFactor(0.08, fromStep, envelope)).toBe(1);
+    expect(lateFormFactor(0.08, fromStep - 1, envelope)).toBe(1);
     // 41 s : la moitié de l'effet ; 42 s : l'effet complet.
-    expect(lateFormFactor(0.08, stepsForSeconds(41), fromStep, fullAtStep)).toBeCloseTo(1.04, 12);
-    expect(lateFormFactor(0.08, fullAtStep, fromStep, fullAtStep)).toBeCloseTo(1.08, 12);
+    expect(lateFormFactor(0.08, stepsForSeconds(41), envelope)).toBeCloseTo(1.04, 12);
+    expect(lateFormFactor(0.08, fullAtStep, envelope)).toBeCloseTo(1.08, 12);
     // Puis constant jusqu'à l'arrivée.
-    expect(lateFormFactor(0.08, RACE_CONFIG.TOTAL_STEPS, fromStep, fullAtStep)).toBeCloseTo(1.08, 12);
+    expect(lateFormFactor(0.08, RACE_CONFIG.TOTAL_STEPS, envelope)).toBeCloseTo(1.08, 12);
     // Symétrique : une forme négative freine exactement autant.
-    expect(lateFormFactor(-0.08, fullAtStep, fromStep, fullAtStep)).toBeCloseTo(0.92, 12);
+    expect(lateFormFactor(-0.08, fullAtStep, envelope)).toBeCloseTo(0.92, 12);
     // Une forme nulle est inerte, à tout pas.
-    expect(lateFormFactor(0, RACE_CONFIG.TOTAL_STEPS, fromStep, fullAtStep)).toBe(1);
+    expect(lateFormFactor(0, RACE_CONFIG.TOTAL_STEPS, envelope)).toBe(1);
   });
 
   it('tire une forme par personnage sur un flux dédié, dans les bornes', () => {
@@ -1707,10 +1710,10 @@ describe('forme de fin de course persistante ±8 %', () => {
     const fullS = 50;
     const fullAtStep = stepsForSeconds(fullS);
 
-    expect(lateFormFactor(amplitude, fromStep, fromStep, fullAtStep)).toBe(1);
-    expect(lateFormFactor(amplitude, stepsForSeconds(45), fromStep, fullAtStep)).toBeCloseTo(1.08, 12);
-    expect(lateFormFactor(amplitude, fullAtStep, fromStep, fullAtStep)).toBeCloseTo(1.16, 12);
-    expect(lateFormFactor(-amplitude, fullAtStep, fromStep, fullAtStep)).toBeCloseTo(0.84, 12);
+    expect(lateFormFactor(amplitude, fromStep, { fromStep, fullAtStep })).toBe(1);
+    expect(lateFormFactor(amplitude, stepsForSeconds(45), { fromStep, fullAtStep })).toBeCloseTo(1.08, 12);
+    expect(lateFormFactor(amplitude, fullAtStep, { fromStep, fullAtStep })).toBeCloseTo(1.16, 12);
+    expect(lateFormFactor(-amplitude, fullAtStep, { fromStep, fullAtStep })).toBeCloseTo(0.84, 12);
 
     const seed = 'KR7Z8NAR';
     const values = lateFormValues(seed, amplitude);
@@ -1743,6 +1746,103 @@ describe('forme de fin de course persistante ±8 %', () => {
     expect(() => runLateFormComparison(corpusSeeds(1), { amplitude, fullS: LATE_FORM_FROM_S })).toThrow(
       RangeError,
     );
+  });
+
+  it('applique une enveloppe 40→50→55→60 et revient exactement à 1 à l’arrivée', () => {
+    const amplitude = 0.16;
+    const fullS = 50;
+    const fallFromS = 55;
+    const endS = 60;
+    const envelope = {
+      fromStep,
+      fullAtStep: stepsForSeconds(fullS),
+      fallFromStep: stepsForSeconds(fallFromS),
+      endStep: stepsForSeconds(endS),
+    };
+
+    // 40 s : rien ; 45 s : +8 % ; 50 s et 55 s : +16 % ; 57,5 s : +8 % ; 60 s : exactement 1.
+    expect(lateFormFactor(amplitude, fromStep, envelope)).toBe(1);
+    expect(lateFormFactor(amplitude, stepsForSeconds(45), envelope)).toBeCloseTo(1.08, 12);
+    expect(lateFormFactor(amplitude, stepsForSeconds(fullS), envelope)).toBeCloseTo(1.16, 12);
+    expect(lateFormFactor(amplitude, stepsForSeconds(fallFromS), envelope)).toBeCloseTo(1.16, 12);
+    expect(lateFormFactor(amplitude, stepsForSeconds(57.5), envelope)).toBeCloseTo(1.08, 12);
+    // Contrôle demandé : le multiplicateur est **exactement** 1 au pas de 60 s (3600).
+    expect(lateFormFactor(amplitude, stepsForSeconds(endS), envelope)).toBe(1);
+    expect(stepsForSeconds(endS)).toBe(RACE_CONFIG.TOTAL_STEPS);
+    // …et il ne l'est pas encore tout à fait au pas précédent.
+    expect(lateFormFactor(amplitude, RACE_CONFIG.TOTAL_STEPS - 1, envelope)).toBeGreaterThan(1);
+    // Symétrie parfaite en négatif.
+    expect(lateFormFactor(-amplitude, stepsForSeconds(fullS), envelope)).toBeCloseTo(0.84, 12);
+    expect(lateFormFactor(-amplitude, stepsForSeconds(57.5), envelope)).toBeCloseTo(0.92, 12);
+    expect(lateFormFactor(-amplitude, stepsForSeconds(endS), envelope)).toBe(1);
+
+    const seed = 'KR7Z8NAR';
+    const candidate = {
+      lateForm: {
+        fromStep,
+        fullAtStep: envelope.fullAtStep,
+        fallFromStep: envelope.fallFromStep,
+        endStep: envelope.endStep,
+        values: lateFormValues(seed, amplitude),
+      },
+    };
+    const baseline = auditSuspenseRace(seed);
+    const variant = auditSuspenseRace(seed, candidate);
+    // Identité jusqu'à 40 s inclus, puis premier pas divergent = 2401 (après la borne).
+    expect(variant.leadersAtBounds[1]).toBe(baseline.leadersAtBounds[1]);
+    expect(variant.gapAtBoundsM[1]).toBe(baseline.gapAtBoundsM[1]);
+    expect(firstDivergentStep(seed, candidate)).toBe(fromStep + 1);
+
+    const report = runLateFormComparison(corpusSeeds(2), { amplitude, fullS, fallFromS, endS });
+    expect(report.fallFromS).toBe(fallFromS);
+    expect(report.endS).toBe(endS);
+    expect(report.fallFromStep).toBe(envelope.fallFromStep);
+    expect(report.endStep).toBe(RACE_CONFIG.TOTAL_STEPS);
+    expect(report.comparison.points[1]?.label).toContain('40 → 50 → 55 → 60 s');
+    expect(report.comparison.points[1]?.inertness.firstDivergentStepMin).toBe(fromStep + 1);
+    const text = renderLateFormComparisonText(report);
+    expect(text).toContain('retombée linéaire de 55 s à 60 s');
+    expect(text).toContain('exactement 1');
+    const json = JSON.stringify(buildLateFormComparisonJson(report));
+    expect(json).toContain('"factorOneAtEnd":true');
+    expect(json).toContain('"endS":60');
+
+    // Une retombée incomplète ou incohérente est refusée.
+    expect(() => runLateFormComparison(corpusSeeds(1), { amplitude, fullS, fallFromS })).toThrow(RangeError);
+    expect(() =>
+      runLateFormComparison(corpusSeeds(1), { amplitude, fullS, fallFromS: 45, endS: 60 }),
+    ).toThrow(RangeError);
+    expect(() =>
+      runLateFormComparison(corpusSeeds(1), { amplitude, fullS, fallFromS: 55, endS: 55 }),
+    ).toThrow(RangeError);
+  });
+
+  it('expose la fenêtre des 5 dernières secondes et le seuil des 10 m', () => {
+    const summary = summarizeSuspenseAudit(corpusSeeds(2).map((seed) => auditSuspenseRace(seed)));
+    const metrics = noiseSweepMetrics(summary);
+
+    // Les fenêtres visibles sont celles des changements bruts, et 10 s concorde exactement avec la
+    // mesure historique `visibleInFinalWindowPercent`.
+    expect(summary.visibleChanges.windowsS).toEqual([...LAST_CHANGE_WINDOWS_S]);
+    expect(summary.visibleChanges.visibleWithinWindowPercent).toHaveLength(LAST_CHANGE_WINDOWS_S.length);
+    const indexOf10 = LAST_CHANGE_WINDOWS_S.indexOf(10);
+    expect(summary.visibleChanges.visibleWithinWindowPercent[indexOf10]).toBe(
+      summary.visibleChanges.visibleInFinalWindowPercent,
+    );
+    expect(metrics.visibleChangeInLast5Percent).toBe(
+      summary.visibleChanges.visibleWithinWindowPercent[LAST_CHANGE_WINDOWS_S.indexOf(5)],
+    );
+    // Les deux seuils d'arrivée serrée sortent de la même table de seuils.
+    const indexOf15 = summary.gapThresholdsM.indexOf(FACT.CLOSE_RACE_MAX_GAP_M);
+    const indexOf10m = summary.gapThresholdsM.indexOf(TIGHT_FINISH_GAP_M);
+    expect(metrics.finishUnder15mPercent).toBe(summary.finalSuspense.photoAtFinishPercent[indexOf15]);
+    expect(metrics.finishUnder10mPercent).toBe(summary.finalSuspense.photoAtFinishPercent[indexOf10m]);
+    expect(metrics.finishUnder10mPercent).toBeLessThanOrEqual(metrics.finishUnder15mPercent);
+
+    const report = runLateFormComparison(corpusSeeds(1), { amplitude: LATE_FORM_AMPLITUDE });
+    const text = renderLateFormComparisonText(report);
+    expect(text).toContain('changement visible dans les 5 dernières secondes');
+    expect(text).toContain('arrivée sous 10 m');
   });
 });
 
@@ -1872,6 +1972,32 @@ describe('ligne de commande', () => {
     expect(defaultsRamp.lateFormFullS).toBe(LATE_FORM_FULL_S);
     expect(() => parseSuspenseAuditArgs(['--late-form-full-s=40'])).toThrow(RangeError);
     expect(() => parseSuspenseAuditArgs(['--late-form-full-s=abc'])).toThrow(RangeError);
+
+    // Enveloppe complète : plateau jusqu'à 55 s, retour exact à 0 % à 60 s.
+    const envelope = parseSuspenseAuditArgs([
+      '--late-form',
+      '--late-form-amplitude=16',
+      '--late-form-full-s=50',
+      '--late-form-fall-s=55',
+      '--late-form-end-s=60',
+    ]);
+    expect(envelope).not.toBe('help');
+    if (envelope === 'help') {
+      throw new Error('aide inattendue');
+    }
+    expect(envelope.lateFormAmplitude).toBe(0.16);
+    expect(envelope.lateFormFullS).toBe(50);
+    expect(envelope.lateFormFallS).toBe(55);
+    expect(envelope.lateFormEndS).toBe(60);
+    const noFall = parseSuspenseAuditArgs(['--late-form']);
+    expect(noFall).not.toBe('help');
+    if (noFall === 'help') {
+      throw new Error('aide inattendue');
+    }
+    expect(noFall.lateFormFallS).toBeNull();
+    expect(noFall.lateFormEndS).toBeNull();
+    expect(() => parseSuspenseAuditArgs(['--late-form-fall-s=0'])).toThrow(RangeError);
+    expect(() => parseSuspenseAuditArgs(['--late-form-end-s=abc'])).toThrow(RangeError);
   });
 
   it('refuse une entrée invalide et répond à --help', () => {

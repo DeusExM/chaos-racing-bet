@@ -228,6 +228,9 @@ export const SURGE_INTERVAL_TARGETS: readonly string[] = Object.freeze([
   'aucun déséquilibre significatif entre les six personnages',
 ]);
 
+/** Seuil d'arrivée serrée du test « forme de fin de course » : `10 m` entre P1 et P2. */
+export const TIGHT_FINISH_GAP_M = 10;
+
 /** Seconde où la forme de fin de course commence à s'appliquer (0 % de l'effet à cette borne). */
 export const LATE_FORM_FROM_S = LEADER_BOUNDS_S[1] ?? 40;
 
@@ -275,6 +278,12 @@ export interface LateFormComparisonReport {
   readonly fullS: number;
   readonly fromStep: number;
   readonly fullAtStep: number;
+  /** Début de la retombée, ou `null` quand l'effet reste complet jusqu'à l'arrivée. */
+  readonly fallFromS: number | null;
+  readonly fallFromStep: number | null;
+  /** Retour à zéro, ou `null` quand il n'y a pas de retombée. */
+  readonly endS: number | null;
+  readonly endStep: number | null;
   readonly statsByCharacter: readonly LateFormCharacterStats[];
   readonly pooledMean: number;
 }
@@ -345,6 +354,9 @@ export function runLateFormComparison(
     readonly amplitude?: number;
     /** Seconde où l'effet est complet ; la montée part toujours de `LATE_FORM_FROM_S` à 0 %. */
     readonly fullS?: number;
+    /** Début de la retombée, et seconde où l'effet redevient exactement nul. */
+    readonly fallFromS?: number;
+    readonly endS?: number;
     readonly onVariant?: (index: number, total: number) => void;
   } = {},
 ): LateFormComparisonReport {
@@ -355,16 +367,47 @@ export function runLateFormComparison(
       `runLateFormComparison : la rampe doit se terminer après ${decimal(LATE_FORM_FROM_S, 0)} s (reçu : ${decimal(fullS, 0)} s).`,
     );
   }
+  const fallFromS = options.fallFromS ?? null;
+  const endS = options.endS ?? null;
+  if ((fallFromS === null) !== (endS === null)) {
+    throw new RangeError('runLateFormComparison : une retombée demande son début ET sa fin.');
+  }
+  if (fallFromS !== null && endS !== null) {
+    if (!(fallFromS >= fullS)) {
+      throw new RangeError(
+        `runLateFormComparison : la retombée commence au plus tôt à ${decimal(fullS, 0)} s (reçu : ${decimal(fallFromS, 0)} s).`,
+      );
+    }
+    if (!(endS > fallFromS)) {
+      throw new RangeError(
+        `runLateFormComparison : la retombée doit se terminer après ${decimal(fallFromS, 0)} s (reçu : ${decimal(endS, 0)} s).`,
+      );
+    }
+  }
+
   const fromStep = stepsForSeconds(LATE_FORM_FROM_S);
   const fullAtStep = stepsForSeconds(fullS);
+  const fallFromStep = fallFromS === null ? null : stepsForSeconds(fallFromS);
+  const endStep = endS === null ? null : stepsForSeconds(endS);
+  const envelopeLabel =
+    fallFromStep === null || endStep === null
+      ? `${decimal(LATE_FORM_FROM_S, 0)} → ${decimal(fullS, 0)} s`
+      : `${decimal(LATE_FORM_FROM_S, 0)} → ${decimal(fullS, 0)} → ${decimal(fallFromS ?? 0, 0)} → ${decimal(endS ?? 0, 0)} s`;
+
   const comparison = compareSuspenseVariants(
     seeds,
     [
       { label: 'production', options: {} },
       {
-        label: `lateForm ±${decimal(amplitude * 100, 0)} % (${decimal(LATE_FORM_FROM_S, 0)} → ${decimal(fullS, 0)} s)`,
+        label: `lateForm ±${decimal(amplitude * 100, 0)} % (${envelopeLabel})`,
         options: (seed: string) => ({
-          lateForm: { fromStep, fullAtStep, values: lateFormValues(seed, amplitude) },
+          lateForm: {
+            fromStep,
+            fullAtStep,
+            ...(fallFromStep === null ? {} : { fallFromStep }),
+            ...(endStep === null ? {} : { endStep }),
+            values: lateFormValues(seed, amplitude),
+          },
         }),
       },
     ],
@@ -379,9 +422,30 @@ export function runLateFormComparison(
     fullS,
     fromStep,
     fullAtStep,
+    fallFromS,
+    fallFromStep,
+    endS,
+    endStep,
     statsByCharacter: stats.byCharacter,
     pooledMean: stats.pooledMean,
   });
+}
+
+/** Description lisible de l'enveloppe : « 0 % à 40 s, 100 % à 50 s, plateau, 0 % à 60 s ». */
+function lateFormEnvelopeLabel(report: LateFormComparisonReport): string {
+  const parts = [
+    `0 % à ${decimal(report.fromS, 0)} s`,
+    `100 % à ${decimal(report.fullS, 0)} s`,
+  ];
+  if (report.fallFromS !== null && report.endS !== null) {
+    parts.push(
+      `plateau jusqu'à ${decimal(report.fallFromS, 0)} s`,
+      `0 % à ${decimal(report.endS, 0)} s`,
+    );
+  } else {
+    parts.push('puis 100 % jusqu’à l’arrivée');
+  }
+  return parts.join(', ');
 }
 
 /** Rapport texte du test « forme de fin de course persistante ». */
@@ -392,12 +456,12 @@ export function renderLateFormComparisonText(report: LateFormComparisonReport): 
     `Chaos Race — forme de fin de course persistante ±${decimal(report.amplitude * 100, 0)} % (courses à 6 coureurs)`,
   );
   lines.push(
-    `corpus : ${String(report.comparison.seeds)} seeds | montée de ${decimal(report.fromS, 0)} s (0 %) à ` +
-      `${decimal(report.fullS, 0)} s (100 %) puis constante | durée : ${decimal(report.comparison.elapsedMs / 1_000, 1)} s`,
+    `corpus : ${String(report.comparison.seeds)} seeds | enveloppe : ${lateFormEnvelopeLabel(report)} | ` +
+      `durée : ${decimal(report.comparison.elapsedMs / 1_000, 1)} s`,
   );
   lines.push(
     'Levier : une forme relative par personnage, tirée uniformément sur un flux dédié « lateform:<charId> », ' +
-      'constante ensuite, appliquée en multiplicateur de la vitesse **cible** (donc via les rampes). ' +
+      'pondérée par une enveloppe temporelle, appliquée en multiplicateur de la vitesse **cible** (donc via les rampes). ' +
       'Aucun tirage supplémentaire dans les flux du moteur, aucune règle ne lit le rang.',
   );
   lines.push('');
@@ -418,6 +482,13 @@ export function renderLateFormComparisonText(report: LateFormComparisonReport): 
   lines.push(
     `  moyenne globale (les six confondus) : ${decimal(report.pooledMean * 100, 3)} % | ` +
       `espérance théorique : 0,000 % | bornes théoriques : ±${decimal(report.amplitude * 100, 0)} %`,
+  );
+  lines.push('');
+  lines.push(
+    report.endS === null
+      ? 'Enveloppe : effet maintenu jusqu’à l’arrivée.'
+      : `Enveloppe : retombée linéaire de ${decimal(report.fallFromS ?? 0, 0)} s à ${decimal(report.endS, 0)} s — ` +
+          `le multiplicateur vaut donc **exactement 1** au pas ${String(report.endStep ?? 0)} (tSim = 60 s).`,
   );
   lines.push('');
   lines.push(...inertnessLines(points, report.fromS));
@@ -446,6 +517,12 @@ export function buildLateFormComparisonJson(report: LateFormComparisonReport): u
       fromStep: report.fromStep,
       firstAffectedStep: report.fromStep + 1,
       fullAtStep: report.fullAtStep,
+      fallFromS: report.fallFromS,
+      fallFromStep: report.fallFromStep,
+      endS: report.endS,
+      endStep: report.endStep,
+      /** Le facteur est exactement `1` au dernier pas, donc l'effet est nul à l'arrivée. */
+      factorOneAtEnd: report.endStep !== null,
       amplitude: report.amplitude,
       streamPrefix: LATE_FORM_STREAM_PREFIX,
       dedicatedStream: true,
@@ -1153,10 +1230,14 @@ export interface AuditRaceOptions {
   readonly driftNoiseScale?: (stepNumber: number) => number;
   /** Moyenne d'intervalle de surge appliquée aux intervalles tirés **après** `fromStep`. */
   readonly surgeIntervalAfter?: { readonly fromStep: number; readonly meanS: number };
-  /** Forme de fin de course par partant (ordre des partants), montée de `fromStep` à `fullAtStep`. */
+  /** Forme de fin de course par partant (ordre des partants), pondérée par son enveloppe. */
   readonly lateForm?: {
     readonly fromStep: number;
     readonly fullAtStep: number;
+    /** Pas de début de la retombée ; absent = l'effet reste complet jusqu'à l'arrivée. */
+    readonly fallFromStep?: number;
+    /** Pas où l'effet redevient exactement nul ; absent = pas de retombée. */
+    readonly endStep?: number;
     readonly values: readonly number[];
   };
 }
@@ -1624,6 +1705,10 @@ export interface VisibleLeaderChangeStats {
   readonly racesWithoutVisibleChangePercent: number;
   /** Part des courses avec au moins un changement visible dans les 10 dernières secondes. */
   readonly visibleInFinalWindowPercent: number;
+  /** Fenêtres finales (s) des parts ci-dessous, dans l'ordre — les mêmes que les changements bruts. */
+  readonly windowsS: readonly number[];
+  /** Part des courses avec au moins un changement **visible** dans chacune de ces fenêtres. */
+  readonly visibleWithinWindowPercent: readonly number[];
 }
 
 /** Remontées **qualifiées** par une durée, par opposition aux remontées brutes d'un seul pas. */
@@ -1790,6 +1875,10 @@ export function summarizeSuspenseAudit(
   let racesWithVisibleChange = 0;
   let racesWithoutVisibleChange = 0;
   let visibleInFinalWindow = 0;
+  // Mêmes fenêtres que les changements **bruts**, mais comptées sur les seuls changements visibles :
+  // c'est ce qui permet de dire si un renversement perçu a lieu dans les 20, 10 ou 5 dernières
+  // secondes, et pas seulement s'il en existe un.
+  const visibleWithinWindowCounts = LAST_CHANGE_WINDOWS_S.map(() => 0);
   let heldLastTwoSeconds = 0;
   let lastStreakToTop3WithoutWin = 0;
   let at40FifthOrSixthToTop3 = 0;
@@ -1938,6 +2027,16 @@ export function summarizeSuspenseAudit(
     if (race.visible.changes.visibleInFinalWindow) {
       visibleInFinalWindow += 1;
     }
+    // Même convention que `visibleInFinalWindow` : un changement visible compte s'il a **commencé**
+    // dans la fenêtre, comparé au même pas de départ que `visibleSuspense`.
+    for (const [index, windowS] of LAST_CHANGE_WINDOWS_S.entries()) {
+      if (
+        race.visible.changes.lastVisibleChangeStep >=
+        RACE_CONFIG.TOTAL_STEPS - stepsForSeconds(windowS)
+      ) {
+        visibleWithinWindowCounts[index] = (visibleWithinWindowCounts[index] ?? 0) + 1;
+      }
+    }
     if (race.visible.heldLastTwoSeconds) {
       heldLastTwoSeconds += 1;
     }
@@ -2079,6 +2178,10 @@ export function summarizeSuspenseAudit(
       racesWithVisibleChangePercent: percentOf(racesWithVisibleChange, total),
       racesWithoutVisibleChangePercent: percentOf(racesWithoutVisibleChange, total),
       visibleInFinalWindowPercent: percentOf(visibleInFinalWindow, total),
+      windowsS: Object.freeze([...LAST_CHANGE_WINDOWS_S]),
+      visibleWithinWindowPercent: Object.freeze(
+        visibleWithinWindowCounts.map((count) => percentOf(count, total)),
+      ),
     }),
     qualifiedComebacks: Object.freeze({
       heldLastTwoSecondsPercent: percentOf(heldLastTwoSeconds, total),
@@ -2800,11 +2903,13 @@ export interface NoiseSweepMetrics {
   readonly leader40WinsPercent: number;
   readonly leader40LosesLeadAfter50Percent: number;
   readonly visibleChangeInFinalWindowPercent: number;
+  readonly visibleChangeInLast5Percent: number;
   readonly at40FifthOrSixthToTop3Percent: number;
   readonly at40FifthOrSixthToWinPercent: number;
   readonly sameLeaderAllBoundsPercent: number;
   readonly gapAtFinishMedianM: number;
   readonly finishUnder15mPercent: number;
+  readonly finishUnder10mPercent: number;
   readonly winnerSharesPercent: readonly number[];
 }
 
@@ -2825,19 +2930,23 @@ export interface NoiseSweepReport {
   readonly elapsedMs: number;
 }
 
-/** Extrait les neuf mesures comparées d'une synthèse, sans recalculer quoi que ce soit. */
+/** Extrait les mesures comparées d'une synthèse, sans recalculer quoi que ce soit. */
 export function noiseSweepMetrics(summary: SuspenseAuditSummary): NoiseSweepMetrics {
   const finishIndex = Math.max(0, summary.gapThresholdsM.indexOf(FACT.CLOSE_RACE_MAX_GAP_M));
+  const tightIndex = Math.max(0, summary.gapThresholdsM.indexOf(TIGHT_FINISH_GAP_M));
   const finish = summary.finalSuspense.gapAtBounds[summary.finalSuspense.gapAtBounds.length - 1];
+  const last5Index = Math.max(0, summary.visibleChanges.windowsS.indexOf(LAST_CHANGE_WINDOWS_S[2] ?? 5));
   return Object.freeze({
     leader40WinsPercent: summary.persistence.leader40EqualsWinnerPercent,
     leader40LosesLeadAfter50Percent: summary.qualifiedComebacks.leader40LosesLeadAfter50Percent,
     visibleChangeInFinalWindowPercent: summary.visibleChanges.visibleInFinalWindowPercent,
+    visibleChangeInLast5Percent: summary.visibleChanges.visibleWithinWindowPercent[last5Index] ?? Number.NaN,
     at40FifthOrSixthToTop3Percent: summary.qualifiedComebacks.at40FifthOrSixthToTop3Percent,
     at40FifthOrSixthToWinPercent: summary.qualifiedComebacks.at40FifthOrSixthToWinPercent,
     sameLeaderAllBoundsPercent: summary.persistence.sameLeaderAllBoundsPercent,
     gapAtFinishMedianM: finish?.median ?? Number.NaN,
     finishUnder15mPercent: summary.finalSuspense.photoAtFinishPercent[finishIndex] ?? Number.NaN,
+    finishUnder10mPercent: summary.finalSuspense.photoAtFinishPercent[tightIndex] ?? Number.NaN,
     winnerSharesPercent: Object.freeze([...summary.winnerShares.shares]),
   });
 }
@@ -2899,11 +3008,16 @@ const NOISE_SWEEP_ROWS: readonly { readonly label: string; readonly pick: (m: No
       label: 'changement visible dans les 10 dernières secondes',
       pick: (m) => percent(m.visibleChangeInFinalWindowPercent),
     },
+    {
+      label: 'changement visible dans les 5 dernières secondes',
+      pick: (m) => percent(m.visibleChangeInLast5Percent),
+    },
     { label: '5e/6e à 40 s → top 3', pick: (m) => percent(m.at40FifthOrSixthToTop3Percent) },
     { label: '5e/6e à 40 s → victoire', pick: (m) => percent(m.at40FifthOrSixthToWinPercent) },
     { label: 'même leader 20/40/60', pick: (m) => percent(m.sameLeaderAllBoundsPercent) },
     { label: 'écart P1–P2 médian à l’arrivée', pick: (m) => `${decimal(m.gapAtFinishMedianM)} m` },
     { label: 'arrivée sous 15 m', pick: (m) => percent(m.finishUnder15mPercent) },
+    { label: 'arrivée sous 10 m', pick: (m) => percent(m.finishUnder10mPercent) },
     {
       label: 'répartition des vainqueurs (c0→c5)',
       pick: (m) => m.winnerSharesPercent.map((share) => decimal(share, 1)).join(' / '),
@@ -3235,6 +3349,9 @@ export interface SuspenseAuditCliOptions {
   readonly lateFormAmplitude: number;
   /** Seconde où la rampe atteint 100 % (défaut : 42 s). */
   readonly lateFormFullS: number;
+  /** Retombée éventuelle : début du plateau descendant et retour exact à 0 % (60 s). */
+  readonly lateFormFallS: number | null;
+  readonly lateFormEndS: number | null;
 }
 
 const AUDIT_HELP: readonly string[] = Object.freeze([
@@ -3256,6 +3373,8 @@ const AUDIT_HELP: readonly string[] = Object.freeze([
   `  --late-form                  mode expérimental : forme de fin de course ±${decimal(LATE_FORM_AMPLITUDE * 100, 0)} % après ${decimal(LATE_FORM_FROM_S, 0)} s`,
   `  --late-form-amplitude=<x>    demi-amplitude du candidat (défaut : ${decimal(LATE_FORM_AMPLITUDE * 100, 0)} %)`,
   `  --late-form-full-s=<s>       seconde où la rampe atteint 100 % (défaut : ${decimal(LATE_FORM_FULL_S, 0)} s)`,
+  '  --late-form-fall-s=<s>       début de la retombée (plateau jusqu’à cette seconde)',
+  '  --late-form-end-s=<s>        seconde où l’effet redevient exactement nul (ex. 60)',
   '  --help                       affiche cette aide',
   '',
 ]);
@@ -3275,6 +3394,8 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
   let lateForm = false;
   let lateFormAmplitude = LATE_FORM_AMPLITUDE;
   let lateFormFullS = LATE_FORM_FULL_S;
+  let lateFormFallS: number | null = null;
+  let lateFormEndS: number | null = null;
 
   const integer = (value: string, label: string): number => {
     const parsed = Number.parseInt(value, 10);
@@ -3372,6 +3493,26 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
       lateForm = true;
       continue;
     }
+    if (argument.startsWith('--late-form-fall-s=')) {
+      const raw = argument.slice('--late-form-fall-s='.length);
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new RangeError(`--late-form-fall-s attend une durée > 0 s (reçu : ${raw}).`);
+      }
+      lateFormFallS = parsed;
+      lateForm = true;
+      continue;
+    }
+    if (argument.startsWith('--late-form-end-s=')) {
+      const raw = argument.slice('--late-form-end-s='.length);
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new RangeError(`--late-form-end-s attend une durée > 0 s (reçu : ${raw}).`);
+      }
+      lateFormEndS = parsed;
+      lateForm = true;
+      continue;
+    }
     if (argument === '--help' || argument === '-h') {
       return 'help';
     }
@@ -3392,6 +3533,8 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
     lateForm,
     lateFormAmplitude,
     lateFormFullS,
+    lateFormFallS,
+    lateFormEndS,
   });
 }
 
@@ -3438,6 +3581,8 @@ export function runSuspenseAuditWithReport(argv: readonly string[]): SuspenseAud
     const report = runLateFormComparison(seeds, {
       amplitude: options.lateFormAmplitude,
       fullS: options.lateFormFullS,
+      ...(options.lateFormFallS === null ? {} : { fallFromS: options.lateFormFallS }),
+      ...(options.lateFormEndS === null ? {} : { endS: options.lateFormEndS }),
       onVariant: (index, total) => {
         console.log(`  … variante ${String(index)}/${String(total)}`);
       },

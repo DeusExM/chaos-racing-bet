@@ -59,6 +59,23 @@ export interface SurgeConfig {
   readonly MAGNITUDE_BRAKE_MAX: number;
 }
 
+/**
+ * Forme de fin de course : un écart relatif **persistant**, propre à chaque personnage, qui ne
+ * s'applique que sur le dernier tiers de la course.
+ *
+ * C'est une constante de jeu : elle est tirée par le noyau lui-même, sur un flux dédié
+ * `lateform:<charId>`, et pondérée par une rampe temporelle — nulle jusqu'à `FROM_S`, linéaire
+ * jusqu'à `FULL_S`, complète ensuite jusqu'à l'arrivée.
+ */
+export interface LateFormConfig {
+  /** Demi-amplitude du tirage uniforme : la forme vit dans `[−AMPLITUDE ; +AMPLITUDE]`. */
+  readonly AMPLITUDE: number;
+  /** Seconde où l'effet commence à s'appliquer (0 % à cette borne **incluse**). */
+  readonly FROM_S: number;
+  /** Seconde où l'effet est complet (100 %). */
+  readonly FULL_S: number;
+}
+
 /** Planificateur d'événements rares. */
 export interface EventConfig {
   readonly RATE_PER_S: number;
@@ -255,6 +272,38 @@ export const SURGE: SurgeConfig = Object.freeze({
 });
 
 /**
+ * Forme de fin de course (P014) — le levier retenu après l'audit de suspense.
+ *
+ * Chaque personnage reçoit, **une seule fois par course**, un écart relatif tiré uniformément dans
+ * `[−0,16 ; +0,16]`. Cet écart ne s'applique qu'à partir de 40 s, monte linéairement jusqu'à 50 s,
+ * puis reste complet jusqu'à l'arrivée : c'est une **forme** de fin de course, pas un handicap de
+ * départ. Elle multiplie la vitesse **cible**, donc elle passe par les rampes de `integrateSpeed` et
+ * par l'écrêtage `SPEED.MIN`/`SPEED.MAX` — jamais par une écriture directe de `x`.
+ *
+ * Ce que ce levier est : symétrique (même loi pour les six), de moyenne nulle (tirage centré), et
+ * **indépendant du rang** (le tirage ne lit ni `x`, ni l'écart, ni le classement ; il ne dépend que
+ * de `(seed, charId)`). Ce n'est donc ni un rubber-band, ni un bonus du dernier.
+ *
+ * Ce qu'il change, et qui est assumé : sur le dernier tiers, la vitesse moyenne d'un personnage n'est
+ * plus exactement `SPEED.BASE` — elle vaut `SPEED.BASE × (1 + forme/3)` en moyenne sur 40–60 s. Sur
+ * un grand nombre de courses la moyenne reste `SPEED.BASE` (l'espérance du tirage est nulle) et les
+ * six personnages restent équivalents **ex ante**, mais plus course par course. C'est l'entorse
+ * explicite à l'invariant d'équivalence stricte, mesurée et acceptée : elle fait passer la victoire
+ * du leader de 40 s de 63,2 % à ≈ 57 % et les remontées tardives de 25 % à ≈ 33 % (audit de suspense,
+ * 1 000 seeds, N=6).
+ *
+ * Les valeurs sont celles du candidat validé : ±16 %, rampe 40 → 50 s. Une enveloppe avec retombée
+ * 55 → 60 s a été mesurée puis **écartée** (elle annulait le suspense des 5 dernières secondes et ne
+ * récupérait que ~13 % du creusement des écarts, la distance gagnée pendant le plateau n'étant jamais
+ * rendue).
+ */
+export const LATE_FORM: LateFormConfig = Object.freeze({
+  AMPLITUDE: 0.16,
+  FROM_S: 40.0,
+  FULL_S: 50.0,
+});
+
+/**
  * Planificateur d'événements rares.
  *
  * Le **catalogue** des événements (magnitudes, durées, poids) ne vit pas ici : il arrive avec le
@@ -403,6 +452,7 @@ export interface GameConfig {
   readonly SPEED: SpeedConfig;
   readonly DRIFT: DriftConfig;
   readonly SURGE: SurgeConfig;
+  readonly LATE_FORM: LateFormConfig;
   readonly EVENT: EventConfig;
   readonly RANK: RankConfig;
   readonly OVERTAKE: OvertakeConfig;
@@ -417,6 +467,7 @@ export const GAME_CONFIG: GameConfig = Object.freeze({
   SPEED,
   DRIFT,
   SURGE,
+  LATE_FORM,
   EVENT,
   RANK,
   OVERTAKE,
@@ -496,7 +547,7 @@ function requireCloseTo(actual: number, expected: number, label: string): void {
  * configurations volontairement incohérentes pour vérifier qu'elles sont bien rejetées.
  */
 export function validateConfig(config: GameConfig = GAME_CONFIG): void {
-  const { RACE, SPEED: S, DRIFT: D, SURGE: G, EVENT: E, OVERTAKE: O, LEADER: L, SPEAK: K, FACT: F } = config;
+  const { RACE, SPEED: S, DRIFT: D, SURGE: G, LATE_FORM: LF, EVENT: E, OVERTAKE: O, LEADER: L, SPEAK: K, FACT: F } = config;
 
   requireIntegerAtLeast(RACE.SEGMENT_COUNT, 1, 'RACE_CONFIG.SEGMENT_COUNT');
   requirePositive(RACE.SEGMENT_DURATION_S, 'RACE_CONFIG.SEGMENT_DURATION_S');
@@ -585,6 +636,22 @@ export function validateConfig(config: GameConfig = GAME_CONFIG): void {
     G.INTERVAL_MIN_S,
     'SURGE : DURATION_MAX_S doit rester inférieur ou égal à INTERVAL_MIN_S, sinon deux surges pourraient se chevaucher',
   );
+
+  // Forme de fin de course : une amplitude nulle serait un levier mort, et une rampe qui ne monte pas
+  // rendrait l'effet instantané. La borne haute doit rester dans la course.
+  requirePositive(LF.AMPLITUDE, 'LATE_FORM.AMPLITUDE');
+  requireAtMost(LF.AMPLITUDE, 1, 'LATE_FORM.AMPLITUDE');
+  requireNonNegative(LF.FROM_S, 'LATE_FORM.FROM_S');
+  requirePositive(LF.FULL_S, 'LATE_FORM.FULL_S');
+  requireOrder(LF.FROM_S, LF.FULL_S, 'LATE_FORM : FROM_S / FULL_S');
+  // Montée **linéaire** : une rampe de durée nulle serait un saut d'un pas à l'autre, contraire à la
+  // règle §6.5 (« interpolation linéaire de 40 s à 50 s »).
+  if (!(LF.FULL_S > LF.FROM_S)) {
+    throw new RangeError(
+      `LATE_FORM : FULL_S (${LF.FULL_S}) doit être strictement supérieure à FROM_S (${LF.FROM_S}), sinon la rampe n'existe pas.`,
+    );
+  }
+  requireAtMost(LF.FULL_S, RACE.TOTAL_SIM_S, 'LATE_FORM.FULL_S');
 
   requirePositive(E.RATE_PER_S, 'EVENT.RATE_PER_S');
   requireNonNegative(E.GLOBAL_COOLDOWN_S, 'EVENT.GLOBAL_COOLDOWN_S');

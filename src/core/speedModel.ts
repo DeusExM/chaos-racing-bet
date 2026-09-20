@@ -3,10 +3,15 @@ import { approach, clamp } from './math';
 import type { CharacterState } from './types';
 
 /**
- * Modèle de vitesse — **base + dérive permanente (P004) + surges (P007) + événements rares (P008).**
+ * Modèle de vitesse — **base + dérive permanente (P004) + surges (P007) + événements rares (P008)
+ * + forme de fin de course (P013-cor6).**
  *
  * Ces trois fonctions sont pures et sans état : elles reçoivent une valeur et un pas, elles
  * retournent la valeur suivante. Le seul état de la course vit dans `RaceEngine`.
+ *
+ * La forme de fin de course n'apparaît pas ici : c'est un **facteur multiplicatif** appliqué par le
+ * moteur autour de `computeTargetSpeed` (voir `lateForm.ts`), ce qui garde ce module indépendant de
+ * toute notion de planning.
  */
 
 /**
@@ -24,58 +29,6 @@ import type { CharacterState } from './types';
  */
 export function computeTargetSpeed(character: CharacterState, config: GameConfig): number {
   return config.SPEED.BASE * (1 + character.drift + character.surge + character.eventBonus);
-}
-
-/**
- * Enveloppe temporelle d'une **forme de fin de course**, en numéros de pas.
- *
- * Elle décrit la part de l'effet appliquée à chaque pas : `0` jusqu'à `fromStep` inclus, montée
- * linéaire jusqu'à `fullAtStep`, plateau à `1` jusqu'à `fallFromStep`, puis descente linéaire
- * jusqu'à `endStep` où l'effet revient **exactement** à `0`.
- *
- * `fallFromStep` et `endStep` sont absents quand l'effet doit rester complet jusqu'à l'arrivée : la
- * forme précédente du levier reste donc exprimable sans cas particulier dans le noyau.
- */
-export interface LateFormEnvelope {
-  readonly fromStep: number;
-  readonly fullAtStep: number;
-  readonly fallFromStep?: number;
-  readonly endStep?: number;
-}
-
-/**
- * Facteur multiplicatif d'une **forme de fin de course** à un pas donné (mesure uniquement).
- *
- * `form` est un écart relatif constant propre à un personnage (`+0,16` = « 16 % plus vite que sa
- * propre cible »), pondéré par l'enveloppe : `+0 %` à 40 s, `+8 %` à 45 s, `+16 %` à 50 s, `+16 %` à
- * 55 s, `+8 %` à 57,5 s, `+0 %` à 60 s pour une enveloppe `40 → 50 → 55 → 60`.
- *
- * Le facteur ne reçoit que le numéro du pas et la forme du personnage : il ne peut donc lire ni le
- * rang, ni la distance, ni l'écart, et il n'est pas un rubber-band (formes de moyenne nulle, tirées
- * indépendamment, aucune règle ne réagit à la position). Il multiplie la **vitesse cible** et non la
- * position : l'effet passe donc toujours par la rampe d'accélération et de décélération de
- * `integrateSpeed`, et par l'écrêtage `SPEED.MIN`/`SPEED.MAX`.
- *
- * Aucune fonction transcendante : soustractions, divisions, multiplications et `Math.min`/`Math.max`,
- * dont l'arrondi est exactement spécifié par ECMAScript.
- */
-export function lateFormFactor(form: number, stepNumber: number, envelope: LateFormEnvelope): number {
-  if (form === 0 || stepNumber <= envelope.fromStep) {
-    return 1;
-  }
-
-  const riseSpan = envelope.fullAtStep - envelope.fromStep;
-  let progress = riseSpan <= 0 ? 1 : Math.min(1, (stepNumber - envelope.fromStep) / riseSpan);
-
-  const fallFromStep = envelope.fallFromStep;
-  const endStep = envelope.endStep;
-  if (fallFromStep !== undefined && endStep !== undefined && stepNumber > fallFromStep) {
-    const fallSpan = endStep - fallFromStep;
-    const remaining = fallSpan <= 0 ? 0 : (endStep - stepNumber) / fallSpan;
-    progress = Math.min(progress, Math.max(0, remaining));
-  }
-
-  return 1 + form * progress;
 }
 
 /**

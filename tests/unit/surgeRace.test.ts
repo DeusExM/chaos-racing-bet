@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CHARACTER_IDS } from '../../src/core/characters';
 import { GAME_CONFIG, RACE_CONFIG, SPEED, SQRT_DT } from '../../src/core/config';
 import { RaceEngine } from '../../src/core/engine';
+import { lateFormFactor, lateFormParams } from '../../src/core/lateForm';
 import { gaussianFrom, stepOrnsteinUhlenbeck } from '../../src/core/math';
 import type { OrnsteinUhlenbeckParams } from '../../src/core/math';
 import { forkStream } from '../../src/core/rng';
@@ -88,6 +89,7 @@ describe('le moteur applique exactement le planning tiré', () => {
 
   it('utilise le surge du pas courant dans la vitesse cible du même pas', () => {
     const engine = new RaceEngine(SEED);
+    const params = lateFormParams(GAME_CONFIG);
     let previousV = CHARACTER_IDS.map(() => SPEED.BASE);
     let mismatches = 0;
 
@@ -97,9 +99,16 @@ describe('le moteur applique exactement le planning tiré', () => {
 
       characters.forEach((character, index) => {
         // Reconstruction avec les valeurs **publiées** : si le moteur avait utilisé la dérive ou le
-        // surge d'un autre pas, l'égalité au bit près échouerait.
+        // surge d'un autre pas, l'égalité au bit près échouerait. La forme de fin de course (P013-cor6)
+        // est relue sur le moteur — ce n'est pas un flux — et appliquée par la même fonction.
         const target = computeTargetSpeed(character, GAME_CONFIG);
-        const expected = integrateSpeed(previousV[index] ?? SPEED.BASE, target, GAME_CONFIG, DT);
+        const factor = lateFormFactor(engine.lateForms[index] ?? 0, step, params);
+        const expected = integrateSpeed(
+          previousV[index] ?? SPEED.BASE,
+          factor === 1 ? target : target * factor,
+          GAME_CONFIG,
+          DT,
+        );
         if (expected !== character.v) {
           mismatches += 1;
         }

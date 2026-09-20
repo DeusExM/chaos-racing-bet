@@ -260,6 +260,42 @@ const PLANNER_TOKEN_RULES: readonly Rule[] = [
 const STEP_EVENTS_SIGNATURE =
   /export function stepEvents\(\s*plan: EventPlanState,\s*stream: RngStream,\s*params: EventParams,\s*characterIds: readonly CharacterId\[\],\s*stepNumber: number,?\s*\): void/;
 
+/**
+ * La forme de fin de course (`src/core/lateForm.ts`) doit rester **aveugle à la course**, comme le
+ * planificateur d'événements : c'est ce qui garantit, structurellement et pas seulement
+ * statistiquement, qu'elle n'est pas un rubber-band déguisé. Elle ne reçoit qu'un flux aléatoire, ses
+ * bornes pré-calculées, la forme déjà tirée et le numéro du pas — ni distance, ni vitesse, ni rang,
+ * ni écart, ni effectif.
+ *
+ * Les trois règles ci-dessous couvrent la preuve : aucune API de classement ou d'état de personnage
+ * n'est citée, aucune décision ne mentionne la position ou la distance, **et** la signature des deux
+ * fonctions de décision n'accepte rien d'autre.
+ */
+const LATE_FORM_TOKEN_RULES: readonly Rule[] = [
+  {
+    pattern: /\b(?:computeRanks|sortByRank|ranking)\b/,
+    rule: 'la forme de fin de course ne lit jamais le classement',
+  },
+  {
+    pattern: /\b\w+\s*\.\s*(?:x|v|drift|surge|eventBonus|activeEvent)\b/,
+    rule: "la forme de fin de course ne lit jamais l'état d'un personnage",
+  },
+  {
+    pattern: /\b(?:leader|gap|position|rank|distance|players|participants)\b/,
+    rule: 'aucune décision de la forme de fin de course ne dépend de la position, de la distance ou de l’effectif',
+  },
+  {
+    pattern: /\b(?:speedModel|computeTargetSpeed|integratePosition|integrateSpeed)\b/,
+    rule: 'la forme de fin de course ne connaît ni le modèle de vitesse ni l’intégration',
+  },
+];
+
+const DRAW_LATE_FORM_SIGNATURE =
+  /export function drawLateForm\(\s*stream: RngStream,\s*params: LateFormParams,?\s*\): number/;
+
+const LATE_FORM_FACTOR_SIGNATURE =
+  /export function lateFormFactor\(\s*form: number,\s*stepNumber: number,\s*params: LateFormParams,?\s*\): number/;
+
 const SIM_SOURCES = import.meta.glob<string>('/src/sim/**/*.ts', {
   query: '?raw',
   import: 'default',
@@ -307,6 +343,35 @@ describe('le planificateur d’événements ne regarde jamais la course', () => 
   it('n’accepte que le planning, le flux, les constantes, l’ordre des personnages et le pas', () => {
     const stripped = stripComments(source ?? '');
     expect(STEP_EVENTS_SIGNATURE.test(stripped), 'signature de stepEvents').toBe(true);
+  });
+});
+
+describe('la forme de fin de course ne regarde jamais la course', () => {
+  const source = CORE_SOURCES['/src/core/lateForm.ts'];
+
+  it('lit bien la source de la forme de fin de course', () => {
+    expect(typeof source).toBe('string');
+  });
+
+  it('ne cite ni classement, ni état de personnage, ni position', () => {
+    const violations = violationsIn(
+      { '/src/core/lateForm.ts': source ?? '' },
+      LATE_FORM_TOKEN_RULES,
+      FORBIDDEN_IMPORTS,
+    );
+    expect(violations, report(violations)).toEqual([]);
+  });
+
+  it('n’accepte qu’un flux, ses bornes, la forme et le pas', () => {
+    const stripped = stripComments(source ?? '');
+    expect(DRAW_LATE_FORM_SIGNATURE.test(stripped), 'signature de drawLateForm').toBe(true);
+    expect(LATE_FORM_FACTOR_SIGNATURE.test(stripped), 'signature de lateFormFactor').toBe(true);
+  });
+
+  it('cite bien le flux dédié et les bornes pré-calculées', () => {
+    const stripped = stripComments(source ?? '');
+    expect(stripped).toContain("'lateform:'");
+    expect(/\bnextFloat\s*\(/.test(stripped), 'un seul tirage uniforme').toBe(true);
   });
 });
 

@@ -4,14 +4,15 @@ import type { EventDefinition, EventParams, EventPlanState } from './events';
 import { EVENT_CATALOG, activeEventAt, createEventPlan, eventParams, stepEvents } from './events';
 import { gaussianFrom, stepOrnsteinUhlenbeck } from './math';
 import type { OrnsteinUhlenbeckParams } from './math';
+import type { LateFormParams } from './lateForm';
+import { drawLateForm, lateFormFactor, lateFormParams, lateFormStreamLabel } from './lateForm';
 import { RaceObserver } from './observer';
 import { DEFAULT_PARTICIPANTS, normalizeParticipants, selectParticipants } from './participants';
 import { sortByRank } from './ranking';
 import type { RngStream } from './rng';
 import { forkStream } from './rng';
 import { normalizeSeed } from './seed';
-import { computeTargetSpeed, integratePosition, integrateSpeed, lateFormFactor } from './speedModel';
-import type { LateFormEnvelope } from './speedModel';
+import { computeTargetSpeed, integratePosition, integrateSpeed } from './speedModel';
 import type { SurgeParams, SurgeState, SurgeStepRange } from './surges';
 import { createSurgeState, intervalStepRangeForMean, stepSurge, surgeParams } from './surges';
 import { segmentElapsedS, segmentIndexAt } from './track';
@@ -140,19 +141,21 @@ export class RaceEngine {
     | undefined;
 
   /**
-   * Formes de fin de course de mesure, **alignées sur l'ordre des partants** (`state.characters`).
+   * Forme de fin de course de chaque partant (P014), **alignée sur l'ordre des partants**.
    *
-   * `undefined` en production. Les valeurs sont **fournies** par l'appelant : le noyau ne tire rien
-   * lui-même, donc cette option ne consomme aucun tirage et ne peut décaler ni les dérives, ni les
-   * surges, ni les événements. Chaque forme multiplie la vitesse **cible** du personnage
-   * correspondant, pondérée par l'enveloppe temporelle (voir `lateFormFactor`).
+   * Un tirage unique par personnage, sur son flux dédié `lateform:<charId>`, donc stable pour
+   * `(seed, charId)` et indépendant de la position dans la liste. Recalculée par `reset()`.
    */
-  private readonly lateForm:
-    | {
-        readonly envelope: LateFormEnvelope;
-        readonly values: readonly number[];
-      }
-    | undefined;
+  private lateFormValues: readonly number[];
+
+  /** Bornes et rampe pré-calculées : aucune conversion secondes → pas dans la boucle. */
+  private readonly lateFormConfig: LateFormParams;
+
+  /**
+   * Mesure uniquement : désactive la forme de fin de course pour reproduire la production d'avant
+   * P014. `false` en production — c'est le comportement normal.
+   */
+  private readonly disableLateForm: boolean;
 
   /**
    * Un flux de dérive par personnage, créé **une seule fois** par course.
@@ -263,13 +266,9 @@ export class RaceEngine {
    * garantie « un seul surge actif » tient toujours. Un intervalle tiré **avant** la borne n'est pas
    * retouché : le levier ne peut donc rien changer avant `fromStep`.
    *
-   * `options.lateForm` n'existe lui aussi que pour la **mesure** : une forme relative par personnage
-   * (moyenne nulle sur le roster, une valeur par partant, dans l'ordre des partants), pondérée par
-   * une enveloppe temporelle — `0 %` jusqu'à `fromStep` inclus, montée jusqu'à `fullAtStep`, plateau
-   * éventuel, puis retombée optionnelle jusqu'à `endStep` où l'effet redevient **exactement** nul.
-   * Elle multiplie la vitesse **cible**, donc l'effet passe par les rampes existantes. Le noyau ne
-   * tire aucune valeur : c'est l'appelant qui fournit le tableau, ce qui garantit qu'aucun flux du
-   * moteur n'est décalé.
+   * `options.disableLateForm` n'existe lui aussi que pour la **mesure** : il reproduit exactement la
+   * production d'avant P014, sans forme de fin de course. La forme est une règle de jeu (P014) : le
+   * noyau la tire lui-même, une fois par personnage, sur son flux dédié `lateform:<charId>`.
    */
   constructor(
     seed: string,
@@ -279,39 +278,21 @@ export class RaceEngine {
       readonly players?: number;
       readonly driftNoiseScale?: (stepNumber: number) => number;
       readonly surgeIntervalAfter?: { readonly fromStep: number; readonly meanS: number };
-      readonly lateForm?: {
-        readonly fromStep: number;
-        readonly fullAtStep: number;
-        readonly fallFromStep?: number;
-        readonly endStep?: number;
-        readonly values: readonly number[];
-      };
+      /** Mesure uniquement : `true` reproduit la production d'avant P014 (aucune forme de fin). */
+      readonly disableLateForm?: boolean;
     } = {},
   ) {
     validateConfig(config);
 
     this.config = config;
     this.driftNoiseScale = options.driftNoiseScale;
+    this.disableLateForm = options.disableLateForm ?? false;
     this.surgeIntervalAfter =
       options.surgeIntervalAfter === undefined
         ? undefined
         : Object.freeze({
             fromStep: options.surgeIntervalAfter.fromStep,
             range: intervalStepRangeForMean(config, options.surgeIntervalAfter.meanS),
-          });
-    this.lateForm =
-      options.lateForm === undefined
-        ? undefined
-        : Object.freeze({
-            envelope: Object.freeze({
-              fromStep: options.lateForm.fromStep,
-              fullAtStep: options.lateForm.fullAtStep,
-              ...(options.lateForm.fallFromStep === undefined
-                ? {}
-                : { fallFromStep: options.lateForm.fallFromStep }),
-              ...(options.lateForm.endStep === undefined ? {} : { endStep: options.lateForm.endStep }),
-            }),
-            values: Object.freeze([...options.lateForm.values]),
           });
     this.driftParams = Object.freeze({
       dt: config.RACE.DT_S,
@@ -324,19 +305,14 @@ export class RaceEngine {
     this.seedValue = normalizeSeed(seed);
     this.players = normalizeParticipants(options.players ?? DEFAULT_PARTICIPANTS);
     this.participants = selectParticipants(this.seedValue, this.players);
-    // Le contrôle d'alignement ne peut avoir lieu qu'une fois les partants connus : une forme est
-    // fournie par partant, dans l'ordre des partants.
-    if (this.lateForm !== undefined && this.lateForm.values.length !== this.participants.length) {
-      throw new RangeError(
-        `lateForm attend ${String(this.participants.length)} valeurs, une par partant (reçu : ${String(this.lateForm.values.length)}).`,
-      );
-    }
     this.surgeConfig = surgeParams(config);
+    this.lateFormConfig = lateFormParams(config);
     this.catalog = options.catalog ?? EVENT_CATALOG;
     this.eventConfig = eventParams(config, this.catalog);
     this.driftStreams = this.createDriftStreams();
     this.surgeStreams = this.createSurgeStreams();
     this.surgeStates = this.createSurgeStates();
+    this.lateFormValues = this.createLateForms();
     this.eventStream = forkStream(this.seedValue, EVENT_STREAM_LABEL);
     this.eventPlan = createEventPlan(this.participants.length);
     this.observer = new RaceObserver(config, this.participants);
@@ -351,6 +327,16 @@ export class RaceEngine {
   /** Partants réellement alignés, dans l'ordre canonique du roster. */
   get participantIds(): readonly CharacterId[] {
     return this.participants;
+  }
+
+  /**
+   * Forme de fin de course de chaque partant, dans l'ordre des partants (P014).
+   *
+   * Lecture seule, exposée pour que l'observateur et les tests puissent **vérifier** la règle : les
+   * valeurs sont figées, et lire ce tableau ne consomme aucun tirage.
+   */
+  get lateForms(): readonly number[] {
+    return this.lateFormValues;
   }
 
   /**
@@ -418,14 +404,11 @@ export class RaceEngine {
         this.driftParams,
       );
 
-      // Forme de fin de course éventuelle (mesure uniquement) : un facteur multiplicatif sur la
-      // vitesse **cible**, jamais sur `x`. Absente, le facteur vaut exactement 1 et le pas est celui
-      // de production, au bit près.
-      const form = this.lateForm === undefined ? 0 : (this.lateForm.values[index] ?? 0);
-      const formFactor =
-        this.lateForm === undefined || form === 0
-          ? 1
-          : lateFormFactor(form, stepNumber, this.lateForm.envelope);
+      // Forme de fin de course (P014) : un facteur multiplicatif sur la vitesse **cible**, jamais sur
+      // `x`. Tant que la rampe n'a pas commencé — c'est-à-dire jusqu'à 40 s inclus — le facteur vaut
+      // exactement 1 et le pas reste celui de la production d'avant P014, au bit près.
+      const form = this.disableLateForm ? 0 : (this.lateFormValues[index] ?? 0);
+      const formFactor = lateFormFactor(form, stepNumber, this.lateFormConfig);
 
       const targetV = computeTargetSpeed(character, this.config);
       const modulatedV = formFactor === 1 ? targetV : targetV * formFactor;
@@ -504,7 +487,10 @@ export class RaceEngine {
     return Object.freeze(drained);
   }
 
-  /** Repart de zéro sur une nouvelle seed : distances, vitesses, dérives, surges, événements, faits et flux. */
+  /**
+   * Repart de zéro sur une nouvelle seed : distances, vitesses, dérives, surges, événements, faits,
+   * **formes de fin de course** et flux.
+   */
   reset(seed: string): void {
     this.seedValue = normalizeSeed(seed);
     // Les partants sont **retirés** pour cette seed : une nouvelle course peut donc changer de plateau
@@ -513,6 +499,8 @@ export class RaceEngine {
     this.driftStreams = this.createDriftStreams();
     this.surgeStreams = this.createSurgeStreams();
     this.surgeStates = this.createSurgeStates();
+    // La forme est fonction de `(seed, charId)` : elle est donc **retirée** ici, comme les autres flux.
+    this.lateFormValues = this.createLateForms();
     this.eventStream = forkStream(this.seedValue, EVENT_STREAM_LABEL);
     this.eventPlan = createEventPlan(this.participants.length);
     this.observer = new RaceObserver(this.config, this.participants);
@@ -542,6 +530,25 @@ export class RaceEngine {
   /** Plannings de surge initiaux : le premier surge de chaque personnage est tiré comme les suivants. */
   private createSurgeStates(): readonly SurgeState[] {
     return this.surgeStreams.map((stream) => createSurgeState(stream, this.surgeConfig));
+  }
+
+  /**
+   * Forme de fin de course de chaque partant (P014), dans l'ordre des partants.
+   *
+   * Un flux **dédié** par personnage, `lateform:<charId>` : le tirage ne dépend donc que de
+   * `(seed, charId)`. Conséquence voulue : un coureur garde exactement la même forme qu'il soit
+   * aligné à trois, quatre, cinq ou six, et quelle que soit sa position dans la liste des partants.
+   * Un seul tirage par personnage, au moment de la construction : rien n'est tiré dans la boucle.
+   */
+  private createLateForms(): readonly number[] {
+    if (this.disableLateForm) {
+      return Object.freeze(this.participants.map(() => 0));
+    }
+    return Object.freeze(
+      this.participants.map((id) =>
+        drawLateForm(forkStream(this.seedValue, lateFormStreamLabel(id)), this.lateFormConfig),
+      ),
+    );
   }
 
   /**

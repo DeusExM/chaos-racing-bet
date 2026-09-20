@@ -24,6 +24,15 @@
 
 ## 0. Passe corrective 60 s — mesures de référence courantes
 
+> **Attention — partiellement périmé depuis P013-cor6.** Le tableau ci-dessous est la mesure de
+> référence de la **passe corrective 60 s**, à constantes inchangées. Depuis **P013-cor6**, une règle
+> de **forme de fin de course** est active (`GAME_DESIGN.md` §6.5) : le harnais d'équilibrage
+> `npm run balance` n'a **pas** été relancé, mais l'audit de suspense remesure sur le même corpus les
+> lignes qui dépendent des arrivées. Valeurs actualisées (1 000 seeds, 6 coureurs) : **leader à 40 s
+> gagnant 56,70 %** (au lieu de 63,20 %), **victoires par personnage 16,30 – 17,70 %** (au lieu de
+> 15,30 – 18,40 %), **biais de vitesse inchangé** (la forme est d'espérance nulle). Les autres lignes
+> (écarts P1–P6, changements de leader, dépassements, cadences) restent celles mesurées ici.
+
 **Aucune constante de jeu n'a changé.** `SPEED.*`, `DRIFT.*`, `SURGE.*`, `EVENT.*` (dont
 `RATE_PER_S = 1/14`) et `OVERTAKE.*` sont identiques à P010 ; seule la **durée** de la course a changé
 (`TOTAL_SIM_S = 60`, `TOTAL_STEPS = 3600`). Ce qui suit est donc une **re-mesure**, pas un réglage.
@@ -36,7 +45,7 @@ Corpus `balance-p010` (mêmes 1000 seeds, première `SXF3072C`, dernière `MFFX4
 | --- | --- | --- | --- |
 | Écart P1–P6 (médiane) | **93,00 m** | 45 – 150 m | ✅ |
 | Écart P1–P6 (p5 / p95) | **45,83 m** / **166,25 m** | ≥ 15 / ≤ 290 m | ✅ |
-| Leader à `tSim = 40 s` gagne | **63,20 %** | 55 % – 85 % | ✅ |
+| Leader à `tSim = 40 s` gagne | **63,20 %** | 55 % – 85 % | ✅ *(56,70 % depuis P013-cor6)* |
 | Changements de leader (moyenne) | 8,308 | 6 – 20 | ✅ |
 | Dépassements (moyenne) | 27,985 | ≥ 25 | ✅ |
 | Répliques du speaker (moyenne) | 8,906 | 6 – 14 | ✅ |
@@ -46,7 +55,7 @@ Corpus `balance-p010` (mêmes 1000 seeds, première `SXF3072C`, dernière `MFFX4
 | Surges par personnage | 6,17 – 6,23 | 4,7 – 8,7 | ✅ |
 | Biais de vitesse (max \\|·\\|) | **1,277 %** | ≤ 1,5 % | ✅ |
 | Nombre de pas par course | 3 600 exactement | exactement 3 600 | ✅ |
-| Victoires par personnage | 15,30 – 18,40 % | 12 – 22 % chacun | ✅ |
+| Victoires par personnage | 15,30 – 18,40 % | 12 – 22 % chacun | ✅ *(16,30 – 17,70 % depuis P013-cor6)* |
 | Reproductibilité | **100/100** bit à bit | 100/100 | ✅ |
 
 **Pourquoi ces lignes ont changé de valeurs, et pourquoi ce n'est pas un relâchement.** Trois lignes

@@ -627,17 +627,22 @@ caractères, et `SUBTITLE_MAX_MS` strictement inférieur au cooldown global du s
 La vitesse instantanée d'un personnage `i` est la somme bornée de composantes, puis **intégrée** :
 
 ```
-v_cible_i(t) = SPEED.BASE × (1 + drift_i(t) + surge_i(t) + event_i(t))
+v_cible_i(t) = SPEED.BASE × (1 + drift_i(t) + surge_i(t) + event_i(t)) × F_i(t)
+F_i(t)       = 1 + forme_i × rampe(t)          // §6.5, nulle jusqu'à 40 s
 v_i(t)       = approche(v_i(t-1), v_cible_i(t), MAX_ACCEL, MAX_DECEL, DT)   // rampe progressive
 v_i(t)       = clamp(v_i(t), SPEED.MIN, SPEED.MAX)
 x_i(t)       = x_i(t-1) + v_i(t) × DT
 ```
 
+Les cinq facteurs sont **multiplicatifs** entre eux et additifs **à l'intérieur** de la parenthèse : la
+forme de fin de course `F_i` multiplie donc la cible déjà modulée par la dérive, les surges et les
+événements, elle ne s'y ajoute pas. Aucun d'eux n'écrit dans `x`.
+
 ### 6.1 Constantes de vitesse
 
 | Constante | Valeur | Rôle |
 | --- | --- | --- |
-| `SPEED.BASE` | `12.0 m/s` | vitesse moyenne, **identique pour les 6** |
+| `SPEED.BASE` | `12.0 m/s` | vitesse moyenne de référence, **identique pour les 6** pendant les 40 premières secondes (voir §6.5 pour le dernier tiers) |
 | `SPEED.MIN` | `3.0 m/s` (0,25 × base) | plancher : on ne s'arrête jamais net |
 | `SPEED.MAX` | `48.0 m/s` (4,0 × base) | plafond dur (marge nécessaire pour `MEGA_TURBO`) |
 | `SPEED.MAX_ACCEL` | `10.0 m/s²` | rampe de **montée** maximale |
@@ -708,9 +713,10 @@ le drift reproductible bit à bit d'un moteur JavaScript à l'autre.
 > de l'implémentation : aucune constante de ce tableau n'est modifiée par P004.
 
 Pourquoi OU et pas une marche aléatoire : le rappel vers 0 garantit que **la vitesse moyenne de chaque
-personnage reste `SPEED.BASE`** (personnages équivalents, aucun trait permanent) tout en créant une
-variance locale qui fait que **le leader peut toujours être rattrapé**, sans jamais tirer un
-personnage vers un autre. Aucun couplage entre personnages : les `drift_i` sont indépendants.
+personnage reste `SPEED.BASE` sur les 40 premières secondes** tout en créant une variance locale qui
+fait que **le leader peut toujours être rattrapé**, sans jamais tirer un personnage vers un autre.
+Aucun couplage entre personnages : les `drift_i` sont indépendants. Sur le dernier tiers, la forme de
+fin de course (§6.5) s'ajoute à cette moyenne — voir la note d'équivalence de §6.5.
 
 C'est cette dérive seule — active dès le premier pas, progressive par construction — qui produit les
 premiers dépassements naturels, avant même l'ajout des surges et des événements.
@@ -767,6 +773,61 @@ intégrations de vitesse, ni une de plus ni une de moins.
 vérification faite après coup : la règle découle de `DURATION_MAX_S ≤ INTERVAL_MIN_S` (ici
 `4,0 ≤ 4,0`), c'est-à-dire qu'un surge est toujours terminé quand le suivant commence.
 `validateConfig()` refuse désormais une configuration qui romprait cette inégalité.
+
+### 6.5 Forme de fin de course (P013-cor6)
+
+Chaque personnage reçoit, **une seule fois par course**, un écart relatif `forme_i` tiré uniformément
+dans `[−0,16 ; +0,16]` sur un flux aléatoire **dédié** `lateform:<charId>`. Cet écart ne s'applique
+qu'à partir de 40 s, monte linéairement jusqu'à 50 s, puis reste complet jusqu'à l'arrivée :
+
+```
+F_i(t) = 1 + forme_i × rampe(t)
+rampe(t) = 0                        si t <= 40 s
+         = (t − 40) / 10            si 40 s < t < 50 s
+         = 1                        si t >= 50 s
+v_cible_i(t) = SPEED.BASE × (1 + drift_i + surge_i + event_i) × F_i(t)
+```
+
+| Constante | Valeur | Rôle |
+| --- | --- | --- |
+| `LATE_FORM.AMPLITUDE` | `0.16` | demi-amplitude du tirage (`±16 %`) |
+| `LATE_FORM.FROM_S` | `40.0 s` | borne basse : effet **nul** à cette seconde incluse (pas 2 400) |
+| `LATE_FORM.FULL_S` | `50.0 s` | effet complet (pas 3 000), maintenu jusqu'à l'arrivée |
+
+Valeurs de contrôle pour `forme_i = +0,16` : `40 s → +0 %`, `45 s → +8 %`, `50 s → +16 %`,
+`60 s → +16 %`. Le premier pas physique touché est **2 401** : jusqu'au pas 2 400 inclus, `x`, `v` et
+`drift` sont **bit à bit** ceux d'une course sans cette règle.
+
+**Ce que la règle est.** Un écart **symétrique** (même loi pour les six), d'**espérance nulle**
+(tirage centré) et **indépendant du rang** : le tirage ne lit ni `x`, ni l'écart, ni le classement, il
+ne dépend que de `(seed, charId)`. Un personnage garde donc exactement la même forme qu'il soit aligné
+à trois, quatre, cinq ou six, et quelle que soit sa position dans la liste des partants. Ce n'est ni
+un rubber-band, ni un bonus au dernier, ni un malus au leader : aucun personnage n'est structurellement
+avantagé, et la forme s'applique **avant** que quiconque sache qui mène.
+
+**Ce que la règle n'est pas.** Ce n'est pas un déplacement : elle multiplie la vitesse **cible**, donc
+elle passe par la rampe `MAX_ACCEL`/`MAX_DECEL` de §6.2 et par l'écrêtage `SPEED.MIN`/`SPEED.MAX`.
+Aucune écriture dans `x` n'est possible, et la fin de course reste `tSim = 60 s`.
+
+**Justification et mesure.** La règle est issue de l'audit de suspense (`npm run balance:suspense`) et
+retenue après comparaison de plusieurs candidats paramétrés dans l'outil, avant d'être **passée en
+règle de jeu**. Sur 1 000 seeds à six coureurs, elle fait passer la victoire du leader de 40 s de
+**63,20 % à 56,70 %**, les remontées « 5e ou 6e à 40 s → top 3 » de **25,00 % à 33,20 %** et
+« 5e/6e → victoire » de **2,70 % à 4,60 %**, au prix d'un écart P1–P2 médian qui se creuse
+(**20,77 m → 23,44 m**) et d'arrivées serrées un peu moins fréquentes sous 15 m (**39,50 % →
+34,30 %**). Une variante à retombée (`40 → 50 → 55 → 60 s`, l'effet revenant à zéro à l'arrivée) a été
+mesurée puis **écartée** : elle n'améliorait les écarts que de ~13 %, rendait les 5 dernières secondes
+*moins* animées que la production, et transformait le mécanisme en compromis dominé des deux côtés.
+
+> **Note d'équivalence (invariant §5.6 de `AGENTS.md`) — entorse explicite et assumée.**
+> L'invariant « vitesse moyenne de chacun = `SPEED.BASE` » n'est **plus vrai course par course** : sur
+> le dernier tiers, la vitesse moyenne d'un personnage vaut `SPEED.BASE × (1 + forme/3)`, soit jusqu'à
+> ±5,33 %. Ce qui reste vrai, et qui est le vrai contenu de l'invariant, c'est que les six personnages
+> sont **équivalents ex ante** : même loi, même espérance nulle, aucun trait permanent, aucune
+> différence structurelle. Sur 1 000 seeds, la moyenne par personnage du tirage reste dans
+> `[−0,63 % ; +0,63 %]` (biais partagé mesuré `+1,28 %`, seuil §13), et la répartition des vainqueurs
+> reste homogène (χ² = 0,73 ; seuil à 5 % = 11,07). Le critère §13 « vitesse moyenne par personnage »
+> se lit donc désormais **sur le corpus**, plus sur une course isolée : voir §13.
 
 ---
 
@@ -1256,6 +1317,16 @@ sans attendre. Le mode `fast=1` sert aux tests d'intégration visibles : il doit
 11. Faire avancer ou modifier `RaceEngine` pendant une pause réelle.
 12. Ajouter un backend, une base de données, un appel réseau ou une ressource CDN dans la V1.
 
+> **Précision P013-cor6 — pourquoi la forme de fin de course (§6.5) n'est aucune de ces interdictions.**
+> Elle ne dépend **ni du rang, ni de l'écart, ni de la distance** (point 4) : elle est tirée une fois par
+> personnage, sur son propre flux, avant que la course ne commence, et sa valeur ne change plus — elle
+> ignore qui mène. Elle ne donne **aucun avantage structurel** (point 6) : même loi pour les six,
+> espérance nulle, aucun trait permanent. Elle ne rapproche personne et ne garantit aucun rattrapage
+> (point 7). Elle n'écrit **jamais** dans `x` (points 1 et 2) : elle multiplie la vitesse **cible**, qui
+> passe par la rampe directionnelle de §6.2. Ce qu'elle entorse est l'invariant d'**égalité stricte des
+> vitesses moyennes** sur une course isolée — entorse mesurée, bornée à ±5,33 % sur le dernier tiers,
+> et documentée à §6.5.
+
 ---
 
 ## 13. Critères d'équilibrage (à vérifier par le harnais de P010 / P017)
@@ -1266,17 +1337,17 @@ Sur **1000 seeds**, 6 personnages, course complète (**60 s**) :
 | --- | --- | --- |
 | Écart P1–P6 à `tSim = 60 s` (médiane) | 45 – 150 m | 93,00 m |
 | Écart P1–P6 à `tSim = 60 s` (5e / 95e percentile) | ≥ 15 m / ≤ 290 m | 45,83 m / 166,25 m |
-| Le leader à `tSim = 40 s` gagne | 55 % – 85 % des courses | 63,20 % |
+| Le leader à `tSim = 40 s` gagne | 55 % – 85 % des courses | 56,70 % |
 | Changements de leader par course (moyenne) | 6 – 20 | 8,31 |
 | Dépassements comptés par course (moyenne) | ≥ 25 | 27,98 |
-| Taux de victoire par personnage | 12 % – 22 % chacun | 15,30 % – 18,40 % |
+| Taux de victoire par personnage | 12 % – 22 % chacun | 16,30 % – 17,70 % |
 | Événements par course (moyenne) | 3 – 6 | 3,36 |
 | Événements par personnage | ≤ 5, part de chacun entre 10 % et 27 % | 0,54 – 0,58 ; 16,14 % – 17,30 % |
 | Surges par personnage | 4,7 – 8,7 | 6,17 – 6,23 |
 | Répliques du speaker par course (moyenne) | 6 – 14 | 8,91 |
 | Reproductibilité | 100/100 seeds identiques bit à bit | 100/100, distances et classement |
 | Nombre de pas par course | exactement `3600`, avec ou sans pauses | 3600 exactement |
-| Vitesse moyenne finale par personnage | `SPEED.BASE ± 1,5 %` (équivalence) | 1,277 % max |
+| Vitesse moyenne par personnage, **sur le corpus** | `SPEED.BASE ± 1,5 %` (équivalence ex ante) | 1,277 % max, forme comprise |
 
 Ces seuils sont **implémentés comme tests** (P010, `tools/balanceStats.ts`). Si un réglage change, le
 document et les seuils changent ensemble.
@@ -1382,6 +1453,50 @@ document et les seuils changent ensemble.
 >    son propre flux `surge:<id>`, donc un partant garde exactement la même séquence de surges qu'en
 >    mode six. C'est la preuve que la sélection ne touche aucun flux de personnage.
 
+
+> **P013-cor6 — la forme de fin de course (§6.5) devient une règle de jeu.** C'est la première fois
+> depuis la passe corrective qu'une règle **change réellement une course**. Le levier est né de l'audit
+> de suspense, où il a été paramétré et comparé dans l'outil avant d'être adopté. Mesuré sur le même
+> corpus canonique de **1 000 seeds** à six coureurs, `npm run balance:suspense --late-form` (rapports
+> `.tmp/late-form-production.txt` et `.tmp/late-form-production.json`) :
+>
+> | Ligne de §13 | Avant P013-cor6 | Après |
+> | --- | --- | --- |
+> | Leader à `tSim = 40 s` gagne | 63,20 % | **56,70 %** |
+> | Taux de victoire par personnage | 15,30 % – 18,40 % | **16,30 % – 17,70 %** (χ² = 0,73) |
+> | Vitesse moyenne par personnage | `SPEED.BASE ± 1,277 %` | inchangée : la forme est d'espérance nulle |
+>
+> Les trois lignes ci-dessus sont **remesurées** ; les autres (changements de leader `8,31`,
+> dépassements `27,98`, cadence d'événements `3,36`, cadence du speaker `8,91`) ne le sont **pas** :
+> le harnais d'équilibrage `npm run balance` n'a pas été relancé, l'audit de suspense ne mesurant pas
+> ces grandeurs. Elles restent des mesures de l'état précédent, et les tests qui les encadrent passent
+> toujours (la seed de dépassements en produit **37**, contre 36 avant, pour un minimum de 25 exigé).
+>
+> Aucune **autre** constante n'a été touchée : ni `SPEED`, ni `DRIFT`, ni `SURGE`, ni `EVENT`, ni le
+> catalogue, ni `RACE`. La plage `55 % – 85 %` du critère du leader n'a pas été relâchée : la mesure
+> passe de 63,20 % à 56,70 %, donc **dans** la plage, plus près de sa borne basse — c'est précisément
+> l'effet recherché (moins de courses « pliées » à 40 s), mesuré sur le corpus et non choisi.
+>
+> Ce que la règle améliore (mêmes 1 000 seeds) : « 5e ou 6e à 40 s → top 3 » passe de 25,00 % à
+> **33,20 %**, « 5e/6e à 40 s → victoire » de 2,70 % à **4,60 %**, « le leader de 40 s perd la tête
+> après 50 s » de 15,10 % à **17,80 %**, et le changement visible dans les 10 dernières secondes de
+> 28,20 % à **30,00 %**. Ce que la règle coûte, mesuré et accepté : l'écart P1–P2 médian se creuse de
+> 20,77 m à **23,44 m**, les arrivées sous 15 m passent de 39,50 % à **34,30 %** et celles sous 10 m de
+> 27,60 % à **23,90 %**. Le suspense se déplace donc vers la fin de course — c'est l'arbitrage retenu.
+>
+> **Inertie prouvée, pas supposée** : sur les 1 000 courses, `x`, `v` et `drift` des six personnages
+> sont **bit à bit** identiques à ceux de l'ancienne production jusqu'au pas 2 400 inclus, et le premier
+> pas divergent est **2 401 dans les 1 000 courses** (min = max = 2 401). Les flux `drift:*`, `surge:*`
+> et `events:*` ne sont **pas** décalés : la forme a son propre flux `lateform:<charId>`, et l'outil
+> vérifie cette identité pas à pas.
+>
+> **Deux mises à jour de fixtures, volontaires et mesurées** : les seeds dorées (§4, `golden-seeds.json`)
+> sont remesurées — c'est la première fois depuis la passe corrective — et les seeds d'évidence
+> `tests/fixtures/seeds.ts` aussi. La seed de photo finish change (`ZH0D03Q4` → `G7Z3JRYQ`) parce que
+> son critère de choix est « l'écart P1–P2 le plus serré du corpus canonique » : sur 600 seeds, 77
+> courses (12,8 %) produisent encore `PHOTO_FINISH`, et `G7Z3JRYQ` en est le plus serré (0,083 m). La
+> seed d'arrivée franche (`HVEXYB9A`) reste la **plus large** du corpus (176,56 m au lieu de 179,33 m)
+> et garde donc son rôle.
 
 > **Biais de vitesse — résolu en P010, revérifié à 60 s.** La dérive, les surges et les événements ont
 > chacun une espérance **nette positive**, et leur somme dépassait le seuil `±1,5 %` de §13. P008 avait

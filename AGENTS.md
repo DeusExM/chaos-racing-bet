@@ -172,7 +172,15 @@ Règles concrètes :
 5. **Pas de rubber-banding** : aucune règle (événement, vitesse, malus, bonus) ne dépend du rang ni
    de l'écart de distance. Les remontées émergent de la variance, elles ne sont jamais garanties.
 6. **Équivalence des personnages** : les 6 configurations sont strictement identiques. Aucun trait
-   permanent. Vitesse moyenne de chacun = `SPEED.BASE`.
+   permanent, aucune caractéristique par personnage. **Sur les 40 premières secondes**, la vitesse
+   moyenne de chacun vaut exactement `SPEED.BASE`. Sur le dernier tiers, la **forme de fin de course**
+   (`GAME_DESIGN.md` §6.5, P013-cor6) ajoute un écart relatif tiré une fois par personnage,
+   uniformément dans `[−0,16 ; +0,16]`, d'espérance nulle : la vitesse moyenne d'une course isolée vaut
+   alors `SPEED.BASE × (1 + forme/3)`, donc **l'égalité n'est plus vraie course par course**. Ce qui
+   reste exigé, et qui est le contenu réel de l'invariant : même loi pour les six, espérance nulle,
+   aucune dépendance au rang, à la distance ou à l'écart, aucun avantage structurel — l'équivalence se
+   lit **sur le corpus** (`GAME_DESIGN.md` §13), plus sur une course isolée. Toute autre entorse
+   (handicap, bonus permanent, trait de personnage) reste interdite.
 7. **Progressivité directionnelle** : à chaque pas, avec `Δv = v(t) − v(t−1)` :
    `Δv ≤ MAX_ACCEL × DT` si `Δv ≥ 0`, et `−Δv ≤ MAX_DECEL × DT` si `Δv < 0`.
    **Ne jamais** appliquer `|Δv| ≤ MAX_ACCEL × DT` aux deux directions : les décélérations ont leur
@@ -181,8 +189,11 @@ Règles concrètes :
 8. **Classement dérivé** : le classement est toujours recalculé à partir des distances, jamais
    stocké, jamais ajusté. Égalité départagée par index de personnage croissant.
 9. **Véracité du speaker** : aucune réplique sans `RaceFact`, aucun chiffre non mesuré.
-10. **Indépendance des flux aléatoires** : `drift:*`, `surge:*`, `events:*`, `speaker:lines`,
-    `cosmetic`. Modifier les visuels ou les textes ne doit **jamais** changer le résultat d'une course.
+10. **Indépendance des flux aléatoires** : `drift:*`, `surge:*`, `events:*`, `lateform:*`,
+    `speaker:lines`, `cosmetic`. Modifier les visuels ou les textes ne doit **jamais** changer le
+    résultat d'une course. Un levier qui tire son propre flux ne peut pas décaler les autres : c'est
+    ce qui a permis d'ajouter la forme de fin de course (`lateform:<charId>`, invariant §5.6 et
+    `GAME_DESIGN.md` §6.5) sans retoucher une seule course avant 40 s.
 11. **Responsabilité du temps** : `RaceEngine` ne connaît que le **temps simulé** (pas fixes, `tSim`,
     segments, fin à `60 s`). Il ne connaît **ni** le compte à rebours, **ni** la durée réelle d'une
     pause, **ni** le `timeScale`, **ni** l'horloge réelle : ces valeurs vivent dans `SIM_CONFIG`

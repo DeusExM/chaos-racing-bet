@@ -6,6 +6,7 @@ import { DRIFT, GAME_CONFIG, RACE_CONFIG, SPEED, SQRT_DT } from '../../src/core/
 import { RaceEngine } from '../../src/core/engine';
 import { gaussianFrom, stepOrnsteinUhlenbeck } from '../../src/core/math';
 import type { OrnsteinUhlenbeckParams } from '../../src/core/math';
+import { lateFormFactor, lateFormParams } from '../../src/core/lateForm';
 import { forkStream } from '../../src/core/rng';
 import { normalizeSeed } from '../../src/core/seed';
 import { computeTargetSpeed, integratePosition, integrateSpeed } from '../../src/core/speedModel';
@@ -346,6 +347,7 @@ describe('indépendance des flux aléatoires', () => {
   it('fait évoluer c0 exactement comme s’il courait seul', () => {
     const engine = new RaceEngine(SEED);
     const stream = forkStream(normalizeSeed(SEED), 'drift:c0');
+    const lateForm = engine.lateForms[0] ?? 0;
     const params: OrnsteinUhlenbeckParams = {
       dt: DT,
       theta: DRIFT.THETA,
@@ -366,7 +368,9 @@ describe('indépendance des flux aléatoires', () => {
         throw new Error('c0 manquant : impossible de reconstruire la course.');
       }
 
-      // Reconstruction indépendante, avec le seul flux de c0.
+      // Reconstruction indépendante, avec le seul flux de c0. La forme de fin de course (P013-cor6)
+      // n'est pas un flux : elle est relue sur le moteur, exactement comme le surge, et appliquée par
+      // la même fonction de décision que dans `RaceEngine.step()`.
       drift = stepOrnsteinUhlenbeck(drift, gaussianFrom(stream), params);
       const probe: CharacterState = {
         id: 'c0',
@@ -379,7 +383,9 @@ describe('indépendance des flux aléatoires', () => {
         eventBonus: 0,
         activeEvent: null,
       };
-      v = integrateSpeed(v, computeTargetSpeed(probe, GAME_CONFIG), GAME_CONFIG, DT);
+      const formFactor = lateFormFactor(lateForm, step + 1, lateFormParams(GAME_CONFIG));
+      const targetV = computeTargetSpeed(probe, GAME_CONFIG);
+      v = integrateSpeed(v, formFactor === 1 ? targetV : targetV * formFactor, GAME_CONFIG, DT);
       x = integratePosition(x, v, DT);
 
       if (character.x !== x || character.v !== v || character.drift !== drift) {

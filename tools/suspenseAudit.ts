@@ -67,6 +67,7 @@
 import { CHARACTER_IDS } from '../src/core/characters';
 import { FACT, GAME_CONFIG, RACE_CONFIG } from '../src/core/config';
 import { RaceEngine } from '../src/core/engine';
+import { LATE_FORM_STREAM_PREFIX, drawLateForm, lateFormParams, lateFormStreamLabel } from '../src/core/lateForm';
 import { computeRanks } from '../src/core/ranking';
 import { forkStream } from '../src/core/rng';
 import { normalizeSeed } from '../src/core/seed';
@@ -231,11 +232,14 @@ export const SURGE_INTERVAL_TARGETS: readonly string[] = Object.freeze([
 /** Seuil d'arrivée serrée du test « forme de fin de course » : `10 m` entre P1 et P2. */
 export const TIGHT_FINISH_GAP_M = 10;
 
-/** Seconde où la forme de fin de course commence à s'appliquer (0 % de l'effet à cette borne). */
-export const LATE_FORM_FROM_S = LEADER_BOUNDS_S[1] ?? 40;
+/** Demi-amplitude **de production** de la forme de fin de course, lue dans les constantes de jeu. */
+export const LATE_FORM_AMPLITUDE = GAME_CONFIG.LATE_FORM.AMPLITUDE;
 
-/** Seconde où l'effet de la forme de fin de course est complet (100 %), par défaut. */
-export const LATE_FORM_FULL_S = LATE_FORM_FROM_S + 2;
+/** Seconde où la forme de fin de course commence à s'appliquer (0 % de l'effet à cette borne). */
+export const LATE_FORM_FROM_S = GAME_CONFIG.LATE_FORM.FROM_S;
+
+/** Seconde où l'effet de la forme de fin de course est complet (100 %), puis maintenu. */
+export const LATE_FORM_FULL_S = GAME_CONFIG.LATE_FORM.FULL_S;
 
 /**
  * Cibles du test « forme de fin de course ».
@@ -250,18 +254,6 @@ export const LATE_FORM_TARGETS: readonly string[] = Object.freeze([
   'écarts finaux et arrivées serrées à surveiller',
 ]);
 
-/** Demi-amplitude de la forme de fin de course : `±8 %`. */
-export const LATE_FORM_AMPLITUDE = 0.08;
-
-/**
- * Préfixe du flux **dédié** de la forme de fin de course.
- *
- * Un seul tirage par personnage, sur un flux nommé à part : il ne décale donc ni `drift:*`, ni
- * `surge:*`, ni `events:*`, ni `speaker:lines`, ni `cosmetic`. Le noyau ne tire rien lui-même : c'est
- * l'outil qui fournit les valeurs, ce qui rend la séparation vérifiable.
- */
-export const LATE_FORM_STREAM_PREFIX = 'lateform:';
-
 /** Tableau de la forme de fin de course : moyenne/min/max par personnage, sur tout le corpus. */
 export interface LateFormCharacterStats {
   readonly id: CharacterId;
@@ -270,7 +262,7 @@ export interface LateFormCharacterStats {
   readonly max: number;
 }
 
-/** Rapport complet du test « forme de fin de course persistante ». */
+/** Rapport complet du test « forme de fin de course de production ». */
 export interface LateFormComparisonReport {
   readonly comparison: SuspenseComparisonReport;
   readonly amplitude: number;
@@ -278,45 +270,37 @@ export interface LateFormComparisonReport {
   readonly fullS: number;
   readonly fromStep: number;
   readonly fullAtStep: number;
-  /** Début de la retombée, ou `null` quand l'effet reste complet jusqu'à l'arrivée. */
-  readonly fallFromS: number | null;
-  readonly fallFromStep: number | null;
-  /** Retour à zéro, ou `null` quand il n'y a pas de retombée. */
-  readonly endS: number | null;
-  readonly endStep: number | null;
   readonly statsByCharacter: readonly LateFormCharacterStats[];
   readonly pooledMean: number;
 }
 
 /**
- * Une forme par personnage, tirée uniformément dans `[-amplitude, +amplitude]`.
+ * Les six formes de production d'une seed, **dans l'ordre du roster**.
  *
- * Un **unique** tirage par personnage, sur le flux dédié `lateform:<charId>` : même seed et même
- * personnage donnent toujours la même forme, et aucun autre flux n'est consommé. L'espérance est
- * nulle (loi uniforme centrée) et aucune valeur ne dépend du rang, de la distance ni de quoi que ce
- * soit d'autre que `(seed, personnage)`.
+ * Elles sont obtenues en appelant les **fonctions du noyau** (`lateFormParams`, `lateFormStreamLabel`,
+ * `drawLateForm`) sur les mêmes flux : l'outil ne réimplémente donc pas la loi, il la rejoue. C'est ce
+ * qui permet de contrôler le biais du tirage réellement utilisé par la course, sans jamais toucher au
+ * moteur — et sans risque de divergence, puisque c'est le même code qui décide.
  */
-export function lateFormValues(seed: string, amplitude: number): readonly number[] {
+export function lateFormValues(seed: string): readonly number[] {
   const seedValue = normalizeSeed(seed);
+  const params = lateFormParams(GAME_CONFIG);
   return Object.freeze(
-    CHARACTER_IDS.map((id) => {
-      const stream = forkStream(seedValue, `${LATE_FORM_STREAM_PREFIX}${id}`);
-      return (stream.nextFloat() * 2 - 1) * amplitude;
-    }),
+    CHARACTER_IDS.map((id) => drawLateForm(forkStream(seedValue, lateFormStreamLabel(id)), params)),
   );
 }
 
 /** Statistiques par personnage des formes tirées sur tout le corpus, plus la moyenne globale. */
-export function lateFormStats(
-  seeds: readonly string[],
-  amplitude: number,
-): { readonly byCharacter: readonly LateFormCharacterStats[]; readonly pooledMean: number } {
+export function lateFormStats(seeds: readonly string[]): {
+  readonly byCharacter: readonly LateFormCharacterStats[];
+  readonly pooledMean: number;
+} {
   const byCharacter = CHARACTER_IDS.map((id, slot) => {
     let sum = 0;
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
     for (const seed of seeds) {
-      const value = lateFormValues(seed, amplitude)[slot] ?? 0;
+      const value = lateFormValues(seed)[slot] ?? 0;
       sum += value;
       if (value < min) {
         min = value;
@@ -333,136 +317,76 @@ export function lateFormStats(
     });
   });
 
-  const total = seeds.length * CHARACTER_IDS.length;
   const pooledSum = byCharacter.reduce((sum, stats) => sum + stats.mean, 0);
   return Object.freeze({
     byCharacter: Object.freeze(byCharacter),
-    pooledMean: total === 0 ? 0 : pooledSum / CHARACTER_IDS.length,
+    pooledMean: CHARACTER_IDS.length === 0 ? 0 : pooledSum / CHARACTER_IDS.length,
   });
 }
 
 /**
- * Le candidat « forme de fin de course persistante » : `±8 %` par personnage, montés de 40 s à 42 s.
+ * Confronte l'**ancienne production** et la **production P013-cor6**, sur le même corpus.
  *
- * Le baseline est la production stricte ; le candidat reçoit, **par seed**, six formes tirées sur le
- * flux dédié. Durées, magnitudes, surges, événements et freinage restent ceux de la production :
- * seul le multiplicateur de vitesse cible change, et seulement après 40 s.
+ * Depuis que la forme de fin de course est une règle de jeu, la comparaison n'a plus de « candidat »
+ * à simuler depuis l'extérieur : la variante de gauche **désactive** la règle (`disableLateForm`) et
+ * reproduit donc la course d'avant, la variante de droite est la course réelle. L'outil ne fournit
+ * plus aucune valeur au moteur ; il ne fait que **relire** les formes que le noyau a tirées.
  */
 export function runLateFormComparison(
   seeds: readonly string[],
-  options: {
-    readonly amplitude?: number;
-    /** Seconde où l'effet est complet ; la montée part toujours de `LATE_FORM_FROM_S` à 0 %. */
-    readonly fullS?: number;
-    /** Début de la retombée, et seconde où l'effet redevient exactement nul. */
-    readonly fallFromS?: number;
-    readonly endS?: number;
-    readonly onVariant?: (index: number, total: number) => void;
-  } = {},
+  options: { readonly onVariant?: (index: number, total: number) => void } = {},
 ): LateFormComparisonReport {
-  const amplitude = options.amplitude ?? LATE_FORM_AMPLITUDE;
-  const fullS = options.fullS ?? LATE_FORM_FULL_S;
-  if (!(fullS > LATE_FORM_FROM_S)) {
-    throw new RangeError(
-      `runLateFormComparison : la rampe doit se terminer après ${decimal(LATE_FORM_FROM_S, 0)} s (reçu : ${decimal(fullS, 0)} s).`,
-    );
-  }
-  const fallFromS = options.fallFromS ?? null;
-  const endS = options.endS ?? null;
-  if ((fallFromS === null) !== (endS === null)) {
-    throw new RangeError('runLateFormComparison : une retombée demande son début ET sa fin.');
-  }
-  if (fallFromS !== null && endS !== null) {
-    if (!(fallFromS >= fullS)) {
-      throw new RangeError(
-        `runLateFormComparison : la retombée commence au plus tôt à ${decimal(fullS, 0)} s (reçu : ${decimal(fallFromS, 0)} s).`,
-      );
-    }
-    if (!(endS > fallFromS)) {
-      throw new RangeError(
-        `runLateFormComparison : la retombée doit se terminer après ${decimal(fallFromS, 0)} s (reçu : ${decimal(endS, 0)} s).`,
-      );
-    }
-  }
-
   const fromStep = stepsForSeconds(LATE_FORM_FROM_S);
-  const fullAtStep = stepsForSeconds(fullS);
-  const fallFromStep = fallFromS === null ? null : stepsForSeconds(fallFromS);
-  const endStep = endS === null ? null : stepsForSeconds(endS);
-  const envelopeLabel =
-    fallFromStep === null || endStep === null
-      ? `${decimal(LATE_FORM_FROM_S, 0)} → ${decimal(fullS, 0)} s`
-      : `${decimal(LATE_FORM_FROM_S, 0)} → ${decimal(fullS, 0)} → ${decimal(fallFromS ?? 0, 0)} → ${decimal(endS ?? 0, 0)} s`;
+  const fullAtStep = stepsForSeconds(LATE_FORM_FULL_S);
 
   const comparison = compareSuspenseVariants(
     seeds,
     [
-      { label: 'production', options: {} },
+      { label: 'ancienne production (sans forme)', options: { disableLateForm: true } },
       {
-        label: `lateForm ±${decimal(amplitude * 100, 0)} % (${envelopeLabel})`,
-        options: (seed: string) => ({
-          lateForm: {
-            fromStep,
-            fullAtStep,
-            ...(fallFromStep === null ? {} : { fallFromStep }),
-            ...(endStep === null ? {} : { endStep }),
-            values: lateFormValues(seed, amplitude),
-          },
-        }),
+        label: `production : lateForm ±${decimal(LATE_FORM_AMPLITUDE * 100, 0)} % (${decimal(LATE_FORM_FROM_S, 0)} → ${decimal(LATE_FORM_FULL_S, 0)} s)`,
+        options: {},
       },
     ],
     { fromS: LATE_FORM_FROM_S, ...(options.onVariant === undefined ? {} : { onVariant: options.onVariant }) },
   );
 
-  const stats = lateFormStats(seeds, amplitude);
+  const stats = lateFormStats(seeds);
   return Object.freeze({
     comparison,
-    amplitude,
+    amplitude: LATE_FORM_AMPLITUDE,
     fromS: LATE_FORM_FROM_S,
-    fullS,
+    fullS: LATE_FORM_FULL_S,
     fromStep,
     fullAtStep,
-    fallFromS,
-    fallFromStep,
-    endS,
-    endStep,
     statsByCharacter: stats.byCharacter,
     pooledMean: stats.pooledMean,
   });
 }
 
-/** Description lisible de l'enveloppe : « 0 % à 40 s, 100 % à 50 s, plateau, 0 % à 60 s ». */
-function lateFormEnvelopeLabel(report: LateFormComparisonReport): string {
-  const parts = [
-    `0 % à ${decimal(report.fromS, 0)} s`,
-    `100 % à ${decimal(report.fullS, 0)} s`,
-  ];
-  if (report.fallFromS !== null && report.endS !== null) {
-    parts.push(
-      `plateau jusqu'à ${decimal(report.fallFromS, 0)} s`,
-      `0 % à ${decimal(report.endS, 0)} s`,
-    );
-  } else {
-    parts.push('puis 100 % jusqu’à l’arrivée');
-  }
-  return parts.join(', ');
+/** Description lisible de la rampe : « 0 % à 40 s, 100 % à 50 s, puis 100 % jusqu'à l'arrivée ». */
+function lateFormRampLabel(report: LateFormComparisonReport): string {
+  return (
+    `0 % à ${decimal(report.fromS, 0)} s, 100 % à ${decimal(report.fullS, 0)} s, ` +
+    'puis 100 % jusqu’à l’arrivée'
+  );
 }
 
-/** Rapport texte du test « forme de fin de course persistante ». */
+/** Rapport texte du test « forme de fin de course de production ». */
 export function renderLateFormComparisonText(report: LateFormComparisonReport): string {
   const points = report.comparison.points;
   const lines: string[] = [];
   lines.push(
-    `Chaos Race — forme de fin de course persistante ±${decimal(report.amplitude * 100, 0)} % (courses à 6 coureurs)`,
+    `Chaos Race — forme de fin de course de production ±${decimal(report.amplitude * 100, 0)} % (courses à 6 coureurs)`,
   );
   lines.push(
-    `corpus : ${String(report.comparison.seeds)} seeds | enveloppe : ${lateFormEnvelopeLabel(report)} | ` +
+    `corpus : ${String(report.comparison.seeds)} seeds | rampe : ${lateFormRampLabel(report)} | ` +
       `durée : ${decimal(report.comparison.elapsedMs / 1_000, 1)} s`,
   );
   lines.push(
-    'Levier : une forme relative par personnage, tirée uniformément sur un flux dédié « lateform:<charId> », ' +
-      'pondérée par une enveloppe temporelle, appliquée en multiplicateur de la vitesse **cible** (donc via les rampes). ' +
-      'Aucun tirage supplémentaire dans les flux du moteur, aucune règle ne lit le rang.',
+    'Règle de jeu depuis P013-cor6 : une forme relative par personnage, tirée par le **noyau** sur un ' +
+      'flux dédié « lateform:<charId> », appliquée en multiplicateur de la vitesse **cible** (donc via ' +
+      'les rampes). Aucune règle ne lit le rang, la distance ni l’écart.',
   );
   lines.push('');
   lines.push(...metricsTableLines(points.map((point) => point.label), points.map((point) => point.metrics)));
@@ -485,10 +409,8 @@ export function renderLateFormComparisonText(report: LateFormComparisonReport): 
   );
   lines.push('');
   lines.push(
-    report.endS === null
-      ? 'Enveloppe : effet maintenu jusqu’à l’arrivée.'
-      : `Enveloppe : retombée linéaire de ${decimal(report.fallFromS ?? 0, 0)} s à ${decimal(report.endS, 0)} s — ` +
-          `le multiplicateur vaut donc **exactement 1** au pas ${String(report.endStep ?? 0)} (tSim = 60 s).`,
+    `Rampe : effet nul jusqu’à ${decimal(report.fromS, 0)} s inclus, montée linéaire jusqu’à ` +
+      `${decimal(report.fullS, 0)} s (pas ${String(report.fullAtStep)}), puis maintenu jusqu’à l’arrivée.`,
   );
   lines.push('');
   lines.push(...inertnessLines(points, report.fromS));
@@ -499,38 +421,37 @@ export function renderLateFormComparisonText(report: LateFormComparisonReport): 
   }
   lines.push('');
   lines.push(
-    'Lecture : « production » est la course actuelle ; l’autre n’ajoute qu’une forme individuelle ' +
-      'après 40 s. Les valeurs sont en % de la vitesse cible.',
+    'Lecture : « ancienne production » est la course d’avant P013-cor6 (forme désactivée, mesure ' +
+      'uniquement) ; l’autre est la course réelle. Les valeurs sont en % de la vitesse cible.',
   );
   return lines.join('\n');
 }
 
-/** Rapport structuré du test « forme de fin de course », à clés ASCII. */
+/** Rapport structuré du test « forme de fin de course de production », à clés ASCII. */
 export function buildLateFormComparisonJson(report: LateFormComparisonReport): unknown {
   return {
     tool: 'chaos-race-late-form-comparison',
-    scope: { players: SUSPENSE_PLAYERS, note: 'N=6 uniquement, mode expérimental' },
+    scope: {
+      players: SUSPENSE_PLAYERS,
+      note: 'N=6 uniquement ; production P013-cor6, comparée à la production d’avant',
+    },
     lever: {
       kind: 'persistent-late-form-multiplier-after-bound',
+      productionRule: true,
       fromS: report.fromS,
       fullAtS: report.fullS,
       fromStep: report.fromStep,
       firstAffectedStep: report.fromStep + 1,
       fullAtStep: report.fullAtStep,
-      fallFromS: report.fallFromS,
-      fallFromStep: report.fallFromStep,
-      endS: report.endS,
-      endStep: report.endStep,
-      /** Le facteur est exactement `1` au dernier pas, donc l'effet est nul à l'arrivée. */
-      factorOneAtEnd: report.endStep !== null,
       amplitude: report.amplitude,
       streamPrefix: LATE_FORM_STREAM_PREFIX,
+      drawnBy: 'RaceEngine (src/core/engine.ts)',
       dedicatedStream: true,
       zeroMean: true,
       rankIndependent: true,
       appliesTo: 'targetSpeed',
       extraRngDraws: 0,
-      productionConstantsChanged: false,
+      baseline: 'disableLateForm = true (production d’avant P013-cor6)',
     },
     corpus: { seeds: report.comparison.seeds, prefix: DEFAULT_AUDIT_CORPUS, dtS: RACE_CONFIG.DT_S },
     timing: { elapsedMs: Number(report.comparison.elapsedMs.toFixed(1)) },
@@ -1230,16 +1151,12 @@ export interface AuditRaceOptions {
   readonly driftNoiseScale?: (stepNumber: number) => number;
   /** Moyenne d'intervalle de surge appliquée aux intervalles tirés **après** `fromStep`. */
   readonly surgeIntervalAfter?: { readonly fromStep: number; readonly meanS: number };
-  /** Forme de fin de course par partant (ordre des partants), pondérée par son enveloppe. */
-  readonly lateForm?: {
-    readonly fromStep: number;
-    readonly fullAtStep: number;
-    /** Pas de début de la retombée ; absent = l'effet reste complet jusqu'à l'arrivée. */
-    readonly fallFromStep?: number;
-    /** Pas où l'effet redevient exactement nul ; absent = pas de retombée. */
-    readonly endStep?: number;
-    readonly values: readonly number[];
-  };
+  /**
+   * Mesure uniquement : désactive la forme de fin de course (P013-cor6) et reproduit donc exactement
+   * la course d'avant cette règle. La forme n'est **pas** fournie par l'outil : c'est le noyau qui la
+   * tire, et il n'y a rien à injecter.
+   */
+  readonly disableLateForm?: boolean;
 }
 
 /**
@@ -1261,7 +1178,7 @@ export function auditSuspenseRace(
     ...(options.surgeIntervalAfter === undefined
       ? {}
       : { surgeIntervalAfter: options.surgeIntervalAfter }),
-    ...(options.lateForm === undefined ? {} : { lateForm: options.lateForm }),
+    ...(options.disableLateForm === undefined ? {} : { disableLateForm: options.disableLateForm }),
   });
   const ids = CHARACTER_IDS;
   const characters = ids.length;
@@ -2863,7 +2780,7 @@ export function firstDivergentStep(seed: string, options: AuditRaceOptions = {})
     ...(options.surgeIntervalAfter === undefined
       ? {}
       : { surgeIntervalAfter: options.surgeIntervalAfter }),
-    ...(options.lateForm === undefined ? {} : { lateForm: options.lateForm }),
+    ...(options.disableLateForm === undefined ? {} : { disableLateForm: options.disableLateForm }),
   });
 
   let state = baseline.getState();
@@ -3344,14 +3261,11 @@ export interface SuspenseAuditCliOptions {
   /** Mode expérimental : comparaison « surges plus fréquents après 40 s ». */
   readonly surgeInterval: boolean;
   readonly surgeIntervalMeanS: number;
-  /** Mode expérimental : comparaison « forme de fin de course persistante ». */
+  /**
+   * Mode « forme de fin de course » : compare la production **actuelle** (forme ±16 % active, règle
+   * de jeu depuis P013-cor6) à la production d'avant, forme désactivée.
+   */
   readonly lateForm: boolean;
-  readonly lateFormAmplitude: number;
-  /** Seconde où la rampe atteint 100 % (défaut : 42 s). */
-  readonly lateFormFullS: number;
-  /** Retombée éventuelle : début du plateau descendant et retour exact à 0 % (60 s). */
-  readonly lateFormFallS: number | null;
-  readonly lateFormEndS: number | null;
 }
 
 const AUDIT_HELP: readonly string[] = Object.freeze([
@@ -3370,11 +3284,7 @@ const AUDIT_HELP: readonly string[] = Object.freeze([
   `  --sweep-factors=<liste>      facteurs du sweep (défaut : ${DRIFT_NOISE_SWEEP_FACTORS.map((factor) => decimal(factor)).join(', ')})`,
   `  --surge-interval             mode expérimental : surges plus fréquents après ${decimal(SURGE_INTERVAL_FROM_S, 0)} s`,
   `  --surge-interval-mean=<s>    intervalle moyen du candidat (défaut : ${decimal(SURGE_INTERVAL_CANDIDATE_MEAN_S, 0)} s)`,
-  `  --late-form                  mode expérimental : forme de fin de course ±${decimal(LATE_FORM_AMPLITUDE * 100, 0)} % après ${decimal(LATE_FORM_FROM_S, 0)} s`,
-  `  --late-form-amplitude=<x>    demi-amplitude du candidat (défaut : ${decimal(LATE_FORM_AMPLITUDE * 100, 0)} %)`,
-  `  --late-form-full-s=<s>       seconde où la rampe atteint 100 % (défaut : ${decimal(LATE_FORM_FULL_S, 0)} s)`,
-  '  --late-form-fall-s=<s>       début de la retombée (plateau jusqu’à cette seconde)',
-  '  --late-form-end-s=<s>        seconde où l’effet redevient exactement nul (ex. 60)',
+  `  --late-form                  compare la production (forme de fin de course ±${decimal(LATE_FORM_AMPLITUDE * 100, 0)} % après ${decimal(LATE_FORM_FROM_S, 0)} s) à la production d’avant`,
   '  --help                       affiche cette aide',
   '',
 ]);
@@ -3392,10 +3302,6 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
   let surgeInterval = false;
   let surgeIntervalMeanS = SURGE_INTERVAL_CANDIDATE_MEAN_S;
   let lateForm = false;
-  let lateFormAmplitude = LATE_FORM_AMPLITUDE;
-  let lateFormFullS = LATE_FORM_FULL_S;
-  let lateFormFallS: number | null = null;
-  let lateFormEndS: number | null = null;
 
   const integer = (value: string, label: string): number => {
     const parsed = Number.parseInt(value, 10);
@@ -3471,48 +3377,6 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
       lateForm = true;
       continue;
     }
-    if (argument.startsWith('--late-form-amplitude=')) {
-      const raw = argument.slice('--late-form-amplitude='.length);
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new RangeError(`--late-form-amplitude attend une amplitude > 0 (reçu : ${raw}).`);
-      }
-      lateFormAmplitude = parsed > 1 ? parsed / 100 : parsed;
-      lateForm = true;
-      continue;
-    }
-    if (argument.startsWith('--late-form-full-s=')) {
-      const raw = argument.slice('--late-form-full-s='.length);
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed) || parsed <= LATE_FORM_FROM_S) {
-        throw new RangeError(
-          `--late-form-full-s attend une durée > ${decimal(LATE_FORM_FROM_S, 0)} s (reçu : ${raw}).`,
-        );
-      }
-      lateFormFullS = parsed;
-      lateForm = true;
-      continue;
-    }
-    if (argument.startsWith('--late-form-fall-s=')) {
-      const raw = argument.slice('--late-form-fall-s='.length);
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new RangeError(`--late-form-fall-s attend une durée > 0 s (reçu : ${raw}).`);
-      }
-      lateFormFallS = parsed;
-      lateForm = true;
-      continue;
-    }
-    if (argument.startsWith('--late-form-end-s=')) {
-      const raw = argument.slice('--late-form-end-s='.length);
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new RangeError(`--late-form-end-s attend une durée > 0 s (reçu : ${raw}).`);
-      }
-      lateFormEndS = parsed;
-      lateForm = true;
-      continue;
-    }
     if (argument === '--help' || argument === '-h') {
       return 'help';
     }
@@ -3531,10 +3395,6 @@ export function parseSuspenseAuditArgs(argv: readonly string[]): SuspenseAuditCl
     surgeInterval,
     surgeIntervalMeanS,
     lateForm,
-    lateFormAmplitude,
-    lateFormFullS,
-    lateFormFallS,
-    lateFormEndS,
   });
 }
 
@@ -3575,14 +3435,11 @@ export function runSuspenseAuditWithReport(argv: readonly string[]): SuspenseAud
 
   if (options.lateForm) {
     console.log(
-      `forme de fin de course ±${decimal(options.lateFormAmplitude * 100, 0)} % : montée de ` +
-        `${decimal(LATE_FORM_FROM_S, 0)} s à ${decimal(options.lateFormFullS, 0)} s`,
+      `forme de fin de course (règle de jeu) ±${decimal(LATE_FORM_AMPLITUDE * 100, 0)} % : ` +
+        `montée de ${decimal(LATE_FORM_FROM_S, 0)} s à ${decimal(LATE_FORM_FULL_S, 0)} s, ` +
+        'puis maintenue — comparaison avec la production d’avant',
     );
     const report = runLateFormComparison(seeds, {
-      amplitude: options.lateFormAmplitude,
-      fullS: options.lateFormFullS,
-      ...(options.lateFormFallS === null ? {} : { fallFromS: options.lateFormFallS }),
-      ...(options.lateFormEndS === null ? {} : { endS: options.lateFormEndS }),
       onVariant: (index, total) => {
         console.log(`  … variante ${String(index)}/${String(total)}`);
       },

@@ -33,11 +33,17 @@ import { describe, expect, it } from 'vitest';
 import { CHARACTER_IDS } from '../../src/core/characters';
 import { FACT, GAME_CONFIG, RACE_CONFIG } from '../../src/core/config';
 import { RaceEngine } from '../../src/core/engine';
-import { selectParticipants } from '../../src/core/participants';
 import { computeRanks } from '../../src/core/ranking';
 import { forkStream } from '../../src/core/rng';
 import { normalizeSeed } from '../../src/core/seed';
-import { lateFormFactor } from '../../src/core/speedModel';
+import {
+  LATE_FORM_STREAM_PREFIX as CORE_LATE_FORM_STREAM_PREFIX,
+  drawLateForm,
+  lateFormFactor,
+  lateFormParams,
+  lateFormProgress,
+  lateFormStreamLabel,
+} from '../../src/core/lateForm';
 import { intervalStepRange, intervalStepRangeForMean } from '../../src/core/surges';
 import { corpusSeeds } from '../../tools/balanceStats';
 import {
@@ -63,7 +69,6 @@ import {
   LATE_FORM_AMPLITUDE,
   LATE_FORM_FROM_S,
   LATE_FORM_FULL_S,
-  LATE_FORM_STREAM_PREFIX,
   VISIBLE_LEADER_CHANGE_S,
   auditSuspenseRace,
   buildLateFormComparisonJson,
@@ -1548,102 +1553,172 @@ describe('surges plus fréquents après 40 s', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// Candidat « forme de fin de course persistante » (mode expérimental)
+// Forme de fin de course — règle de jeu depuis P013-cor6
 // ---------------------------------------------------------------------------------------------
 
-describe('forme de fin de course persistante ±8 %', () => {
+describe('forme de fin de course de production ±16 %', () => {
   const fromStep = stepsForSeconds(LATE_FORM_FROM_S);
   const fullAtStep = stepsForSeconds(LATE_FORM_FULL_S);
-  /** Enveloppe du candidat ±8 % : montée 40 → 42 s, puis effet complet jusqu'à l'arrivée. */
-  const envelope = { fromStep, fullAtStep };
+  const params = lateFormParams(GAME_CONFIG);
 
-  it('monte progressivement de 0 % à 40 s jusqu’à 100 % à 42 s', () => {
+  it('monte de 0 % à 40 s jusqu’à 100 % à 50 s, puis reste complet', () => {
     expect(LATE_FORM_FROM_S).toBe(LEADER_BOUNDS_S[1]);
-    expect(LATE_FORM_FULL_S).toBe(LATE_FORM_FROM_S + 2);
-    expect(LATE_FORM_AMPLITUDE).toBe(0.08);
+    expect(LATE_FORM_AMPLITUDE).toBe(0.16);
+    expect(LATE_FORM_FULL_S).toBe(50);
+    expect(params).toEqual({ amplitude: LATE_FORM_AMPLITUDE, fromStep, fullAtStep });
+    expect(fromStep).toBe(stepsForSeconds(40));
+    expect(fullAtStep).toBe(stepsForSeconds(50));
 
     // Le pas qui atteint 40 s ne subit rien : l'identité jusqu'à 40 s incluse est exacte.
-    expect(lateFormFactor(0.08, fromStep, envelope)).toBe(1);
-    expect(lateFormFactor(0.08, fromStep - 1, envelope)).toBe(1);
-    // 41 s : la moitié de l'effet ; 42 s : l'effet complet.
-    expect(lateFormFactor(0.08, stepsForSeconds(41), envelope)).toBeCloseTo(1.04, 12);
-    expect(lateFormFactor(0.08, fullAtStep, envelope)).toBeCloseTo(1.08, 12);
-    // Puis constant jusqu'à l'arrivée.
-    expect(lateFormFactor(0.08, RACE_CONFIG.TOTAL_STEPS, envelope)).toBeCloseTo(1.08, 12);
+    expect(lateFormProgress(fromStep, params)).toBe(0);
+    expect(lateFormFactor(0.16, fromStep, params)).toBe(1);
+    expect(lateFormFactor(0.16, fromStep - 1, params)).toBe(1);
+    // 45 s : la moitié de l'effet ; 50 s : l'effet complet.
+    expect(lateFormProgress(stepsForSeconds(45), params)).toBeCloseTo(0.5, 12);
+    expect(lateFormFactor(0.16, stepsForSeconds(45), params)).toBeCloseTo(1.08, 12);
+    expect(lateFormProgress(fullAtStep, params)).toBe(1);
+    expect(lateFormFactor(0.16, fullAtStep, params)).toBeCloseTo(1.16, 12);
+    // Puis **maintenu** jusqu'à l'arrivée : pas de retombée, l'effet ne redescend jamais.
+    expect(lateFormProgress(RACE_CONFIG.TOTAL_STEPS, params)).toBe(1);
+    expect(lateFormFactor(0.16, RACE_CONFIG.TOTAL_STEPS, params)).toBeCloseTo(1.16, 12);
     // Symétrique : une forme négative freine exactement autant.
-    expect(lateFormFactor(-0.08, fullAtStep, envelope)).toBeCloseTo(0.92, 12);
+    expect(lateFormFactor(-0.16, fullAtStep, params)).toBeCloseTo(0.84, 12);
+    expect(lateFormFactor(-0.16, RACE_CONFIG.TOTAL_STEPS, params)).toBeCloseTo(0.84, 12);
     // Une forme nulle est inerte, à tout pas.
-    expect(lateFormFactor(0, RACE_CONFIG.TOTAL_STEPS, envelope)).toBe(1);
+    expect(lateFormFactor(0, RACE_CONFIG.TOTAL_STEPS, params)).toBe(1);
   });
 
   it('tire une forme par personnage sur un flux dédié, dans les bornes', () => {
     const seed = 'KR7Z8NAR';
-    const values = lateFormValues(seed, LATE_FORM_AMPLITUDE);
+    const values = lateFormValues(seed);
 
     expect(values).toHaveLength(SUSPENSE_PLAYERS);
-    expect(lateFormValues(seed, LATE_FORM_AMPLITUDE)).toEqual(values);
+    expect(lateFormValues(seed)).toEqual(values);
     for (const value of values) {
       expect(Math.abs(value)).toBeLessThanOrEqual(LATE_FORM_AMPLITUDE);
     }
     // Six tirages indépendants : ils ne sont pas tous identiques, et changer de seed les change tous.
     expect(new Set(values).size).toBeGreaterThan(1);
-    expect(lateFormValues('MFFX4731', LATE_FORM_AMPLITUDE)).not.toEqual(values);
+    expect(lateFormValues('MFFX4731')).not.toEqual(values);
     // Le flux est bien distinct de ceux du moteur : la forme n'est pas corrélée à la dérive.
     const drift = forkStream(normalizeSeed(seed), 'drift:c0');
-    const lateForm = forkStream(normalizeSeed(seed), `${LATE_FORM_STREAM_PREFIX}c0`);
+    const lateForm = forkStream(normalizeSeed(seed), `${CORE_LATE_FORM_STREAM_PREFIX}c0`);
     expect(lateForm.next()).not.toBe(drift.next());
-  });
-
-  it('aligne les formes sur l’ordre des partants, qui est le roster à six', () => {
-    // C'est ce qui autorise l'outil à fournir les formes dans l'ordre de `CHARACTER_IDS`.
-    for (const seed of corpusSeeds(5)) {
-      expect(selectParticipants(normalizeSeed(seed), SUSPENSE_PLAYERS)).toEqual(CHARACTER_IDS);
+    // Le nom du flux est dérivé du personnage, jamais de sa position dans la liste.
+    expect(lateFormStreamLabel('c3')).toBe('lateform:c3');
+    expect(lateFormStreamLabel('c3')).toBe(`${CORE_LATE_FORM_STREAM_PREFIX}c3`);
+    // Une loi uniforme centrée : un tirage unique, dans les bornes, de moyenne nulle.
+    const stream = forkStream(normalizeSeed(seed), lateFormStreamLabel('c0'));
+    const draws = [drawLateForm(stream, params), drawLateForm(stream, params)];
+    expect(draws).toHaveLength(2);
+    for (const draw of draws) {
+      expect(Math.abs(draw)).toBeLessThanOrEqual(LATE_FORM_AMPLITUDE);
     }
   });
 
-  it('ne change rien jusqu’à 40 s inclus et ne touche à rien d’autre', () => {
-    const seed = 'KR7Z8NAR';
-    const candidate = {
-      lateForm: { fromStep, fullAtStep, values: lateFormValues(seed, LATE_FORM_AMPLITUDE) },
-    };
-    const baseline = auditSuspenseRace(seed);
-    const variant = auditSuspenseRace(seed, candidate);
-
-    expect(variant.leadersAtBounds[0]).toBe(baseline.leadersAtBounds[0]);
-    expect(variant.leadersAtBounds[1]).toBe(baseline.leadersAtBounds[1]);
-    expect(variant.gapAtBoundsM[0]).toBe(baseline.gapAtBoundsM[0]);
-    expect(variant.gapAtBoundsM[1]).toBe(baseline.gapAtBoundsM[1]);
-
-    const divergent = firstDivergentStep(seed, candidate);
-    // Premier pas du levier : 2401, soit le premier pas **après** 40 s. Jamais 2400.
-    expect(divergent).toBe(fromStep + 1);
+  it('laisse le noyau tirer lui-même les six formes, sur `(seed, charId)`', () => {
+    for (const seed of corpusSeeds(3)) {
+      const engine = new RaceEngine(seed, GAME_CONFIG, { players: SUSPENSE_PLAYERS });
+      // Le noyau tire exactement ce que l'outil relit : mêmes fonctions, mêmes flux, aucune injection.
+      expect(engine.participantIds).toEqual(CHARACTER_IDS);
+      expect(engine.lateForms).toEqual(lateFormValues(seed));
+      expect(engine.lateForms).toHaveLength(SUSPENSE_PLAYERS);
+      expect(Object.isFrozen(engine.lateForms)).toBe(true);
+      for (const form of engine.lateForms) {
+        expect(Math.abs(form)).toBeLessThanOrEqual(LATE_FORM_AMPLITUDE);
+      }
+    }
   });
 
-  it('est inerte si les formes sont nulles, et déterministe sinon', () => {
+  it('donne la même forme à un personnage quel que soit l’effectif', () => {
     const seed = 'KR7Z8NAR';
-    const zeros = {
-      lateForm: { fromStep, fullAtStep, values: new Array<number>(SUSPENSE_PLAYERS).fill(0) },
-    };
-    expect(firstDivergentStep(seed, zeros)).toBe(-1);
-    expect(auditSuspenseRace(seed, zeros)).toEqual(auditSuspenseRace(seed));
+    const reference = new RaceEngine(seed, GAME_CONFIG, { players: SUSPENSE_PLAYERS });
+    const byId = new Map(reference.participantIds.map((id, slot) => [id, reference.lateForms[slot]]));
 
-    const candidate = {
-      lateForm: { fromStep, fullAtStep, values: lateFormValues(seed, LATE_FORM_AMPLITUDE) },
-    };
-    expect(auditSuspenseRace(seed, candidate)).toEqual(auditSuspenseRace(seed, candidate));
-    // Une forme par partant : un tableau de la mauvaise taille est refusé.
-    expect(() =>
-      new RaceEngine(
-        seed,
-        GAME_CONFIG,
-        { players: SUSPENSE_PLAYERS, lateForm: { fromStep, fullAtStep, values: [0.01] } },
-      ),
-    ).toThrow(RangeError);
+    // 3, 4, 5 et 6 partants : la forme d'un personnage ne dépend que de `(seed, charId)`.
+    for (const players of [3, 4, 5, 6]) {
+      const engine = new RaceEngine(seed, GAME_CONFIG, { players });
+      expect(engine.participantIds).toHaveLength(players);
+      engine.participantIds.forEach((id, slot) => {
+        expect(engine.lateForms[slot], `${id} à ${String(players)}`).toBe(byId.get(id));
+      });
+    }
+    // …et changer de seed change la forme de chaque personnage.
+    const other = new RaceEngine('MFFX4731', GAME_CONFIG, { players: SUSPENSE_PLAYERS });
+    expect(other.lateForms).toEqual(lateFormValues('MFFX4731'));
+    expect(other.lateForms).not.toEqual(reference.lateForms);
   });
 
-  it('compare production et candidat, et contrôle le biais des formes', () => {
+  it('recalcule les formes à chaque reset, et reste déterministe', () => {
+    const engine = new RaceEngine('KR7Z8NAR', GAME_CONFIG, { players: SUSPENSE_PLAYERS });
+    expect(engine.lateForms).toEqual(lateFormValues('KR7Z8NAR'));
+
+    engine.reset('MFFX4731');
+    expect(engine.lateForms).toEqual(lateFormValues('MFFX4731'));
+
+    const again = new RaceEngine('MFFX4731', GAME_CONFIG, { players: SUSPENSE_PLAYERS });
+    expect(engine.lateForms).toEqual(again.lateForms);
+  });
+
+  it('ne change rien jusqu’à 40 s inclus : premier effet physique après la borne', () => {
+    for (const seed of corpusSeeds(3)) {
+      const production = auditSuspenseRace(seed);
+      const legacy = auditSuspenseRace(seed, { disableLateForm: true });
+
+      // Le leader et l'écart à 20 s et à 40 s sont **identiques** : rien n'a bougé avant la borne.
+      expect(legacy.leadersAtBounds[0]).toBe(production.leadersAtBounds[0]);
+      expect(legacy.leadersAtBounds[1]).toBe(production.leadersAtBounds[1]);
+      expect(legacy.gapAtBoundsM[0]).toBe(production.gapAtBoundsM[0]);
+      expect(legacy.gapAtBoundsM[1]).toBe(production.gapAtBoundsM[1]);
+
+      // `x`, `v` et `drift` des six sont bit à bit identiques pendant 2400 pas, puis divergent au
+      // pas 2401 : aucun flux `drift:*`, `surge:*` ou `events:*` n'a été décalé.
+      expect(firstDivergentStep(seed, { disableLateForm: true })).toBe(fromStep + 1);
+      // La production, elle, est identique à elle-même : aucune divergence, évidemment.
+      expect(firstDivergentStep(seed)).toBe(-1);
+      // Et la course reste déterministe : deux exécutions identiques donnent le même relevé.
+      expect(auditSuspenseRace(seed)).toEqual(auditSuspenseRace(seed));
+    }
+  });
+
+  it('applique la règle aux 3, 4, 5 et 6 partants', () => {
+    for (const players of [3, 4, 5, 6]) {
+      const seed = 'KR7Z8NAR';
+      const withRule = new RaceEngine(seed, GAME_CONFIG, { players });
+      const without = new RaceEngine(seed, GAME_CONFIG, { players, disableLateForm: true });
+
+      // Les deux courses sont identiques jusqu'à 40 s inclus, puis divergent au pas suivant.
+      let divergent = -1;
+      while (withRule.getState().phase.kind !== 'finished') {
+        withRule.step();
+        without.step();
+        const left = withRule.getState();
+        const right = without.getState();
+        if (divergent === -1) {
+          const identical = left.characters.every((character, slot) => {
+            const other = right.characters[slot];
+            return (
+              other !== undefined &&
+              Object.is(character.x, other.x) &&
+              Object.is(character.v, other.v) &&
+              Object.is(character.drift, other.drift)
+            );
+          });
+          if (!identical) {
+            divergent = left.steps;
+          }
+        }
+      }
+      expect(divergent, `${String(players)} partants`).toBe(fromStep + 1);
+      // Les deux courses se terminent au même pas : la règle ne touche pas la fin de course.
+      expect(withRule.getState().steps).toBe(RACE_CONFIG.TOTAL_STEPS);
+      expect(without.getState().steps).toBe(RACE_CONFIG.TOTAL_STEPS);
+    }
+  });
+
+  it('compare la production à la production d’avant, et contrôle le biais des formes', () => {
     const seeds = corpusSeeds(3);
-    const report = runLateFormComparison(seeds, { amplitude: LATE_FORM_AMPLITUDE });
+    const report = runLateFormComparison(seeds);
 
     expect(report.comparison.seeds).toBe(3);
     expect(report.comparison.points).toHaveLength(2);
@@ -1652,24 +1727,26 @@ describe('forme de fin de course persistante ±8 %', () => {
     expect(report.fullAtStep).toBe(fullAtStep);
     expect(report.amplitude).toBe(LATE_FORM_AMPLITUDE);
 
-    const [baseline, candidate] = report.comparison.points;
-    expect(baseline?.label).toBe('production');
-    expect(candidate?.label).toContain('±8 %');
-    expect(baseline?.metrics).toEqual(
+    const [legacy, production] = report.comparison.points;
+    expect(legacy?.label).toBe('ancienne production (sans forme)');
+    expect(production?.label).toContain('±16 %');
+    expect(production?.label).toContain('40 → 50 s');
+    // La production réelle est bien la variante sans option : rien n'est injecté par l'outil.
+    expect(production?.metrics).toEqual(
       noiseSweepMetrics(summarizeSuspenseAudit(seeds.map((seed) => auditSuspenseRace(seed)))),
     );
     for (const point of report.comparison.points) {
       expect(point.inertness.divergentAtOrBeforeBound).toBe(0);
       expect(point.metrics.winnerSharesPercent).toHaveLength(SUSPENSE_PLAYERS);
     }
-    // Le levier ne peut agir qu'après 40 s : le premier pas divergent est 2401.
-    expect(candidate?.inertness.firstDivergentStepMin).toBe(fromStep + 1);
-    expect(baseline?.inertness.firstDivergentStepMin).toBe(-1);
+    // Seule la variante sans forme diverge de la production, et seulement après 40 s.
+    expect(legacy?.inertness.firstDivergentStepMin).toBe(fromStep + 1);
+    expect(production?.inertness.firstDivergentStepMin).toBe(-1);
 
     // Contrôle de biais : six personnages, des bornes respectées, une moyenne globale proche de zéro.
     expect(report.statsByCharacter.map((stats) => stats.id)).toEqual([...CHARACTER_IDS]);
-    expect(lateFormStats(seeds, LATE_FORM_AMPLITUDE).byCharacter).toEqual([...report.statsByCharacter]);
-    expect(lateFormStats(seeds, LATE_FORM_AMPLITUDE).pooledMean).toBe(report.pooledMean);
+    expect(lateFormStats(seeds).byCharacter).toEqual([...report.statsByCharacter]);
+    expect(lateFormStats(seeds).pooledMean).toBe(report.pooledMean);
     for (const stats of report.statsByCharacter) {
       expect(stats.min).toBeGreaterThanOrEqual(-LATE_FORM_AMPLITUDE);
       expect(stats.max).toBeLessThanOrEqual(LATE_FORM_AMPLITUDE);
@@ -1678,11 +1755,14 @@ describe('forme de fin de course persistante ±8 %', () => {
     expect(Math.abs(report.pooledMean)).toBeLessThan(LATE_FORM_AMPLITUDE / 2);
   });
 
-  it('rend un tableau avec les formes et un JSON sans constante modifiée', () => {
-    const report = runLateFormComparison(corpusSeeds(1), { amplitude: LATE_FORM_AMPLITUDE });
+  it('rend un tableau de production et un JSON qui ne revendique aucune retombée', () => {
+    const report = runLateFormComparison(corpusSeeds(1));
     const text = renderLateFormComparisonText(report);
 
-    expect(text).toContain('forme de fin de course persistante ±8 %');
+    expect(text).toContain('forme de fin de course de production ±16 %');
+    expect(text).toContain('ancienne production');
+    expect(text).toContain('100 % à 50 s');
+    expect(text).toContain('puis 100 % jusqu’à l’arrivée');
     expect(text).toContain('leader à 40 s qui gagne');
     expect(text).toContain('changement visible dans les 10 dernières secondes');
     expect(text).toContain('5e/6e à 40 s → top 3');
@@ -1696,125 +1776,16 @@ describe('forme de fin de course persistante ±8 %', () => {
 
     const json = JSON.stringify(buildLateFormComparisonJson(report));
     expect(json).toContain('chaos-race-late-form-comparison');
+    expect(json).toContain('"productionRule":true');
     expect(json).toContain('"dedicatedStream":true');
     expect(json).toContain('"appliesTo":"targetSpeed"');
-    expect(json).toContain('"productionConstantsChanged":false');
+    expect(json).toContain('"drawnBy":"RaceEngine (src/core/engine.ts)"');
     expect(json).toContain('"extraRngDraws":0');
     expect(json).toContain('"zeroMean":true');
+    // La retombée 55 → 60 s a été mesurée puis écartée : elle ne doit plus apparaître nulle part.
+    expect(json).not.toContain('fallFromS');
+    expect(json).not.toContain('endStep');
     expect(json).not.toContain('undefined');
-  });
-
-  it('accepte une rampe plus longue et une amplitude plus forte, sans rien changer avant 40 s', () => {
-    // Candidat « plus fort mais plus tardif » : ±16 %, 0 % à 40 s, 50 % à 45 s, 100 % à 50 s.
-    const amplitude = 0.16;
-    const fullS = 50;
-    const fullAtStep = stepsForSeconds(fullS);
-
-    expect(lateFormFactor(amplitude, fromStep, { fromStep, fullAtStep })).toBe(1);
-    expect(lateFormFactor(amplitude, stepsForSeconds(45), { fromStep, fullAtStep })).toBeCloseTo(1.08, 12);
-    expect(lateFormFactor(amplitude, fullAtStep, { fromStep, fullAtStep })).toBeCloseTo(1.16, 12);
-    expect(lateFormFactor(-amplitude, fullAtStep, { fromStep, fullAtStep })).toBeCloseTo(0.84, 12);
-
-    const seed = 'KR7Z8NAR';
-    const values = lateFormValues(seed, amplitude);
-    const half = lateFormValues(seed, LATE_FORM_AMPLITUDE);
-    expect(values).toHaveLength(SUSPENSE_PLAYERS);
-    values.forEach((value, slot) => {
-      expect(Math.abs(value)).toBeLessThanOrEqual(amplitude);
-      // Une amplitude doublée double exactement chaque forme : le tirage lui-même ne change pas.
-      expect(value).toBeCloseTo((half[slot] ?? 0) * 2, 12);
-    });
-
-    const candidate = { lateForm: { fromStep, fullAtStep, values } };
-    const baseline = auditSuspenseRace(seed);
-    const variant = auditSuspenseRace(seed, candidate);
-    expect(variant.leadersAtBounds[1]).toBe(baseline.leadersAtBounds[1]);
-    expect(variant.gapAtBoundsM[1]).toBe(baseline.gapAtBoundsM[1]);
-    // Le contrôle ne dépend pas de la rampe : premier pas divergent = 2401, soit après 40 s.
-    expect(firstDivergentStep(seed, candidate)).toBe(fromStep + 1);
-
-    const report = runLateFormComparison(corpusSeeds(2), { amplitude, fullS });
-    expect(report.amplitude).toBe(amplitude);
-    expect(report.fullS).toBe(fullS);
-    expect(report.fullAtStep).toBe(fullAtStep);
-    expect(report.comparison.points[1]?.label).toContain('±16 %');
-    expect(report.comparison.points[1]?.label).toContain('50 s');
-    expect(report.comparison.points[1]?.inertness.firstDivergentStepMin).toBe(fromStep + 1);
-    expect(report.comparison.points[1]?.inertness.divergentAtOrBeforeBound).toBe(0);
-    expect(renderLateFormComparisonText(report)).toContain('±16 %');
-    // Une rampe qui ne monte pas est refusée.
-    expect(() => runLateFormComparison(corpusSeeds(1), { amplitude, fullS: LATE_FORM_FROM_S })).toThrow(
-      RangeError,
-    );
-  });
-
-  it('applique une enveloppe 40→50→55→60 et revient exactement à 1 à l’arrivée', () => {
-    const amplitude = 0.16;
-    const fullS = 50;
-    const fallFromS = 55;
-    const endS = 60;
-    const envelope = {
-      fromStep,
-      fullAtStep: stepsForSeconds(fullS),
-      fallFromStep: stepsForSeconds(fallFromS),
-      endStep: stepsForSeconds(endS),
-    };
-
-    // 40 s : rien ; 45 s : +8 % ; 50 s et 55 s : +16 % ; 57,5 s : +8 % ; 60 s : exactement 1.
-    expect(lateFormFactor(amplitude, fromStep, envelope)).toBe(1);
-    expect(lateFormFactor(amplitude, stepsForSeconds(45), envelope)).toBeCloseTo(1.08, 12);
-    expect(lateFormFactor(amplitude, stepsForSeconds(fullS), envelope)).toBeCloseTo(1.16, 12);
-    expect(lateFormFactor(amplitude, stepsForSeconds(fallFromS), envelope)).toBeCloseTo(1.16, 12);
-    expect(lateFormFactor(amplitude, stepsForSeconds(57.5), envelope)).toBeCloseTo(1.08, 12);
-    // Contrôle demandé : le multiplicateur est **exactement** 1 au pas de 60 s (3600).
-    expect(lateFormFactor(amplitude, stepsForSeconds(endS), envelope)).toBe(1);
-    expect(stepsForSeconds(endS)).toBe(RACE_CONFIG.TOTAL_STEPS);
-    // …et il ne l'est pas encore tout à fait au pas précédent.
-    expect(lateFormFactor(amplitude, RACE_CONFIG.TOTAL_STEPS - 1, envelope)).toBeGreaterThan(1);
-    // Symétrie parfaite en négatif.
-    expect(lateFormFactor(-amplitude, stepsForSeconds(fullS), envelope)).toBeCloseTo(0.84, 12);
-    expect(lateFormFactor(-amplitude, stepsForSeconds(57.5), envelope)).toBeCloseTo(0.92, 12);
-    expect(lateFormFactor(-amplitude, stepsForSeconds(endS), envelope)).toBe(1);
-
-    const seed = 'KR7Z8NAR';
-    const candidate = {
-      lateForm: {
-        fromStep,
-        fullAtStep: envelope.fullAtStep,
-        fallFromStep: envelope.fallFromStep,
-        endStep: envelope.endStep,
-        values: lateFormValues(seed, amplitude),
-      },
-    };
-    const baseline = auditSuspenseRace(seed);
-    const variant = auditSuspenseRace(seed, candidate);
-    // Identité jusqu'à 40 s inclus, puis premier pas divergent = 2401 (après la borne).
-    expect(variant.leadersAtBounds[1]).toBe(baseline.leadersAtBounds[1]);
-    expect(variant.gapAtBoundsM[1]).toBe(baseline.gapAtBoundsM[1]);
-    expect(firstDivergentStep(seed, candidate)).toBe(fromStep + 1);
-
-    const report = runLateFormComparison(corpusSeeds(2), { amplitude, fullS, fallFromS, endS });
-    expect(report.fallFromS).toBe(fallFromS);
-    expect(report.endS).toBe(endS);
-    expect(report.fallFromStep).toBe(envelope.fallFromStep);
-    expect(report.endStep).toBe(RACE_CONFIG.TOTAL_STEPS);
-    expect(report.comparison.points[1]?.label).toContain('40 → 50 → 55 → 60 s');
-    expect(report.comparison.points[1]?.inertness.firstDivergentStepMin).toBe(fromStep + 1);
-    const text = renderLateFormComparisonText(report);
-    expect(text).toContain('retombée linéaire de 55 s à 60 s');
-    expect(text).toContain('exactement 1');
-    const json = JSON.stringify(buildLateFormComparisonJson(report));
-    expect(json).toContain('"factorOneAtEnd":true');
-    expect(json).toContain('"endS":60');
-
-    // Une retombée incomplète ou incohérente est refusée.
-    expect(() => runLateFormComparison(corpusSeeds(1), { amplitude, fullS, fallFromS })).toThrow(RangeError);
-    expect(() =>
-      runLateFormComparison(corpusSeeds(1), { amplitude, fullS, fallFromS: 45, endS: 60 }),
-    ).toThrow(RangeError);
-    expect(() =>
-      runLateFormComparison(corpusSeeds(1), { amplitude, fullS, fallFromS: 55, endS: 55 }),
-    ).toThrow(RangeError);
   });
 
   it('expose la fenêtre des 5 dernières secondes et le seuil des 10 m', () => {
@@ -1839,8 +1810,7 @@ describe('forme de fin de course persistante ±8 %', () => {
     expect(metrics.finishUnder10mPercent).toBe(summary.finalSuspense.photoAtFinishPercent[indexOf10m]);
     expect(metrics.finishUnder10mPercent).toBeLessThanOrEqual(metrics.finishUnder15mPercent);
 
-    const report = runLateFormComparison(corpusSeeds(1), { amplitude: LATE_FORM_AMPLITUDE });
-    const text = renderLateFormComparisonText(report);
+    const text = renderLateFormComparisonText(runLateFormComparison(corpusSeeds(1)));
     expect(text).toContain('changement visible dans les 5 dernières secondes');
     expect(text).toContain('arrivée sous 10 m');
   });
@@ -1930,74 +1900,29 @@ describe('ligne de commande', () => {
     expect(() => parseSuspenseAuditArgs(['--surge-interval-mean=abc'])).toThrow(RangeError);
   });
 
-  it('active le mode forme de fin de course et lit son amplitude', () => {
+  it('active le mode forme de fin de course, sans plus aucune option expérimentale', () => {
     const defaults = parseSuspenseAuditArgs(['--late-form']);
     expect(defaults).not.toBe('help');
     if (defaults === 'help') {
       throw new Error('aide inattendue');
     }
     expect(defaults.lateForm).toBe(true);
-    expect(defaults.lateFormAmplitude).toBe(LATE_FORM_AMPLITUDE);
     expect(defaults.sweep).toBe(false);
     expect(defaults.surgeInterval).toBe(false);
 
-    // L'amplitude s'accepte en fraction comme en pourcentage.
-    const fraction = parseSuspenseAuditArgs(['--late-form-amplitude=0.05']);
-    const percent = parseSuspenseAuditArgs(['--late-form-amplitude=5']);
-    for (const options of [fraction, percent]) {
-      expect(options).not.toBe('help');
-      if (options === 'help') {
-        throw new Error('aide inattendue');
-      }
-      expect(options.lateForm).toBe(true);
-      expect(options.lateFormAmplitude).toBeCloseTo(0.05, 12);
-    }
-
-    expect(() => parseSuspenseAuditArgs(['--late-form-amplitude=0'])).toThrow(RangeError);
-    expect(() => parseSuspenseAuditArgs(['--late-form-amplitude=abc'])).toThrow(RangeError);
-
-    // Rampe « plus tardive » : 100 % à 50 s.
-    const ramp = parseSuspenseAuditArgs(['--late-form-full-s=50']);
-    expect(ramp).not.toBe('help');
-    if (ramp === 'help') {
-      throw new Error('aide inattendue');
-    }
-    expect(ramp.lateForm).toBe(true);
-    expect(ramp.lateFormFullS).toBe(50);
-    const defaultsRamp = parseSuspenseAuditArgs(['--late-form']);
-    expect(defaultsRamp).not.toBe('help');
-    if (defaultsRamp === 'help') {
-      throw new Error('aide inattendue');
-    }
-    expect(defaultsRamp.lateFormFullS).toBe(LATE_FORM_FULL_S);
-    expect(() => parseSuspenseAuditArgs(['--late-form-full-s=40'])).toThrow(RangeError);
-    expect(() => parseSuspenseAuditArgs(['--late-form-full-s=abc'])).toThrow(RangeError);
-
-    // Enveloppe complète : plateau jusqu'à 55 s, retour exact à 0 % à 60 s.
-    const envelope = parseSuspenseAuditArgs([
-      '--late-form',
+    // La règle vit dans le noyau : les options de candidat ont disparu, et sont donc refusées.
+    for (const flag of [
       '--late-form-amplitude=16',
       '--late-form-full-s=50',
       '--late-form-fall-s=55',
       '--late-form-end-s=60',
-    ]);
-    expect(envelope).not.toBe('help');
-    if (envelope === 'help') {
-      throw new Error('aide inattendue');
+    ]) {
+      expect(() => parseSuspenseAuditArgs([flag]), flag).toThrow(RangeError);
     }
-    expect(envelope.lateFormAmplitude).toBe(0.16);
-    expect(envelope.lateFormFullS).toBe(50);
-    expect(envelope.lateFormFallS).toBe(55);
-    expect(envelope.lateFormEndS).toBe(60);
-    const noFall = parseSuspenseAuditArgs(['--late-form']);
-    expect(noFall).not.toBe('help');
-    if (noFall === 'help') {
-      throw new Error('aide inattendue');
-    }
-    expect(noFall.lateFormFallS).toBeNull();
-    expect(noFall.lateFormEndS).toBeNull();
-    expect(() => parseSuspenseAuditArgs(['--late-form-fall-s=0'])).toThrow(RangeError);
-    expect(() => parseSuspenseAuditArgs(['--late-form-end-s=abc'])).toThrow(RangeError);
+    // L'amplitude et les bornes sont celles du jeu, pas celles de la ligne de commande.
+    expect(LATE_FORM_AMPLITUDE).toBe(GAME_CONFIG.LATE_FORM.AMPLITUDE);
+    expect(LATE_FORM_FROM_S).toBe(GAME_CONFIG.LATE_FORM.FROM_S);
+    expect(LATE_FORM_FULL_S).toBe(GAME_CONFIG.LATE_FORM.FULL_S);
   });
 
   it('refuse une entrée invalide et répond à --help', () => {

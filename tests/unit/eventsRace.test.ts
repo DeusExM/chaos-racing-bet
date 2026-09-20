@@ -5,6 +5,7 @@ import { GAME_CONFIG, RACE_CONFIG, SPEED, SQRT_DT } from '../../src/core/config'
 import { RaceEngine } from '../../src/core/engine';
 import { EVENT_CATALOG, activeEventAt, createEventPlan, eventParams, stepEvents } from '../../src/core/events';
 import type { EventPlanState } from '../../src/core/events';
+import { lateFormFactor, lateFormParams } from '../../src/core/lateForm';
 import { gaussianFrom, stepOrnsteinUhlenbeck } from '../../src/core/math';
 import { computeRanks } from '../../src/core/ranking';
 import { forkStream } from '../../src/core/rng';
@@ -270,6 +271,7 @@ describe('le moteur applique exactement le planning d’événements', () => {
 
   it('utilise l’événement du pas courant dans la vitesse cible du même pas', () => {
     const engine = new RaceEngine(WORK_SEED);
+    const params = lateFormParams(GAME_CONFIG);
     let previousV = CHARACTER_IDS.map(() => SPEED.BASE);
     let mismatches = 0;
 
@@ -279,9 +281,13 @@ describe('le moteur applique exactement le planning d’événements', () => {
 
       for (const [index, character] of characters.entries()) {
         // Reconstruction depuis les seules valeurs **publiées** : si le moteur avait utilisé
-        // l'événement d'un autre pas, ou oublié `eventBonus`, l'égalité au bit près échouerait.
+        // l'événement d'un autre pas, ou oublié `eventBonus`, l'égalité au bit près échouerait. La
+        // forme de fin de course (P013-cor6) multiplie cette cible : elle est relue sur le moteur et
+        // appliquée par la même fonction que dans la boucle de simulation.
         const target = SPEED.BASE * (1 + character.drift + character.surge + character.eventBonus);
-        if (integrateSpeed(previousV[index] ?? SPEED.BASE, target, CONFIG, DT) !== character.v) {
+        const factor = lateFormFactor(engine.lateForms[index] ?? 0, stepNumber, params);
+        const modulated = factor === 1 ? target : target * factor;
+        if (integrateSpeed(previousV[index] ?? SPEED.BASE, modulated, CONFIG, DT) !== character.v) {
           mismatches += 1;
         }
       }
@@ -382,6 +388,7 @@ describe('gain réellement produit par chaque événement', () => {
     // histoire (un malus a parfaitement le droit de reprendre du terrain à un jumeau sans histoires).
     let trackedEvents = 0;
     let comparedSteps = 0;
+    const params = lateFormParams(GAME_CONFIG);
 
     for (const seed of seeds(6, 'EVENTK')) {
       const engine = new RaceEngine(seed);
@@ -401,6 +408,10 @@ describe('gain réellement produit par chaque événement', () => {
           }
           const event = character.activeEvent;
           const twin = tracked[index] ?? null;
+          // Le jumeau reçoit la **même** forme de fin de course que le personnage suivi : la
+          // comparaison ne porte donc que sur l'événement, pas sur la règle de fin de course.
+          const factor = lateFormFactor(engine.lateForms[index] ?? 0, stepNumber, params);
+          const modulate = (target: number): number => (factor === 1 ? target : target * factor);
 
           if (twin === null) {
             // Seuls les bonus sont suivis : pour un malus, l'écart au jumeau doit au contraire
@@ -408,7 +419,7 @@ describe('gain réellement produit par chaque événement', () => {
             if (event !== null && event.magnitude > 0) {
               const v = integrateSpeed(
                 previousCharacter.v,
-                SPEED.BASE * (1 + character.drift + character.surge),
+                modulate(SPEED.BASE * (1 + character.drift + character.surge)),
                 CONFIG,
                 DT,
               );
@@ -432,7 +443,7 @@ describe('gain réellement produit par chaque événement', () => {
           // personnage réel le pas courant : les deux distances sont comparées au même instant.
           twin.v = integrateSpeed(
             twin.v,
-            SPEED.BASE * (1 + character.drift + character.surge),
+            modulate(SPEED.BASE * (1 + character.drift + character.surge)),
             CONFIG,
             DT,
           );

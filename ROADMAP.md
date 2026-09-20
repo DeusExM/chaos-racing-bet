@@ -304,6 +304,7 @@ et tous les tests précédents passent (voir `AGENTS.md`). Statuts : `[ ]` à fa
 | **P013-cor3** | **Courses de 3 à 6 coureurs `[x]`** | P013-cor2 | effectif réglable, personnages plus grands à effectif réduit, fermeture de l'arrivée |
 | **P013-cor4** | **UX `Lancer` / `Réinitialiser` et correctif d'effectif `[x]`** | P013-cor3 | trois boutons pilotés par la phase, reset à toute phase, `start()` sans remise à zéro implicite, sélecteur tactile |
 | **P013-cor5** | **Taille des personnages à 3, 4 et 5 coureurs `[x]`** | P013-cor4 | marge fixe de 20 px mesurée sur le bord du cadre, sprites 226/168/132 px en compact, 6 coureurs inchangés au pixel |
+| **P013-cor6** | **Forme de fin de course (±16 %, 40 → 50 s puis maintenue) `[x]`** | P013-cor5 | levier de suspense issu de l'audit passé en **règle de jeu** : tirage unique par personnage sur le flux dédié `lateform:<charId>`, appliqué à la vitesse **cible**, aucun autre levier touché |
 | **P013.5** | **Jalon 3D — prototype de rendu : choix du moteur** | P013 | prototype 3D minimal + décision A/B/C |
 | P014 | Identité visuelle et animations des 6 personnages | P013.5 | personnages distincts et drôles |
 | P015 | Polish, accessibilité, audio optionnel | P014 | finition |
@@ -488,6 +489,10 @@ segments officiels, pas de checkpoints, pas d'événements, pas de rendu.
     (205 200 pas), l'écart-type de la moyenne d'un personnage vaut ≈ 0,46 %, ce qui ne laisse que
     3 σ de marge à ±1,5 % : un test fragile, effectivement franchi par une seed du premier jeu
     essayé. Sur 96 courses il tombe à ≈ 0,21 %, et le seuil devient inatteignable par le hasard.
+  * **Depuis P013-cor6** : cette égalité stricte vaut sur les **40 premières secondes** de chaque
+    course. Sur le dernier tiers, la forme de fin de course ajoute un écart relatif tiré par
+    personnage (`−0,16 ; +0,16`, espérance nulle) : l'équivalence se lit désormais **sur le corpus**,
+    exactement comme le fait le test P004 ci-dessus. Voir *P013-cor6* et `GAME_DESIGN.md` §6.5.
 * Départ identique : `drift(0) = 0` ⇒ `x_i(0) = 0` et `v_i(0) = SPEED.BASE` pour les 6.
 * Aucune dépendance croisée : simuler `c0` seul puis les 6 ensemble donne le même `x_c0`.
 * **Fin par le temps, jamais par la distance** (test central de la correction 1) :
@@ -613,6 +618,9 @@ permanente déjà présente (P004).
   les ralentissements (`MAX_DECEL`).
 * Aucun surge tiré ni appliqué pendant une pause (aucun `step()` ⇒ aucun tirage).
 * La vitesse moyenne finale par personnage reste `SPEED.BASE ± 1,5 %`.
+  * **Depuis P013-cor6**, cette exigence se lit **sur le corpus** : la forme de fin de course déplace
+    la moyenne d'une course isolée de `SPEED.BASE × forme/3` au plus (±5,33 %), mais son espérance est
+    nulle et la moyenne par personnage reste sous le seuil sur 1 000 seeds (voir *P013-cor6*).
 * Reproductibilité inchangée ; table de seeds dorées mise à jour **explicitement** (avec la raison).
 
 ---
@@ -1570,6 +1578,77 @@ mise à jour.
 fichiers) ; `vite build` OK ; **125 tests E2E** OK, dont **1 nouveau**, sans aucune erreur console. Les
 seeds dorées et les tests d'équilibrage passent **sans aucune mise à jour** : aucune constante de
 simulation, aucun RNG et aucune taille de l'effectif de référence n'a été touché.
+
+---
+
+### P013-cor6 — Forme de fin de course ±16 % (40 → 50 s puis maintenue) `[x]`
+
+**Nature.** Comme `P013-cor` à `P013-cor5`, ce n'est **pas** une étape de la numérotation : c'est une
+**micro-correction ciblée** demandée après l'audit de suspense, **avant** P013.5. Elle est la
+**première** de la série à changer réellement une course. Elle touche la **règle de vitesse**, le
+levier correspondant de l'outil d'audit, ses tests et la documentation. Sont intacts : `SPEED`,
+`DRIFT`, `SURGE`, `EVENT`, `RACE`, le catalogue d'événements, la sélection des partants, le speaker,
+le rendu, l'URL et la durée de course. Aucun refactor général.
+
+**1. Le levier.** Chaque personnage reçoit **une seule fois par course** un écart relatif
+`forme_i ~ U[−0,16 ; +0,16]`, tiré sur un flux **dédié** `lateform:<charId>`. Il multiplie la vitesse
+**cible** :
+
+`F_i(t) = 1 + forme_i × rampe(t)`, avec `rampe = 0` jusqu'à 40 s inclus, linéaire de 40 s à 50 s,
+puis **1 jusqu'à l'arrivée**. La retombée `55 → 60 s` mesurée pendant l'exploration est **écartée** et
+n'existe pas en production.
+
+**2. Pourquoi une forme, et pas un rubber-band.** Le tirage ne lit **ni le rang, ni la distance, ni
+l'écart** : il ne dépend que de `(seed, charId)`. Il est donc tiré **avant** que la course ne
+commence, et un personnage garde la même forme à 3, 4, 5 ou 6 coureurs, quelle que soit sa position
+dans la liste. L'écart est symétrique et d'espérance nulle : aucun personnage n'est structurellement
+avantagé. C'est ce qui le distingue d'un bonus au dernier ou d'un malus au leader (invariants §5.5).
+
+**3. Aucune autre règle touchée, et une inertie prouvée.** Le flux `lateform:<charId>` est propre à la
+forme : `drift:*`, `surge:*`, `events:*` ne sont **pas** décalés. Le premier pas physique touché est
+**2401** (une seconde après 40 s), et les valeurs `x`, `v` et `drift` restent **bit à bit** celles de
+l'ancienne production jusqu'au pas 2400 inclus. La forme passe par la rampe `MAX_ACCEL`/`MAX_DECEL` :
+elle ne saute jamais et n'écrit **jamais** dans `x`.
+
+**4. Entorse assumée à §5.6, documentée.** La vitesse moyenne d'un personnage n'est plus exactement
+`SPEED.BASE` course par course : elle vaut `SPEED.BASE × (1 + forme/3)` sur le dernier tiers, soit au
+plus ±5,33 %. L'invariant est réécrit en conséquence dans `AGENTS.md` §5.6 (`GAME_DESIGN.md` §6.5) :
+l'équivalence se lit **sur le corpus**, plus sur une course isolée.
+
+**Tailles et valeurs de contrôle** (6 coureurs, 3 600 pas) :
+
+| Instant | Pas | `F_i` pour `forme = +0,16` |
+| --- | --- | --- |
+| `t ≤ 40 s` | ≤ 2400 | `1,000` (aucun effet, bit à bit) |
+| `t = 45 s` | 2700 | `1,080` |
+| `t = 50 s` | 3000 | `1,160` |
+| `t = 60 s` | 3600 | `1,160` (maintenu) |
+
+**Tests (DoD).** Unitaires : `tests/unit/lateForm.test.ts` (8 tests, **nouveau**) — bornes de la
+configuration refusées par `validateConfig` (amplitude 0 et 1,5 ; `FROM_S` négatif ; `FULL_S` nul,
+égal à `FROM_S`, ou au-delà de la course), rampe nulle/linéaire/plate, symétrie, inertie du tirage
+nul, un seul tirage par personnage **relu sur le flux dédié**, déterminisme et recalcul au `reset()`,
+stabilité de la forme d'un `charId` à 3/4/5/6 coureurs, premier pas divergent `2401` pour les quatre
+effectifs, et contrôle de biais sur **6 000 tirages** (1 000 seeds × 6). `tests/unit/suspenseAudit.test.ts`
+(91 tests) compare l'**ancienne** production et la **nouvelle** règle, et
+`tests/unit/boundaries.test.ts` (23 tests) interdit structurellement toute lecture du rang, de
+`x`, `v`, `drift`, du peloton ou de `speedModel` dans `lateForm.ts`, et fige la signature du tirage.
+Seeds dorées et seeds d'évidence **remesurées explicitement** (voir ci-dessous).
+
+**Résultats réels.** `npm run verify` **vert** — `typecheck` 0 erreur ; **871 tests unitaires**
+(53 fichiers) ; `vite build` OK ; **125 tests E2E** OK, sans aucune erreur console. Contrôle final sur
+**1 000 seeds** à six coureurs (`npm run balance:suspense --late-form`) : leader à 40 s gagnant
+**63,20 % → 56,70 %**, « 5e/6e à 40 s → top 3 » **25,00 % → 33,20 %**, « 5e/6e → victoire »
+**2,70 % → 4,60 %**, changement visible dans les 10 dernières secondes **28,20 % → 30,00 %**, écart
+P1–P2 médian **20,77 m → 23,44 m**, arrivées sous 15 m **39,50 % → 34,30 %**, vainqueurs
+**16,4 / 17,7 / 17,2 / 16,0 / 16,3 / 16,4** (χ² = 0,73). Les valeurs mesurées sont **exactement**
+celles de la variante expérimentée dans l'outil : le passage du levier expérimental à la règle de jeu
+est bit à bit le même calcul, avec le même tirage. Fixtures mises à jour **avec raison écrite** : les
+six distances et classements des seeds dorées (`tests/unit/fixtures/golden-seeds.json`), les seeds
+d'évidence (`tests/fixtures/seeds.ts` : dépassements `36 → 37` pour `POULET42`, photo finish
+`ZH0D03Q4` → `G7Z3JRYQ` parce que le critère est « l'écart P1–P2 le plus serré du corpus »,
+`HVEXYB9A` **reste** l'écart le plus large à 176,56 m), et trois tests de reconstruction qui
+appliquent désormais la même forme que le moteur.
 
 ---
 
